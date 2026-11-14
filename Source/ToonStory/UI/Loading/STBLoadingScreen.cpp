@@ -42,6 +42,25 @@ bool STBLoadingScreen::IsToyHidden() const
 	return Brushes.IsEmpty() || Settings->HiddenSeconds <= 0.f || T >= Settings->PeekSeconds + Settings->RunSeconds;
 }
 
+void STBLoadingScreen::SetExit(float Value)
+{
+	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
+	const float Old = Exit;
+	Exit = FMath::Clamp(Value, 0.f, 1.f);
+	if (Exit <= 0.f) ToyEndsAt = -1.0;
+	else if (Old <= 0.f)
+		ToyEndsAt = ToyStopElapsed(FPlatformTime::Seconds() - Started, Settings->PeekSeconds, Settings->RunSeconds, Settings->HiddenSeconds);
+}
+
+double STBLoadingScreen::ToyStopElapsed(double Elapsed, double Peek, double Run, double Hidden)
+{
+	const double Period = Peek + Run + Hidden;
+	if (Period <= 0.0) return Elapsed;
+	const double CycleStart = Elapsed - FMath::Fmod(Elapsed, Period);
+	// 隠れる間が0でも、次の周には入らない。
+	return FMath::Min(CycleStart + FMath::Max(Elapsed - CycleStart, Peek + Run), CycleStart + Period - KINDA_SMALL_NUMBER);
+}
+
 int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, const FSlateRect&,
                                 FSlateWindowElementList& Out, int32 Layer, const FWidgetStyle&, bool) const
 {
@@ -93,7 +112,9 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	const float BlockRight = W * .22f, BoxLeft = W * .70f;
 	const float Peek = Settings->PeekSeconds, Run = Settings->RunSeconds;
 	const double Period = Peek + Run + Settings->HiddenSeconds;
-	const double Elapsed = FPlatformTime::Seconds() - Started;
+	double Elapsed = FPlatformTime::Seconds() - Started;
+	// 暗転が始まったら、始まった周の中で止める。
+	if (ToyEndsAt >= 0.0) Elapsed = FMath::Min(Elapsed, ToyEndsAt);
 	const int32 Current = int32(Elapsed / Period);
 	const float T = float(Elapsed - Current * Period);
 	if (Current != Loop && Brushes.Num() > 0)
