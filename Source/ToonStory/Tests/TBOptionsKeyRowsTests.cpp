@@ -99,11 +99,9 @@ bool FTBKeyTableTest::RunTest(const FString& Parameters)
 		TestEqual(*FString::Printf(TEXT("%s appears exactly once"), *Name.ToString()), Seen.FilterByPredicate([&Name](const FName& Other) { return Other == Name; }).Num(), 1);
 	}
 
-	// 見出し（共通、にんげん、おもちゃ、ロビー）の順は、IMC（Common、Human、Toy、Lobby）の順と同じ。行はその見出しのIMCに入っている。
-	const auto* Settings = GetDefault<UTBInputSettings>();
-	const TSoftObjectPtr<UInputMappingContext>* Contexts[] = {&Settings->CommonContext, &Settings->HumanContext,
-	                                                          &Settings->ToyContext, &Settings->LobbyContext};
-	if (!TestEqual(TEXT("One section per IMC"), TB::KeySections().Num(), static_cast<int32>(UE_ARRAY_COUNT(Contexts)))) return false;
+	// 見出しの順は、IMC（UTBInputSettings::ContextSlots）の順と同じ。行はその見出しのIMCに入っている。
+	const auto Contexts = GetDefault<UTBInputSettings>()->ContextSlots();
+	if (!TestEqual(TEXT("One section per IMC"), TB::KeySections().Num(), Contexts.Num())) return false;
 	for (int32 Index = 0; Index < TB::KeySections().Num(); ++Index)
 	{
 		const UInputMappingContext* Context = Contexts[Index]->LoadSynchronous();

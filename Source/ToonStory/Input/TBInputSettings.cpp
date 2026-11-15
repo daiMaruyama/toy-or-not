@@ -9,7 +9,7 @@
 TArray<const UInputMappingContext*> UTBInputSettings::GetAllContexts() const
 {
 	TArray<const UInputMappingContext*> Result;
-	for (const TSoftObjectPtr<UInputMappingContext>* Soft : {&CommonContext, &HumanContext, &ToyContext, &LobbyContext})
+	for (const TSoftObjectPtr<UInputMappingContext>* Soft : ContextSlots())
 	{
 		if (const UInputMappingContext* Context = Soft->IsNull() ? nullptr : Soft->LoadSynchronous())
 		{

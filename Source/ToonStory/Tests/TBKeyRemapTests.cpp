@@ -109,14 +109,13 @@ bool FTBRemapCheckTest::RunTest(const FString& Parameters)
 
 	// 全13行がちょうど1つのIMCに入っている。既定のキーどうし（今のキーではない）は、範囲が重なる行でかぶらない。
 	const auto* Settings = GetDefault<UTBInputSettings>();
-	const TSoftObjectPtr<UInputMappingContext>* ContextPtrs[] = {&Settings->CommonContext, &Settings->HumanContext,
-	                                                             &Settings->ToyContext, &Settings->LobbyContext};
+	const auto ContextPtrs = Settings->ContextSlots();
 	TMap<FName, int32> Scopes;
 	TMap<FName, FKey> Defaults;
 	for (const FName& Name : TB::Keys::All())
 	{
 		int32 ContextCount = 0;
-		for (int32 Scope = 0; Scope < UE_ARRAY_COUNT(ContextPtrs); ++Scope)
+		for (int32 Scope = 0; Scope < ContextPtrs.Num(); ++Scope)
 		{
 			const UInputMappingContext* Context = ContextPtrs[Scope]->LoadSynchronous();
 			if (Context && Context->GetMappings().ContainsByPredicate([&Name](const FEnhancedActionKeyMapping& Mapping) {

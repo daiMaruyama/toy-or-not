@@ -29,6 +29,7 @@ inline const FName ToyPush(TEXT("Toy_Push"));
 	inline const FName ToyTaunt(TEXT("Toy_Taunt"));
 	inline const FName LobbyReady(TEXT("Lobby_Ready"));
 	inline const FName LobbyStart(TEXT("Lobby_Start"));
+	inline const FName ResultsNext(TEXT("Results_Next"));
 
 	/** 上の名前の全部 */
 	TOONSTORY_API const TArray<FName>& All();
@@ -66,7 +67,7 @@ namespace TB
 		TArray<FKeyRowInfo> Rows;
 	};
 
-	/** 画面の並び。共通、にんげん、おもちゃ、ロビー。TB::Keys::Allの各名がちょうど1回ずつ出る。 */
+	/** 画面の並び。共通、にんげん、おもちゃ、ロビー、リザルト。TB::Keys::Allの各名がちょうど1回ずつ出る。 */
 	TOONSTORY_API const TArray<FKeySection>& KeySections();
 
 	/** }の手前で一番近い{から始まる名前を、そのクライアントのキー名に置き換える。TB::Keys::Allにない名前は残してWarningを出す。 */
