@@ -21,6 +21,34 @@
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/SWeakWidget.h"
 
+FString UTBLoadingScreenSubsystem::MapNameFromURL(const FString& URL)
+{
+	// 「ホスト:ポート」だけで、マップがない行き先は空にする。
+	FString Path = URL;
+	int32 Index = INDEX_NONE;
+	if (Path.FindChar('?', Index)) Path.LeftInline(Index);
+	return Path.FindLastChar('/', Index) ? Path.Mid(Index + 1) : FString();
+}
+
+// TBLobbySettings::IsLobby と同じ判定。
+bool UTBLoadingScreenSubsystem::IsLobbyMap(const FString& MapName)
+{
+	return MapName.EndsWith(TEXT("TB_Lobby"));
+}
+
+bool UTBLoadingScreenSubsystem::IsReturningLabel(const FString& DestMap, bool bReturningFromState)
+{
+	return DestMap.IsEmpty() ? bReturningFromState : IsLobbyMap(DestMap);
+}
+
+void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, ETravelType, bool)
+{
+	const FString Map = MapNameFromURL(PendingURL);
+	if (Map.IsEmpty()) return;
+	TravelDestMap = Map;
+	TravelFromWorld = GetGameInstance()->GetWorld();
+}
+
 bool UTBLoadingScreenSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	return !IsRunningDedicatedServer() && GetDefault<UTBLoadingScreenSettings>()->bEnabled;
@@ -37,6 +65,7 @@ void UTBLoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			ToyTextures.Add(Texture);
 		}
 	}
+	PreClientTravelHandle = GetGameInstance()->OnNotifyPreClientTravel().AddUObject(this, &ThisClass::NotePreClientTravel);
 	PreLoadHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &ThisClass::PreLoadMap);
 	PostLoadHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &ThisClass::PostLoadMap);
 	if (GEngine)
@@ -48,6 +77,7 @@ void UTBLoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UTBLoadingScreenSubsystem::Deinitialize()
 {
+	GetGameInstance()->OnNotifyPreClientTravel().Remove(PreClientTravelHandle);
 	FCoreUObjectDelegates::PreLoadMap.Remove(PreLoadHandle);
 	FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadHandle);
 	if (GEngine)
@@ -97,12 +127,14 @@ void UTBLoadingScreenSubsystem::PostLoadMap(UWorld* World)
 
 void UTBLoadingScreenSubsystem::Failed(UWorld*, UNetDriver*, ENetworkFailure::Type, const FString&)
 {
+	TravelDestMap.Reset();
 	StopMovie();
 	bHardLoad = false;
 }
 
 void UTBLoadingScreenSubsystem::TravelFailed(UWorld*, ETravelFailure::Type, const FString&)
 {
+	TravelDestMap.Reset();
 	StopMovie();
 	bHardLoad = false;
 }
@@ -138,6 +170,7 @@ void UTBLoadingScreenSubsystem::RemoveOverlay()
 	Overlay.Reset();
 	OverlayViewport.Reset();
 	Screen.Reset();
+	LabelReturning = -1;
 }
 
 // コントローラーが画面を黒くしている間（試合への移動・配置待ち・ロビーへの戻り）。
@@ -168,6 +201,10 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	bool bCover = ShouldCoverSeamless();
 	// ロビーと試合の切り替わり。読み込みはほとんどないが、いきなり画面が変わらないよう、少しの間かぶせてフェードでつなぐ。
 	UWorld* World = GetGameInstance()->GetWorld();
+	// 行き先のマップに着いて GameState が届いたら、行き先は使い終わり。つなぎのマップでは残す。
+	if (!TravelDestMap.IsEmpty() && World && World != TravelFromWorld.Get() && World->GetGameState<ATBGameState>() &&
+	    World->GetMapName().EndsWith(TravelDestMap))
+		TravelDestMap.Reset();
 	if (const auto* State = World ? World->GetGameState<ATBGameState>() : nullptr)
 	{
 		const uint8 Phase = uint8(State->Phase);
@@ -214,11 +251,14 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		const bool bNew = !Overlay;
 		ShowOverlay();
 		if (!Screen) return;
-		if (bNew && !bHardLoad)
+		// 裏で切り替える移動は、ここから出しはじめる。読み直しのあとは、ロード中の絵をそのまま続ける。
+		// 向きは移動を始めたときの行き先を優先し、かぶせが出たままでも向きが変わったら書き直す。
+		const bool bBack = IsReturningLabel(TravelDestMap, bReturning);
+		if (!bHardLoad && (bNew || (LabelReturning >= 0 && LabelReturning != int8(bBack))))
 		{
-			// 裏で切り替える移動は、ここから出しはじめる。読み直しのあとは、ロード中の絵をそのまま続ける。
-			Screen->SetStatus(FText::FromString(bReturning ? TEXT("ロビーにもどっています…") : TEXT("あそぶ準備をしています…")));
-			Screen->Restart();
+			Screen->SetStatus(FText::FromString(bBack ? TEXT("ロビーにもどっています…") : TEXT("あそぶ準備をしています…")));
+			LabelReturning = bBack ? 1 : 0;
+			if (bNew) Screen->Restart();
 		}
 		Screen->SetExit(0.f);
 		return;

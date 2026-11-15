@@ -32,6 +32,10 @@ public:
 	// Survives map cleanup; used for room closure notices after returning to Title.
 	void QueueTravelSound(ETBSoundEvent Event);
 	uint32 GetSettingsRevision() const { return SettingsRevision; }
+	enum class ELobbyCountSound : uint8 { None, Join, Leave };
+	// ロビーの人数が変わったとき、鳴らす音を決める。ロビーに最初に入った1回は鳴らし、
+	// ワールドが変わってからSettleSeconds以内の増減は鳴らさない（基準の更新だけ）。
+	static ELobbyCountSound LobbyCountSound(int32 Count, int32 LastCount, bool bFirstTick, double SecondsSinceWorldChange, float SettleSeconds);
 	void TrackVoice(UAudioComponent* Audio);
 	void UntrackVoice(UAudioComponent* Audio);
 	// Local listener modifiers, keyed by source so stopping one device leaves the others active.
@@ -87,6 +91,8 @@ private:
 	ETBMusicState MusicState = ETBMusicState::None;
 	float MasterVolume = 1.f, MusicVolume = 1.f, EffectsVolume = 1.f, VoiceVolume = 1.f;
 	float MusicFadeSeconds = .5f;
+	float LobbyCountSettleSeconds = 1.5f;
+	double WorldChangedAt = 0;
 	float HumanFootstepToyVolumeMultiplier = 1.75f;
 	float HumanFootstepToyPitchMultiplier = .75f;
 	uint32 SettingsRevision = 0;
