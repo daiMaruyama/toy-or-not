@@ -123,9 +123,13 @@ void TBLobbySettings::SelectStage(ATBController* Host, int32 Index)
 	State->StageName = FindStage(Index)->Name;
 	State->ForceNetUpdate();
 }
+bool TBLobbySettings::IsLobbyMapName(const FString& MapName)
+{
+	return MapName.EndsWith(TEXT("TB_Lobby"));
+}
 bool TBLobbySettings::IsLobby(const UWorld* World)
 {
-	return World && World->GetMapName().EndsWith(TEXT("TB_Lobby"));
+	return World && IsLobbyMapName(World->GetMapName());
 }
 bool TBLobbySettings::ShouldTravelToStage(const UWorld* World)
 {

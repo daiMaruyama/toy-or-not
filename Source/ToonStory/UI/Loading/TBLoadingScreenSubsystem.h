@@ -29,6 +29,11 @@ public:
 	virtual void Deinitialize() override;
 
 	virtual void Tick(float DeltaTime) override;
+	// 移動の向きの文字を決める部品。移動の行き先（URLから取ったマップ名）がわかっていればそれを優先し、なければGameStateから決めた値を使う。
+	static FString MapNameFromURL(const FString& URL);
+	static bool IsReturningLabel(const FString& DestMap, bool bReturningFromState);
+	// かぶせの文字を書き直すか。Recordedは今書いてある向きの記録（-1は書いていない）。
+	static bool ShouldRewriteLabel(bool bNew, bool bHardLoad, int8 Recorded, bool bBack);
 	virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UTBLoadingScreenSubsystem, STATGROUP_Tickables); }
 	virtual bool IsTickable() const override { return !IsTemplate(); }
 	virtual ETickableTickType GetTickableTickType() const override { return ETickableTickType::Conditional; }
@@ -39,6 +44,7 @@ private:
 	void Failed(UWorld* World, UNetDriver* Driver, ENetworkFailure::Type Type, const FString& Error);
 	void TravelFailed(UWorld* World, ETravelFailure::Type Type, const FString& Error);
 	void StopMovie();
+	void NotePreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bSeamless);
 	void ShowOverlay();
 	void RemoveOverlay();
 	// 裏で切り替える移動の間、かぶせておくか。
@@ -67,4 +73,12 @@ private:
 	uint8 LastPhase = 0;
 	double SwitchUntil = 0;
 	bool bReturning = false;
+	// 移動を始めたときに決まった行き先のマップ名。新しいマップのGameStateが届くまで、文字の向きはこれで決める。
+	FString TravelDestMap;
+	TWeakObjectPtr<UWorld> TravelFromWorld;
+	// 行き先が裏で切り替える移動（seamless）か。
+	bool bTravelSeamless = false;
+	FDelegateHandle PreClientTravelHandle;
+	// かぶせに今書いてある文字の向き（1:ロビーへ、0:試合へ、-1:書いていない）。
+	int8 LabelReturning = -1;
 };

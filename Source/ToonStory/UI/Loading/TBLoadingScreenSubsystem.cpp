@@ -6,6 +6,7 @@
 #include "Character/TBCharacter.h"
 #include "Core/TBController.h"
 #include "Core/TBGameState.h"
+#include "Core/TBLobbySettings.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBSession.h"
 #include "UI/TBPaperStyle.h"
@@ -20,6 +21,35 @@
 #include "MoviePlayer.h"
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/SWeakWidget.h"
+
+// FURLはマップ名がないとき既定のマップ（タイトル）を返すため使わない。
+FString UTBLoadingScreenSubsystem::MapNameFromURL(const FString& URL)
+{
+	// 「ホスト:ポート」だけで、マップがない行き先は空にする。
+	FString Path = URL;
+	int32 Index = INDEX_NONE;
+	if (Path.FindChar('?', Index)) Path.LeftInline(Index);
+	return Path.FindLastChar('/', Index) ? Path.Mid(Index + 1) : FString();
+}
+
+bool UTBLoadingScreenSubsystem::IsReturningLabel(const FString& DestMap, bool bReturningFromState)
+{
+	return DestMap.IsEmpty() ? bReturningFromState : TBLobbySettings::IsLobbyMapName(DestMap);
+}
+
+bool UTBLoadingScreenSubsystem::ShouldRewriteLabel(bool bNew, bool bHardLoad, int8 Recorded, bool bBack)
+{
+	// 読み直しのあと（記録が-1）は、ロード中の絵の文字をそのまま続けるので、新しく作ったときしか書かない。
+	return !bHardLoad && (bNew || (Recorded >= 0 && Recorded != int8(bBack)));
+}
+
+void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, ETravelType, bool bSeamless)
+{
+	// マップ名がない行き先（部屋に入るときのIP:ポートなど）では、古い行き先を残さず空にする。
+	TravelDestMap = MapNameFromURL(PendingURL);
+	TravelFromWorld = GetGameInstance()->GetWorld();
+	bTravelSeamless = bSeamless;
+}
 
 bool UTBLoadingScreenSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -37,6 +67,7 @@ void UTBLoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			ToyTextures.Add(Texture);
 		}
 	}
+	PreClientTravelHandle = GetGameInstance()->OnNotifyPreClientTravel().AddUObject(this, &ThisClass::NotePreClientTravel);
 	PreLoadHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &ThisClass::PreLoadMap);
 	PostLoadHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &ThisClass::PostLoadMap);
 	if (GEngine)
@@ -48,6 +79,7 @@ void UTBLoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UTBLoadingScreenSubsystem::Deinitialize()
 {
+	GetGameInstance()->OnNotifyPreClientTravel().Remove(PreClientTravelHandle);
 	FCoreUObjectDelegates::PreLoadMap.Remove(PreLoadHandle);
 	FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadHandle);
 	if (GEngine)
@@ -90,6 +122,8 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FString& MapName)
 void UTBLoadingScreenSubsystem::PostLoadMap(UWorld* World)
 {
 	bHadWorld = true;
+	// マップを丸ごと読み直したら行き先は使い終わり。裏で切り替える移動は、この通知がGameStateの届く前にも来るので、Tickの到着判定に任せる。
+	if (!bTravelSeamless) TravelDestMap.Reset();
 	if (!bHardLoad) return;
 	LoadedAt = FPlatformTime::Seconds();
 	ShowOverlay();
@@ -97,12 +131,14 @@ void UTBLoadingScreenSubsystem::PostLoadMap(UWorld* World)
 
 void UTBLoadingScreenSubsystem::Failed(UWorld*, UNetDriver*, ENetworkFailure::Type, const FString&)
 {
+	TravelDestMap.Reset();
 	StopMovie();
 	bHardLoad = false;
 }
 
 void UTBLoadingScreenSubsystem::TravelFailed(UWorld*, ETravelFailure::Type, const FString&)
 {
+	TravelDestMap.Reset();
 	StopMovie();
 	bHardLoad = false;
 }
@@ -119,8 +155,11 @@ void UTBLoadingScreenSubsystem::ShowOverlay()
 	// 読み込み直後にエンジンが画面の部品を組み直して外すことがあるので、外れていたら付け直す。
 	if (Overlay && OverlayViewport.Get() == Viewport && Overlay->IsParentValid()) return;
 	const TSharedPtr<STBLoadingScreen> Keep = Screen;
+	const int8 KeepLabel = LabelReturning;
 	RemoveOverlay();
 	Screen = Keep;
+	// 付け直しでは、Screenと同じく文字の向きの記録も引き継ぐ。
+	if (Keep) LabelReturning = KeepLabel;
 	if (!Screen)
 	{
 		Screen = SNew(STBLoadingScreen);
@@ -138,6 +177,7 @@ void UTBLoadingScreenSubsystem::RemoveOverlay()
 	Overlay.Reset();
 	OverlayViewport.Reset();
 	Screen.Reset();
+	LabelReturning = -1;
 }
 
 // コントローラーが画面を黒くしている間（試合への移動・配置待ち・ロビーへの戻り）。
@@ -168,6 +208,10 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	bool bCover = ShouldCoverSeamless();
 	// ロビーと試合の切り替わり。読み込みはほとんどないが、いきなり画面が変わらないよう、少しの間かぶせてフェードでつなぐ。
 	UWorld* World = GetGameInstance()->GetWorld();
+	// 行き先のマップに着いてGameStateが届いたら、行き先は使い終わり。つなぎのマップでは残す。
+	if (!TravelDestMap.IsEmpty() && World && World != TravelFromWorld.Get() && World->GetGameState<ATBGameState>() &&
+	    World->GetMapName().EndsWith(TravelDestMap))
+		TravelDestMap.Reset();
 	if (const auto* State = World ? World->GetGameState<ATBGameState>() : nullptr)
 	{
 		const uint8 Phase = uint8(State->Phase);
@@ -214,11 +258,14 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		const bool bNew = !Overlay;
 		ShowOverlay();
 		if (!Screen) return;
-		if (bNew && !bHardLoad)
+		// 裏で切り替える移動は、ここから出しはじめる。読み直しのあとは、ロード中の絵をそのまま続ける。
+		// 向きは移動を始めたときの行き先を優先し、かぶせが出たままでも向きが変わったら書き直す。
+		const bool bBack = IsReturningLabel(TravelDestMap, bReturning);
+		if (ShouldRewriteLabel(bNew, bHardLoad, LabelReturning, bBack))
 		{
-			// 裏で切り替える移動は、ここから出しはじめる。読み直しのあとは、ロード中の絵をそのまま続ける。
-			Screen->SetStatus(FText::FromString(bReturning ? TEXT("ロビーにもどっています…") : TEXT("あそぶ準備をしています…")));
-			Screen->Restart();
+			Screen->SetStatus(FText::FromString(bBack ? TEXT("ロビーにもどっています…") : TEXT("あそぶ準備をしています…")));
+			LabelReturning = bBack ? 1 : 0;
+			if (bNew) Screen->Restart();
 		}
 		Screen->SetExit(0.f);
 		return;
