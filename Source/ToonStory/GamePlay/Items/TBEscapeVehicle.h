@@ -9,7 +9,7 @@ class UBoxComponent;
 class UTBEscapeVehicleData;
 class UTBEscapeVehicleMovement;
 
-/** 仮の脱出車両。状態の決定と移動はサーバーのみで行う。 */
+/** 仮の脱出車両。状態の決定と移動はサーバーのみで行う。リザルトの演出の走りだけは、参加側も同じ式で動かす。 */
 UCLASS(Blueprintable)
 class TOONSTORY_API ATBEscapeVehicle : public ATBItemBase
 {
@@ -25,6 +25,12 @@ public:
 	// 同じマップで次の試合を始めるとき、置いた位置に戻して空にする。
 	void ResetRound();
 	void SetDrivingInput(ATBCharacter* Toy, FVector2D Input);
+	/** リザルトの演出で、決着の時刻からCover秒かけてToへ走らせる。操作は受け付けない */
+	void StartResultDrive(const FVector& To, double StartTime, float CoverSeconds);
+	/** 演出を終えて、乗っている子を降ろしてWhereに止める */
+	void ParkForResults(const FTransform& Where);
+	/** リザルトの演出で走っている途中（まだ止めていない） */
+	bool IsResultDriving() const { return ResultStart >= 0; }
 	const UTBEscapeVehicleData& Data() const;
 	bool IsDriver(const ATBCharacter* Toy) const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出車両")
@@ -46,6 +52,15 @@ private:
 	FVector2D DriveInput = FVector2D::ZeroVector;
 	double LastInputAt = 0;
 	FTransform StartTransform;
+	// リザルトの演出の走り。開始時刻が負なら走っていない。参加側も位置の同期を待たず、サーバー時刻からこの線の上の位置を出す。
+	UPROPERTY(Replicated)
+	FVector ResultFrom = FVector::ZeroVector;
+	UPROPERTY(Replicated)
+	FVector ResultTo = FVector::ZeroVector;
+	UPROPERTY(Replicated)
+	double ResultStart = -1;
+	UPROPERTY(Replicated)
+	float ResultCover = 0.f;
 	void ReleasePassengers();
 	UFUNCTION()
 	void OnBoardingOverlap(UPrimitiveComponent* Component, AActor* Other, UPrimitiveComponent* OtherComponent,

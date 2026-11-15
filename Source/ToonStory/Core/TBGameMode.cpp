@@ -22,6 +22,8 @@
 #include "Character/TBNPCNavigation.h"
 #include "Character/TBToyCharacter.h"
 #include "GamePlay/TBBox.h"
+#include "GamePlay/TBBoxLid.h"
+#include "Data/TBPresentationData.h"
 #include "GamePlay/TBTVCamera.h"
 #include "GamePlay/TBHumanEntrance.h"
 #include "GamePlay/TBBoxEscapeCourse.h"
@@ -870,6 +872,7 @@ void ATBGameMode::StartRound(APlayerController* PlayerController)
 	MatchInfo->bEscapePhase = false;
 	MatchInfo->bVehicleEscapeResult = false;
 	MatchInfo->EscapedPlayers.Reset();
+	ClearResultPresentation();
 	MatchInfo->BoxedCount = 0;
 	MatchInfo->Winner = ETBWinner::None;
 	MatchInfo->Reason.Reset();
@@ -1055,6 +1058,7 @@ void ATBGameMode::ReturnFinishedMatchToLobby()
 	State->bEscapePhase = false;
 	State->bVehicleEscapeResult = false;
 	State->EscapedPlayers.Reset();
+	ClearResultPresentation();
 	State->BoxedCount = 0;
 	State->EndTime = 0;
 	State->Winner = ETBWinner::None;
@@ -1270,6 +1274,7 @@ void ATBGameMode::Tick(float DeltaSeconds)
 	    (Result->Phase == ETBPhase::Results || Result->Phase == ETBPhase::Aborted) &&
 	    !Result->bTravelPending && !Result->IsLobbyReturnStopped())
 	{
+		if (!bResultPlaced && Result->ResultElapsed() >= TB::PresentationData().Result.CoverSeconds) PlaceResults();
 		if (Result->EndTime <= 0) // A failed placement can also enter Aborted.
 		{
 			Result->EndTime = Result->GetServerWorldTimeSeconds() + ResultDurationSeconds;
@@ -1417,6 +1422,7 @@ void ATBGameMode::Finish(ETBWinner Winner, const FString& Why, bool Abort)
 	MatchInfo->HidePreparation = FTBHidePreparation();
 	MatchInfo->Reason = Why;
 	MatchInfo->Phase = Abort ? ETBPhase::Aborted : ETBPhase::Results;
+	if (!Abort) BeginResultPresentation();
 	for (auto It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 		if (auto* PC = Cast<ATBController>(It->Get())) PC->ClientPreparationCancelled(PreparationRound);
 	MatchInfo->ForceNetUpdate();
@@ -1426,6 +1432,97 @@ void ATBGameMode::Finish(ETBWinner Winner, const FString& Why, bool Abort)
 		It->DropToy();
 		It->ApplyState();
 	}
+}
+
+// 車で脱出したら車、人間が勝って箱の部屋があればふた、それ以外はママの吹き出しで覆う。
+void ATBGameMode::BeginResultPresentation()
+{
+	auto* State = TB::GS(GetWorld());
+	if (!State) return;
+	ClearResultPresentation();
+	const auto& Feel = TB::PresentationData().Result;
+	State->ResultStartTime = State->GetServerWorldTimeSeconds();
+	State->ResultStyle = ETBResultStyle::Mom;
+	if (State->Winner == ETBWinner::Toys && State->bVehicleEscapeResult)
+	{
+		// 車が何台かあるときは、脱出した子が乗っている車を選ぶ。
+		for (TActorIterator<ATBEscapeVehicle> It(GetWorld()); It && !ResultVehicle.IsValid(); ++It)
+			for (const ATBCharacter* Toy : It->Passengers)
+				if (IsValid(Toy) && State->EscapedInVehicle(Toy->TBPS())) ResultVehicle = *It;
+		// 車にいちばん近い出口を、抜けていった出口とみなす。
+		float Best = TNumericLimits<float>::Max();
+		for (TActorIterator<ATBEscapeExit> It(GetWorld()); It && ResultVehicle.IsValid(); ++It)
+		{
+			const float Distance = FVector::DistSquared(It->GetActorLocation(), ResultVehicle->GetActorLocation());
+			if (Distance < Best)
+			{
+				Best = Distance;
+				ResultExit = *It;
+			}
+		}
+		if (ResultVehicle.IsValid() && ResultExit.IsValid())
+		{
+			State->ResultStyle = ETBResultStyle::Car;
+			State->ResultShot = ResultExit->ResultCamera->GetComponentTransform();
+			State->ResultShot.SetScale3D(FVector::OneVector);
+			ResultVehicle->StartResultDrive(ResultExit->ResultPassPoint(), State->ResultStartTime, Feel.CoverSeconds);
+		}
+	}
+	else if (State->Winner == ETBWinner::Humans)
+	{
+		FTransform Shot;
+		if (const auto* Lid = ATBBoxLid::Find(GetWorld()); Lid && Lid->ResultShot(Shot))
+		{
+			State->ResultStyle = ETBResultStyle::Lid;
+			State->ResultShot = Shot;
+		}
+	}
+	bResultPlaced = false;
+	// 結果の画面を見られる時間は変えず、演出の分だけ延ばす。
+	State->EndTime = State->ResultStartTime + Feel.CoverSeconds + Feel.RevealSeconds + ResultDurationSeconds;
+	State->ForceNetUpdate();
+}
+
+// 覆いきった瞬間に呼ぶ。脱出した子を車から降ろして出口の前に並べ、車をその後ろに止める。
+void ATBGameMode::PlaceResults()
+{
+	auto* State = TB::GS(GetWorld());
+	if (bResultPlaced || !State) return;
+	bResultPlaced = true;
+	if (State->ResultStyle != ETBResultStyle::Car || !ResultVehicle.IsValid() || !ResultExit.IsValid()) return;
+	ResultVehicle->ParkForResults(ResultExit->ParkSpot());
+	TArray<ATBCharacter*> Escaped;
+	for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It)
+		if (It->TBPS() && State->EscapedInVehicle(It->TBPS())) Escaped.Add(*It);
+	Escaped.Sort([](const ATBCharacter& A, const ATBCharacter& B) { return A.TBPS()->GetPlayerId() < B.TBPS()->GetPlayerId(); });
+	for (int32 Index = 0; Index < Escaped.Num(); ++Index)
+	{
+		ATBCharacter* Toy = Escaped[Index];
+		const FTransform Spot = ResultExit->LineupSpot(Index, Escaped.Num());
+		FVector Location = Spot.GetLocation() + FVector(0, 0, Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 2.f);
+		const FRotator Facing = Spot.Rotator();
+		// 家具などで列の位置にも近くにも立てなければ、車から降りた位置のまま向きだけそろえる。
+		if (GetWorld()->FindTeleportSpot(Toy, Location, Facing))
+			Toy->SetActorLocationAndRotation(Location, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+		else Toy->SetActorRotation(Facing);
+		if (AController* Controller = Toy->GetController()) Controller->SetControlRotation(Facing);
+		Toy->GetCharacterMovement()->StopMovementImmediately();
+		Toy->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+		Toy->ForceNetUpdate();
+	}
+}
+
+void ATBGameMode::ClearResultPresentation()
+{
+	if (auto* State = TB::GS(GetWorld()))
+	{
+		State->ResultStyle = ETBResultStyle::None;
+		State->ResultStartTime = 0;
+		State->ResultShot = FTransform::Identity;
+	}
+	bResultPlaced = true;
+	ResultVehicle.Reset();
+	ResultExit.Reset();
 }
 
 // 退出者の状態を整理し、両陣営が残っていれば試合を続ける。

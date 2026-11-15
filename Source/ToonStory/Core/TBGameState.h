@@ -78,6 +78,18 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	TArray<TObjectPtr<APlayerState>> EscapedPlayers;
 	bool EscapedInVehicle(const APlayerState* Player) const;
+	// リザルトへの切り替え演出。決着の時刻から各PCが同じ流れを再生する。
+	UPROPERTY(Replicated, BlueprintReadOnly)
+	ETBResultStyle ResultStyle = ETBResultStyle::None;
+	UPROPERTY(Replicated, BlueprintReadOnly)
+	double ResultStartTime = 0;
+	// 車とふたの演出で映すカメラの位置。サーバーが決めて送る。
+	UPROPERTY(Replicated, BlueprintReadOnly)
+	FTransform ResultShot;
+	/** 決着からの秒。リザルト以外は0 */
+	double ResultElapsed() const;
+	/** 演出が終わり、結果の画面を出してよい */
+	bool IsResultRevealed() const;
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	int32 BoxedCount = 0;
 	UPROPERTY(Replicated, BlueprintReadOnly)

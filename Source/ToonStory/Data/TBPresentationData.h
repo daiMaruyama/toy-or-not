@@ -34,6 +34,37 @@ struct FTBLidFeel
 	float FlashSeconds = .35f;
 };
 
+/** 決着からリザルトの画面までの演出。秒は決着の瞬間から数える */
+USTRUCT(BlueprintType)
+struct FTBResultFeel
+{
+	GENERATED_BODY()
+	/** 決着の瞬間を、そのままの画で見せる時間 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
+	          meta = (DisplayName = "決着を見せる時間", Units = "s", ClampMin = "0"))
+	float DecisiveSeconds = .8f;
+	/** 車・ふた・吹き出しで画面が覆われきる時刻。ここで配置とカメラを切り替える */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
+	          meta = (DisplayName = "覆いきる時刻", Units = "s", ClampMin = "0.1"))
+	float CoverSeconds = 3.2f;
+	/** 覆いが抜けて結果の画面が見えるまで */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
+	          meta = (DisplayName = "覆いが抜けるまで", Units = "s", ClampMin = "0.05"))
+	float RevealSeconds = .55f;
+	/** 車とふたで、覆いきる直前に暗くしはじめる時間（カメラの前を横切る車の隙間を隠す） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
+	          meta = (DisplayName = "暗くしはじめる時間", Units = "s", ClampMin = "0"))
+	float DarkenSeconds = .15f;
+	/** ふたが閉まりきるまで（覆いきる時刻で閉まりきる） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
+	          meta = (DisplayName = "ふたが閉まる時間", Units = "s", ClampMin = "0.05"))
+	float LidSlamSeconds = .35f;
+	/** 結果の画面で、ママの吹き出しを出しておく時間 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
+	          meta = (DisplayName = "ママの吹き出しの時間", Units = "s", ClampMin = "0"))
+	float MomLineSeconds = 2.5f;
+};
+
 USTRUCT(BlueprintType)
 struct FTBTelevisionFeel
 {
@@ -76,6 +107,13 @@ public:
 	FTBTelevisionFeel Television;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リモコン", meta = (ShowOnlyInnerProperties))
 	FTBRemoteFeel Remote;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト", meta = (ShowOnlyInnerProperties))
+	FTBResultFeel Result;
+
+#if WITH_EDITOR
+	// 1つずつの範囲は ClampMin で守り、ここでは値どうしの関係だけを確かめる。
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 };
 
 namespace TB

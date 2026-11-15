@@ -10,6 +10,10 @@
 #include "Core/TBGameMode.h"
 #include "Core/TBLobbySettings.h"
 #include "GamePlay/TBHumanEntrance.h"
+#include "GamePlay/TBBoxLid.h"
+#include "GamePlay/Items/TBEscapeVehicle.h"
+#include "Data/TBPresentationData.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GamePlay/TBRuleMath.h"
 #include "Core/TBSession.h"
 #include "Core/TBChat.h"
@@ -105,19 +109,7 @@ void ATBController::PlayerTick(float DeltaTime)
 	UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
 	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()));
 	UpdateScreenTransition();
-	if (State && State->Phase == ETBPhase::Results)
-	{
-		// 箱にしまわれたおもちゃは箱の中にいる。箱の外の勝者がいれば、そちらを映す。
-		auto Before = [this](const ATBCharacter* A, const ATBCharacter* B)
-		{
-			return TBRuleMath::ResultsViewBefore(A->TBPS()->ToyState == ETBToyState::Boxed, A == GetPawn(), A->TBPS()->GetPlayerId(),
-			                                     B->TBPS()->ToyState == ETBToyState::Boxed, B == GetPawn(), B->TBPS()->GetPlayerId());
-		};
-		ATBCharacter* Winner = nullptr;
-		for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It)
-			if (It->IsCelebrating() && (!Winner || Before(*It, Winner))) Winner = *It;
-		if (Winner && GetViewTarget() != Winner) SetViewTargetWithBlend(Winner, .4f);
-	}
+	UpdateResultView();
 	UpdateViewAspect();
 	SyncInputContexts();
 	if (NoticeExpires > 0 && GetWorld()->GetTimeSeconds() > NoticeExpires)
@@ -125,6 +117,173 @@ void ATBController::PlayerTick(float DeltaTime)
 		Notice.Reset();
 		NoticeExpires = 0;
 	}
+}
+
+bool ATBController::IsSpectatingResults() const
+{
+	const auto* State = TB::GS(GetWorld());
+	const auto* Mine = GetPawn<ATBCharacter>();
+	return State && State->Phase == ETBPhase::Results && !(Mine && Mine->IsCelebrating());
+}
+
+TArray<ATBCharacter*> ATBController::ResultViewCandidates() const
+{
+	TArray<ATBCharacter*> Result;
+	if (!IsSpectatingResults()) return Result;
+	for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It)
+		if (It->IsCelebrating() && !It->TBPS()->IsABot()) Result.Add(*It);
+	Result.Sort([](const ATBCharacter& A, const ATBCharacter& B)
+	{
+		return TBRuleMath::ResultsViewBefore(A.TBPS()->ToyState == ETBToyState::Boxed, false, A.TBPS()->GetPlayerId(),
+		                                     B.TBPS()->ToyState == ETBToyState::Boxed, false, B.TBPS()->GetPlayerId());
+	});
+	return Result;
+}
+
+ATBCharacter* ATBController::GetResultViewCharacter() const
+{
+	if (!IsSpectatingResults()) return nullptr;
+	for (ATBCharacter* Candidate : ResultViewCandidates())
+		if (Candidate->TBPS() == ResultViewPlayer.Get()) return Candidate;
+	return nullptr;
+}
+
+void ATBController::ViewNextResultPlayer()
+{
+	const auto* State = TB::GS(GetWorld());
+	const auto Candidates = ResultViewCandidates();
+	if (Candidates.Num() < 2 || IsChatOpen() || bLobbyInput || !State || !IsResultShown()) return;
+	const int32 Current = Candidates.IndexOfByKey(GetResultViewCharacter());
+	ResultViewPlayer = Candidates[(Current + 1) % Candidates.Num()]->TBPS();
+	UpdateResultView();
+}
+
+void ATBController::UpdateResultView()
+{
+	const auto* State = TB::GS(GetWorld());
+	if (!State || State->Phase != ETBPhase::Results)
+	{
+		ResultViewPlayer.Reset();
+		EndResultPresentation();
+		return;
+	}
+	if (!UpdateResultPresentation(*State)) return;
+	ATBCharacter* Target = nullptr;
+	if (IsSpectatingResults())
+	{
+		// 選んだ勝者がいなくなったときだけ選び直す。プレイヤーの勝者がいなければNPCの勝者を映す（切り替えはしない）。
+		Target = GetResultViewCharacter();
+		if (!Target)
+		{
+			const auto Candidates = ResultViewCandidates();
+			if (!Candidates.IsEmpty()) ResultViewPlayer = Candidates[0]->TBPS();
+			Target = Candidates.IsEmpty() ? nullptr : Candidates[0];
+		}
+		if (!Target)
+			for (TActorIterator<ATBCharacter> It(GetWorld()); It && !Target; ++It)
+				if (It->IsCelebrating()) Target = *It;
+	}
+	else
+	{
+		// 箱にしまわれたおもちゃは箱の中にいる。箱の外の勝者がいれば、そちらを映す。
+		auto Before = [this](const ATBCharacter* A, const ATBCharacter* B)
+		{
+			return TBRuleMath::ResultsViewBefore(A->TBPS()->ToyState == ETBToyState::Boxed, A == GetPawn(), A->TBPS()->GetPlayerId(),
+			                                     B->TBPS()->ToyState == ETBToyState::Boxed, B == GetPawn(), B->TBPS()->GetPlayerId());
+		};
+		for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It)
+			if (It->IsCelebrating() && (!Target || Before(*It, Target))) Target = *It;
+	}
+	if (Target && GetViewTarget() != Target)
+	{
+		// 覆いが抜けるときは、覆いの下で切り替えてつながない。
+		if (bResultCut) SetViewTarget(Target);
+		else SetViewTargetWithBlend(Target, .4f);
+	}
+	bResultCut = false;
+}
+
+bool ATBController::UpdateResultPresentation(const ATBGameState& State)
+{
+	const auto& Feel = TB::PresentationData().Result;
+	const ETBResultStyle Style = State.ResultStyle;
+	// 車の演出は、サーバーが覆いきる時刻に降ろして並べる。その様子がこのPCに届くまで真っ暗のまま待ち、届いた時刻から抜ける。
+	// 届かないまま（退出など）でも止まり続けないよう、待つのはResultPlaceWaitLimit秒まで。
+	constexpr float ResultPlaceWaitLimit = 2.f;
+	const float ServerElapsed = float(State.ResultElapsed());
+	bool bWaitingPlace = false;
+	if (Style != ETBResultStyle::Car || ServerElapsed < Feel.CoverSeconds) ResultPlacedAt = -1.f;
+	else if (ResultPlacedAt < 0.f)
+	{
+		if (IsCarResultPlacedHere(State) || ServerElapsed >= Feel.CoverSeconds + ResultPlaceWaitLimit) ResultPlacedAt = ServerElapsed;
+		else bWaitingPlace = true;
+	}
+	const float Elapsed = ResultPresentationElapsed(State);
+	// 車とふたは、覆いきる直前に暗くして、抜けるまでに戻す。
+	const float Dark = Style == ETBResultStyle::Car || Style == ETBResultStyle::Lid
+	    ? TBRuleMath::ResultDarkness(Elapsed, Feel.CoverSeconds, Feel.DarkenSeconds, Feel.RevealSeconds) : 0.f;
+	if (PlayerCameraManager && Dark > 0.f)
+	{
+		PlayerCameraManager->SetManualCameraFade(Dark, FLinearColor::Black, false);
+		bResultFade = true;
+	}
+	else if (PlayerCameraManager && bResultFade)
+	{
+		PlayerCameraManager->StopCameraFade();
+		bResultFade = false;
+	}
+	if (Style == ETBResultStyle::Lid)
+		if (auto* Lid = ATBBoxLid::Find(GetWorld())) Lid->HoldForResult(TBRuleMath::ResultLidOpen(Elapsed, Feel.CoverSeconds, Feel.LidSlamSeconds));
+	if (!bWaitingPlace && (Style == ETBResultStyle::None || Elapsed >= Feel.CoverSeconds))
+	{
+		if (!bResultRevealed) bResultCut = Style != ETBResultStyle::None;
+		bResultRevealed = true;
+		if (ResultCamera.IsValid()) ResultCamera->Destroy();
+		ResultCamera.Reset();
+		return true;
+	}
+	bResultRevealed = false;
+	// 決着の瞬間はそのままの画。その後、車とふたは決められたカメラへ切り替える。
+	if (Elapsed >= Feel.DecisiveSeconds && (Style == ETBResultStyle::Car || Style == ETBResultStyle::Lid))
+	{
+		if (!ResultCamera.IsValid()) ResultCamera = GetWorld()->SpawnActor<ACameraActor>();
+		if (ResultCamera.IsValid())
+		{
+			ResultCamera->SetActorTransform(State.ResultShot);
+			if (GetViewTarget() != ResultCamera.Get()) SetViewTarget(ResultCamera.Get());
+		}
+	}
+	return false;
+}
+
+float ATBController::ResultPresentationElapsed(const ATBGameState& State) const
+{
+	const float Elapsed = float(State.ResultElapsed());
+	const float Cover = TB::PresentationData().Result.CoverSeconds;
+	if (State.ResultStyle != ETBResultStyle::Car || Elapsed < Cover) return Elapsed;
+	// 待っているあいだは覆いきった瞬間で止め、届いてからの秒を足す。
+	return ResultPlacedAt < 0.f ? Cover : Cover + (Elapsed - ResultPlacedAt);
+}
+
+// 脱出した子がみな車から降り、車が走り終えて止まった様子が、このPCに届いている。
+bool ATBController::IsCarResultPlacedHere(const ATBGameState& State) const
+{
+	for (TActorIterator<ATBEscapeVehicle> It(GetWorld()); It; ++It)
+		if (It->IsResultDriving()) return false;
+	for (const APlayerState* Escaped : State.EscapedPlayers)
+		if (const auto* Toy = Escaped ? Escaped->GetPawn<ATBCharacter>() : nullptr; Toy && Toy->EscapeVehicle) return false;
+	return true;
+}
+
+void ATBController::EndResultPresentation()
+{
+	if (ResultCamera.IsValid()) ResultCamera->Destroy();
+	ResultCamera.Reset();
+	if (bResultFade && PlayerCameraManager) PlayerCameraManager->StopCameraFade();
+	bResultFade = false;
+	bResultCut = false;
+	bResultRevealed = false;
+	ResultPlacedAt = -1.f;
 }
 
 // 画面比を測る。基準より横長なら黒帯を出し（ATBCharacter::CalcCamera）、画面が狭い人の視界の判定を映っている
@@ -389,7 +548,9 @@ void ATBController::SyncInputContexts()
 	const auto* Settings = GetDefault<UTBInputSettings>();
 	const auto* Info = GetPlayerState<ATBPlayerState>();
 	const ETBTeam Team = Info ? Info->Team : ETBTeam::None;
-	const auto& RoleContext = Team == ETBTeam::Human ? Settings->HumanContext
+	// リザルトで観戦している間は、陣営のキーの代わりに観戦のキーを付ける（右クリックが凝視とかぶらない）。
+	const auto& RoleContext = IsSpectatingResults() ? Settings->ResultsContext
+	                        : Team == ETBTeam::Human ? Settings->HumanContext
 	                        : Team == ETBTeam::Toy   ? Settings->ToyContext
 	                                                 : TSoftObjectPtr<UInputMappingContext>();
 	// ロビーのキーはロビーの間だけ。GameStateが無いときは付けない。
@@ -465,6 +626,10 @@ void ATBController::SetupInputComponent()
 	if (const UInputAction* Start = Settings->StartAction.LoadSynchronous())
 	{
 		Enhanced->BindAction(Start, ETriggerEvent::Started, this, &ATBController::TBStart);
+	}
+	if (const UInputAction* Next = Settings->ResultNextAction.LoadSynchronous())
+	{
+		Enhanced->BindAction(Next, ETriggerEvent::Started, this, &ATBController::ViewNextResultPlayer);
 	}
 }
 

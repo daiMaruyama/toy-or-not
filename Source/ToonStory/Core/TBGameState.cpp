@@ -2,6 +2,7 @@
 
 #include "TBGameState.h"
 #include "Audio/TBAudioEvents.h"
+#include "Data/TBPresentationData.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -102,6 +103,9 @@ void ATBGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ATBGameState, bEscapePhase);
 	DOREPLIFETIME(ATBGameState, bVehicleEscapeResult);
 	DOREPLIFETIME(ATBGameState, EscapedPlayers);
+	DOREPLIFETIME(ATBGameState, ResultStyle);
+	DOREPLIFETIME(ATBGameState, ResultStartTime);
+	DOREPLIFETIME(ATBGameState, ResultShot);
 	DOREPLIFETIME(ATBGameState, BoxedCount);
 	DOREPLIFETIME(ATBGameState, Box);
 	DOREPLIFETIME(ATBGameState, HidePreparation);
@@ -117,6 +121,17 @@ float ATBGameState::HideProgress() const
 bool ATBGameState::EscapedInVehicle(const APlayerState* Player) const
 {
 	return Player && EscapedPlayers.Contains(Player);
+}
+
+double ATBGameState::ResultElapsed() const
+{
+	return Phase == ETBPhase::Results ? FMath::Max(0.0, GetServerWorldTimeSeconds() - ResultStartTime) : 0.0;
+}
+
+bool ATBGameState::IsResultRevealed() const
+{
+	return Phase == ETBPhase::Results &&
+	    (ResultStyle == ETBResultStyle::None || ResultElapsed() >= TB::PresentationData().Result.CoverSeconds);
 }
 
 bool ATBGameState::IsPreparing() const

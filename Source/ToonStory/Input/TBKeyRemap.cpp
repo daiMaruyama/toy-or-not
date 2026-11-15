@@ -18,14 +18,12 @@ namespace
 	// IMCの並び。Commonだけは全部の行とかぶりを見る。
 	constexpr int32 CommonScope = 0;
 
-	// 行 → 入っているIMCの番号（Common, Human, Toy, Lobby）。
+	// 行 → 入っているIMCの番号（UTBInputSettings::ContextSlotsの順）。
 	// Keys::AllのどれかがどのIMCにも無い、または別のIMCにも入っていればfalse。同じIMC内のキーボードとパッドの重複は正常。
 	bool BuildScopes(TMap<FName, int32>& Scopes)
 	{
-		const auto* Settings = GetDefault<UTBInputSettings>();
-		const TSoftObjectPtr<UInputMappingContext>* Contexts[] = {&Settings->CommonContext, &Settings->HumanContext,
-		                                                          &Settings->ToyContext, &Settings->LobbyContext};
-		for (int32 Scope = 0; Scope < UE_ARRAY_COUNT(Contexts); ++Scope)
+		const auto Contexts = GetDefault<UTBInputSettings>()->ContextSlots();
+		for (int32 Scope = 0; Scope < Contexts.Num(); ++Scope)
 		{
 			const UInputMappingContext* Context = Contexts[Scope]->IsNull() ? nullptr : Contexts[Scope]->LoadSynchronous();
 			if (!Context)

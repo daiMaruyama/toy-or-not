@@ -35,7 +35,7 @@ namespace
 const TArray<FName>& TB::Keys::All()
 {
 	static const TArray<FName> Names = {MoveForward, MoveBack, MoveLeft, MoveRight, Jump, EmoteWave, EmoteCheer, EmoteDance, EmoteSurprise, EmoteHairDisappear, HumanCrouch, HumanInteract,
-	                                    HumanDrop, HumanGaze, ToySprint, ToyInteract, ToyPush, ToyTaunt, LobbyReady, LobbyStart};
+	                                    HumanDrop, HumanGaze, ToySprint, ToyInteract, ToyPush, ToyTaunt, LobbyReady, LobbyStart, ResultsNext};
 	return Names;
 }
 
@@ -63,6 +63,7 @@ const TArray<TB::FKeySection>& TB::KeySections()
 	      {Keys::ToyPush, TEXT("押す")},
 	      {Keys::ToyTaunt, TEXT("音を鳴らす")}}},
 	    {TEXT("ロビー"), {{Keys::LobbyReady, TEXT("準備")}, {Keys::LobbyStart, TEXT("開始")}}},
+	    {TEXT("リザルト"), {{Keys::ResultsNext, TEXT("次のプレイヤー")}}},
 	};
 	return Sections;
 }
