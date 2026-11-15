@@ -82,6 +82,7 @@ bool ATBBoxEscapeCourse::ResolveFinalSupports(TArray<UPrimitiveComponent*>& Out,
 	Out.Reset();
 	const auto* Volume = IsValid(Goal) ? Cast<UBoxComponent>(Goal->GetCollisionComponent()) : nullptr;
 	if (!IsValid(Box) || !Volume || FinalSupportTag.IsNone() || FinalSupportLevelPackage.IsNone() ||
+	    !FMath::IsFinite(EscapeHeightAboveFinalSupport) || EscapeHeightAboveFinalSupport < 5.f ||
 	    ExpectedFinalSupportCount < 1 || ExpectedFinalSupportCount > 2 || !FMath::IsFinite(GoalMarginCm) || GoalMarginCm < 0 || GoalMarginCm > 5 ||
 	    Volume->GetComponentTransform().ContainsNaN() || Volume->GetComponentScale().GetMin() <= 0 ||
 	    !Volume->GetComponentRotation().Equals(FRotator::ZeroRotator, .001f) ||
@@ -144,18 +145,18 @@ bool ATBBoxEscapeCourse::ResolveFinalSupports(TArray<UPrimitiveComponent*>& Out,
 bool ATBBoxEscapeCourse::ReachedGoal(const ATBCharacter* Toy) const
 {
 	TArray<UPrimitiveComponent*> Supports; FString Error;
-	return ResolveFinalSupports(Supports, Error) && IsAtGoalHeight(Toy);
+	return ResolveFinalSupports(Supports, Error) && IsAtGoalHeight(Toy, Supports);
 }
 
-bool ATBBoxEscapeCourse::IsAtGoalHeight(const ATBCharacter* Toy) const
+bool ATBBoxEscapeCourse::IsAtGoalHeight(const ATBCharacter* Toy, const TArray<UPrimitiveComponent*>& Supports) const
 {
-	const auto* Volume = IsValid(Goal) ? Cast<UBoxComponent>(Goal->GetCollisionComponent()) : nullptr;
-	if (!IsValid(Toy) || !Volume || !Contains(CourseBounds, Toy)) return false;
-	const FVector Position = Toy->GetActorLocation();
-	// The bottom of the existing goal volume defines a horizontal finish line.
-	// Jumping across it counts; no precise XY landing or platform contact is needed.
-	return !Position.ContainsNaN() &&
-	    Position.Z - Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() >= Volume->Bounds.GetBox().Min.Z - GoalMarginCm;
+	if (!IsValid(Toy) || Supports.IsEmpty() || !Contains(CourseBounds, Toy)) return false;
+	double FinalHeight = -DBL_MAX;
+	for (const auto* Support : Supports) FinalHeight = FMath::Max(FinalHeight, Support->Bounds.GetBox().Max.Z);
+	// Crossing the horizontal finish line in a jump counts anywhere within the course.
+	// The old goal-volume bottom was low enough to reach from the preceding step.
+	const double Feet = Toy->GetActorLocation().Z - Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	return Feet >= FinalHeight + EscapeHeightAboveFinalSupport;
 }
 
 bool ATBBoxEscapeCourse::SafeExitPoint(FVector Position, const ATBCharacter* Toy) const
@@ -231,7 +232,7 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 		if (Contains(CourseBounds, Toy) && Toy->GetActorLocation().Z + Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() < GoalVolume->Bounds.GetBox().Min.Z)
 			Attempt.bDescendedBelowGoal = true;
 		if (Contains(CourseBounds, Toy)) Toy->SetFrozen(false);
-		if (!Attempt.bDescendedBelowGoal || !IsAtGoalHeight(Toy)) continue;
+		if (!Attempt.bDescendedBelowGoal || !IsAtGoalHeight(Toy, Supports)) continue;
 		// Server deadlines and the current capture token still govern release.
 		if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
 		if (!Eligible(Toy) || State->Phase != ETBPhase::Playing) continue;

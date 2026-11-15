@@ -1,6 +1,8 @@
 #include "Misc/AutomationTest.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Character/TBCharacter.h"
+#include "Character/TBCharacterGeometry.h"
+#include "GamePlay/TBHumanEntrance.h"
 #include "Core/TBGameMode.h"
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
@@ -10,10 +12,13 @@
 #include "Tests/TBTestMatch.h"
 #include "AIController.h"
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/ScopeExit.h"
 
@@ -101,6 +106,12 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	TestTrue(TEXT("Driving passes to the next passenger"), Car->IsDriver(Passenger));
 	Exit = World->SpawnActor<ATBEscapeExit>(Car->GetActorLocation(), FRotator::ZeroRotator, Params);
 	if (!TestNotNull(TEXT("Exit"), Exit)) return false;
+	Exit->ExitArea->SetBoxExtent(FVector(20, 130, 80));
+	Exit->OnConstruction(Exit->GetActorTransform());
+	const FBox GateBounds = Exit->Marker->GetStaticMesh()->GetBoundingBox().TransformBy(Exit->Marker->GetRelativeTransform());
+	TestTrue(TEXT("Gate follows resized exit width"), FMath::IsNearlyEqual(GateBounds.GetSize().Y, 260., .01));
+	TestTrue(TEXT("Gate bottom follows resized exit floor"), FMath::IsNearlyEqual(GateBounds.Min.Z, -80., .01));
+	TestTrue(TEXT("Gate stays centred on the exit plane"), FMath::IsNearlyZero(GateBounds.GetCenter().X, .01) && FMath::IsNearlyZero(GateBounds.GetCenter().Y, .01));
 	Car->Collision->UpdateOverlaps();
 	Exit->ExitArea->UpdateOverlaps();
 	TestTrue(TEXT("Vehicle overlaps exit"), Exit->ExitArea->IsOverlappingActor(Car));
@@ -168,5 +179,30 @@ bool FTBEscapeVehicleGroundTest::RunTest(const FString&)
 	for (int32 I=0; I<8; ++I) Car->VehicleMovement->Advance(FVector(5,0,0), FRotator::ZeroRotator, .016f);
 	TestTrue(TEXT("Vehicle keeps moving after landing"), Car->GetActorLocation().X > LandedX + 30.f);
 	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBEscapeEntranceClearanceTest, "ToonStory.Items.EscapeEntranceClearance",
+	EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBEscapeEntranceClearanceTest::RunTest(const FString&)
+{
+	UWorld* World = nullptr;
+	for (const auto& Context : GEngine->GetWorldContexts())
+		if (Context.WorldType == EWorldType::Game) World = Context.World();
+	if (!TestNotNull(TEXT("Game world"), World)) return false;
+	auto* Entrance = ATBHumanEntrance::Find(World);
+	if (!TestNotNull(TEXT("Authored human entrance"), Entrance)) return false;
+	ATBEscapeExit* Exit = nullptr;
+	for (TActorIterator<ATBEscapeExit> It(World); It; ++It) Exit = *It;
+	if (!TestNotNull(TEXT("Authored escape gate"), Exit)) return false;
+	TestEqual(TEXT("Gate decoration never blocks characters or vehicles"), Exit->Marker->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("Gate trigger only overlaps pawns"), Exit->ExitArea->GetCollisionResponseToChannel(ECC_Pawn), ECR_Overlap);
+	const FBox Visual = Exit->Marker->GetStaticMesh()->GetBoundingBox().TransformBy(Exit->Marker->GetComponentTransform());
+	const FBox Clearance = Visual.ExpandBy(FVector(TBCharacterGeometry::HumanRadius, TBCharacterGeometry::HumanRadius, TBCharacterGeometry::HumanHalfHeight));
+	for (int32 Index = 0; Index < FMath::Min(2, Entrance->DoorSlots.Num()); ++Index)
+	{
+		const FVector Start = Entrance->DoorSlots[Index]->GetActorLocation();
+		FVector End = Entrance->GetActorLocation(); End.Z = Start.Z;
+		TestFalse(TEXT("Gate visual leaves the human entrance route clear"), FMath::LineBoxIntersection(Clearance, Start, End, End - Start));
+	}
+	return !HasAnyErrors();
 }
 #endif

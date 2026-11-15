@@ -241,7 +241,7 @@ bool FTBRetainedStagePresentationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Collectible uses the configured battery mesh"),
 		         It->PickupMesh.Get() && It->Mesh->GetStaticMesh() == It->PickupMesh.Get());
 		TestTrue(TEXT("Battery has visible real-world scale"),
-		         FMath::IsNearlyEqual(It->Mesh->Bounds.BoxExtent.Z * 2, 12.0, .5));
+		         FMath::IsNearlyEqual(It->Mesh->Bounds.BoxExtent.Z * 2, 16.0, .5));
 	}
 	TestTrue(TEXT("At least eight distinct starts"), Starts >= 8);
 	TestEqual(TEXT("One toy box"), Boxes, 1);

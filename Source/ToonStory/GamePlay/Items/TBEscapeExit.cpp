@@ -29,8 +29,28 @@ ATBEscapeExit::ATBEscapeExit()
 	if (Gate.Succeeded())
 	{
 		Marker->SetStaticMesh(Gate.Object);
+	}
+	RefreshAppearance();
+}
+
+void ATBEscapeExit::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	RefreshAppearance();
+}
+
+void ATBEscapeExit::BeginPlay()
+{
+	Super::BeginPlay();
+	RefreshAppearance();
+}
+
+void ATBEscapeExit::RefreshAppearance()
+{
+	if (const UStaticMesh* Gate = Marker->GetStaticMesh())
+	{
 		// 門の通過方向を +X に向け、出口範囲の幅と底面に揃える。
-		const FBox Bounds = Gate.Object->GetBoundingBox();
+		const FBox Bounds = Gate->GetBoundingBox();
 		const FVector Extent = ExitArea->GetUnscaledBoxExtent();
 		const float Scale = Extent.Y * 2.f / FMath::Max(1.f, float(Bounds.GetSize().X));
 		const FRotator Rotation(0, 90, 0);

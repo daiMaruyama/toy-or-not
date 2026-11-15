@@ -103,7 +103,7 @@ TBPrefer 1
 LANへ戻しても、作成済みのSteamパッケージの設定は変わりません。
 
 4. `Builds/Windows` 以下のパッケージ全体を各PCへコピー。exeだけをコピーしない。
-5. スクリプトはDevelopmentテスト用 `steam_appid.txt`（内容480）を実行ファイルのフォルダーへ配置する。手動パッケージの場合は必要に応じて同じファイルを置く。Steamへの製品アップロードには含めない。
+5. スクリプトはDevelopmentテスト用 `steam_appid.txt` を実行ファイルのフォルダーへ配置する。内容は設定ファイルの `SteamDevAppId` から取得する（現在480）。手動パッケージの場合は必要に応じて同じファイルを置く。Steamへの製品アップロードには含めない。
 6. 全員がパッケージのToonStory.exeを起動。ホストはF10で `TBHost`、参加者は `TBFind`、結果が表示されたら `TBJoin 0`（目的の部屋の番号）を実行。
 7. 接続後にホストが `TBRules 1 1 60 5`（2人）または `TBRules 1 2 60 5`（3人）を設定。全員R、ホストF5。
 8. 再戦はホストの「Return together to lobby」または `TBLobby`。全員同じ接続のままロビーに戻り、Readyして再開始する。部屋を退出・終了したい場合だけ `TBLeave` を使う。

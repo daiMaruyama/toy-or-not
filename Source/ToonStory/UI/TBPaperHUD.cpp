@@ -206,7 +206,8 @@ void ATBHUD::DrawLobby()
 		       PC->HasAuthority() ? FString::Printf(TEXT("あそびはじめる [%s]"), *StartKey) : FString(TEXT("ホストを待っています")),
 		       858, Bottom, 294, CanStart, CanStart);
 		DrawNotice(Bottom - 166, 1144, 110);
-		const FString HairHint = Local && Local->Team == ETBTeam::Human
+		const auto* LobbyCharacter = PC->GetPawn<ATBCharacter>();
+		const FString HairHint = LobbyCharacter && LobbyCharacter->SupportsEmoteKind(ETBEmoteKind::HairDisappear)
 		    ? FString::Printf(TEXT("・%s"), *TB::KeyLabel(PC, TB::Keys::EmoteHairDisappear)) : FString();
 		Text(FString::Printf(TEXT("移動キーで歩く / エモート %s・%s・%s・%s%s / Escで設定"),
 		    *TB::KeyLabel(PC, TB::Keys::EmoteWave), *TB::KeyLabel(PC, TB::Keys::EmoteCheer),

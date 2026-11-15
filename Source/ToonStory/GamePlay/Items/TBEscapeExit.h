@@ -13,9 +13,13 @@ class TOONSTORY_API ATBEscapeExit : public AActor
 	GENERATED_BODY()
 public:
 	ATBEscapeExit();
+	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出")
 	TObjectPtr<UBoxComponent> ExitArea;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出")
 	TObjectPtr<UStaticMeshComponent> Marker;
+private:
+	void RefreshAppearance();
 };

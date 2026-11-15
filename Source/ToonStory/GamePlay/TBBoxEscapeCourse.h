@@ -25,7 +25,7 @@ public:
 	TObjectPtr<UBoxComponent> CourseBounds;
 	UPROPERTY(EditInstanceOnly, Category = "Course")
 	TObjectPtr<ATBBox> Box;
-	/** The bottom of this volume defines the finish height anywhere inside CourseBounds. */
+	/** Locates the final platform used as the reference height, not a required XY landing area. */
 	UPROPERTY(EditInstanceOnly, Category = "Course", meta = (DisplayName = "最終到達領域"))
 	TObjectPtr<ATriggerBox> Goal;
 	// Resolve component tags in the loaded shared level; no cross-level actor/component hard reference.
@@ -37,6 +37,9 @@ public:
 	int32 ExpectedFinalSupportCount = 2;
 	UPROPERTY(EditInstanceOnly, Category = "Course", meta = (ClampMin = "0", ClampMax = "5"))
 	float GoalMarginCm = 1.f;
+	/** Feet must rise this far above the final platform. */
+	UPROPERTY(EditAnywhere, Category = "Course", meta = (DisplayName = "最終段からの脱出高さ", Units = "cm", ClampMin = "5"))
+	float EscapeHeightAboveFinalSupport = 40.f;
 	UPROPERTY(EditInstanceOnly, Category = "Course")
 	TArray<TObjectPtr<ATargetPoint>> ExitPoints;
 	bool Validate(FString& Error, bool CheckSafety = true) const;
@@ -53,7 +56,7 @@ private:
 	bool Contains(const UBoxComponent* Volume, const ATBCharacter* Toy, float Margin = 0) const;
 	bool ValidateWithSupports(FString& Error, bool CheckSafety, TArray<UPrimitiveComponent*>& Supports) const;
 	bool ResolveFinalSupports(TArray<UPrimitiveComponent*>& Out, FString& Error) const;
-	bool IsAtGoalHeight(const ATBCharacter* Toy) const;
+	bool IsAtGoalHeight(const ATBCharacter* Toy, const TArray<UPrimitiveComponent*>& Supports) const;
 	bool Eligible(const ATBCharacter* Toy) const;
 	bool SafeExitPoint(FVector Position, const ATBCharacter* Toy = nullptr) const;
 };

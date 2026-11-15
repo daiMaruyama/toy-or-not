@@ -4,6 +4,13 @@ $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $Project = Join-Path $ProjectRoot 'ToonStory.uproject'
 $UAT = Join-Path $EngineRoot 'Engine\Build\BatchFiles\RunUAT.bat'
 $Destination = Join-Path $ProjectRoot 'Builds\Windows'
+$EngineConfig = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'Config\DefaultEngine.ini'))
+$IsSteam = $EngineConfig -match '(?m)^DefaultPlatformService=Steam\s*$'
+if ($IsSteam) {
+    $SteamAppIdMatch = [regex]::Match($EngineConfig, '(?m)^SteamDevAppId=([1-9][0-9]*)[ \t]*\r?$')
+    if (!$SteamAppIdMatch.Success) { throw 'Steam mode requires a positive SteamDevAppId in Config/DefaultEngine.ini.' }
+    $SteamAppId = $SteamAppIdMatch.Groups[1].Value
+}
 if (!(Test-Path $UAT)) { throw "RunUAT.bat not found: $UAT" }
 foreach ($Map in @('Title', 'TB_Lobby', 'Arena', 'TB_ToyWorldDemoExpanded', 'TB_StylizedHouse')) {
     if (!(Test-Path (Join-Path $ProjectRoot "Content\Maps\$Map.umap"))) {
@@ -12,12 +19,12 @@ foreach ($Map in @('Title', 'TB_Lobby', 'Arena', 'TB_ToyWorldDemoExpanded', 'TB_
 }
 & $UAT BuildCookRun "-project=$Project" -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -archive "-archivedirectory=$Destination"
 if ($LASTEXITCODE -ne 0) { throw "Packaging failed with code $LASTEXITCODE. Read the first UAT error." }
-if ([IO.File]::ReadAllText((Join-Path $ProjectRoot 'Config\DefaultEngine.ini')) -match 'DefaultPlatformService=Steam') {
+if ($IsSteam) {
     # 開発テスト専用。後々消す予定。Steamで出すときには含めないようにする。
     $ExecutableDirectories = Get-ChildItem -LiteralPath $Destination -Filter 'ToonStory*.exe' -File -Recurse |
         Select-Object -ExpandProperty DirectoryName -Unique
     foreach ($Directory in $ExecutableDirectories) {
-        [IO.File]::WriteAllText((Join-Path $Directory 'steam_appid.txt'), "480`n", [Text.Encoding]::ASCII)
+        [IO.File]::WriteAllText((Join-Path $Directory 'steam_appid.txt'), "$SteamAppId`n", [Text.Encoding]::ASCII)
     }
 }
 Write-Host "Packaged output: $Destination"
