@@ -108,11 +108,11 @@ void UTBAudioSubsystem::ReleaseVoiceTracking()
 	PlayingSounds.RemoveAll([](const FPlayingSound& Playing) { return Playing.Category == ETBAudioCategory::Voice; });
 }
 
-UTBAudioSubsystem::ELobbyCountSound UTBAudioSubsystem::LobbyCountSound(int32 Count, int32 LastCount, bool bFirstTick, double SecondsSinceWorldChange, float SettleSeconds)
+UTBAudioSubsystem::ELobbyCountSound UTBAudioSubsystem::LobbyCountSound(int32 Count, int32 LastCount, bool bFirstTick, double SecondsSinceFirstCount, float SettleSeconds)
 {
 	if (Count <= 0 || Count == LastCount) return ELobbyCountSound::None;
 	if (LastCount < 0) return bFirstTick ? ELobbyCountSound::Join : ELobbyCountSound::None;
-	if (SecondsSinceWorldChange < SettleSeconds) return ELobbyCountSound::None;
+	if (SecondsSinceFirstCount < SettleSeconds) return ELobbyCountSound::None;
 	return LastCount > Count ? ELobbyCountSound::Leave : ELobbyCountSound::Join;
 }
 
@@ -125,7 +125,7 @@ void UTBAudioSubsystem::EnsurePlaybackWorld(UWorld* World)
 		StopOwnedAudio(KeepMusic);
 		ReleaseVoiceTracking();
 		PlaybackWorld = World;
-		WorldChangedAt = FPlatformTime::Seconds();
+		LobbyCountedAt = -1;
 		ToyActionMasks.Reset();
 		if (!KeepMusic) MusicState = ETBMusicState::None;
 		bSawPlaying = bResultCuePlayed = false;
@@ -174,12 +174,14 @@ void UTBAudioSubsystem::Tick(float DeltaTime)
 			const int32 Count = State->PlayerArray.Num();
 			if (!State->bTravelPending && Count > 0 && Count != LastLobbyCount)
 			{
-				switch (LobbyCountSound(Count, LastLobbyCount, bFirstLobbyTick, FPlatformTime::Seconds() - WorldChangedAt, LobbyCountSettleSeconds))
+				const double Now = FPlatformTime::Seconds();
+				switch (LobbyCountSound(Count, LastLobbyCount, bFirstLobbyTick, LobbyCountedAt >= 0 ? Now - LobbyCountedAt : 0., LobbyCountSettleSeconds))
 				{
 				case ELobbyCountSound::Join: PlaySoundEvent(ETBSoundEvent::LobbyJoin); break;
 				case ELobbyCountSound::Leave: PlaySoundEvent(ETBSoundEvent::LobbyLeave); break;
 				default: break;
 				}
+				if (LastLobbyCount < 0) LobbyCountedAt = Now; // 待ちは、最初に人数を数えた瞬間から数える。
 				LastLobbyCount = Count;
 				bFirstLobbyTick = false; // 人数0の間は最初の入室音を使い切らない。
 			}

@@ -49,7 +49,7 @@ public:
 	TMap<ETBSoundEvent, FTBAudioClip> Sounds;
 	UPROPERTY(Config, EditAnywhere, Category = "Music", meta = (ClampMin = "0", ClampMax = "5"))
 	float MusicFadeSeconds = .5f;
-	// ワールドが変わってから、この間は人数が増減しても入室音・退室音を鳴らさず、基準の人数だけ更新する（移動直後に1人ずつ届くため）。
+	// そのワールドで最初に人数を数えてから、この間は人数が増減しても入室音・退室音を鳴らさず、基準の人数だけ更新する（移動直後に1人ずつ届くため）。
 	UPROPERTY(Config, EditAnywhere, Category = "Sound Effects", meta = (ClampMin = "0", ClampMax = "10"))
 	float LobbyCountSettleSeconds = 1.5f;
 	// One human footstep asset is shared; only Toy listeners receive these multipliers.

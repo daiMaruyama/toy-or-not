@@ -23,7 +23,7 @@ bool FTBTravelLabel::RunTest(const FString&)
 	return true;
 }
 
-// ロビーの入室音。最初の1回は鳴らし、ワールドが変わった直後の増減は鳴らさない。
+// ロビーの入室音。最初の1回は鳴らし、そのワールドで最初に人数を数えてからしばらくの増減は鳴らさない。
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBLobbyCountSound, "ToonStory.Review.LobbyCountSound",
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
 
@@ -33,8 +33,11 @@ bool FTBLobbyCountSound::RunTest(const FString&)
 	using S = A::ELobbyCountSound;
 	TestEqual(TEXT("最初に入ったときは鳴らす"), A::LobbyCountSound(1, -1, true, .1, 1.5f), S::Join);
 	TestEqual(TEXT("最初でなければ鳴らさない"), A::LobbyCountSound(1, -1, false, 5., 1.5f), S::None);
-	TestEqual(TEXT("ワールドが変わった直後の増加は鳴らさない"), A::LobbyCountSound(2, 1, false, .5, 1.5f), S::None);
-	TestEqual(TEXT("ワールドが変わった直後の減少も鳴らさない"), A::LobbyCountSound(1, 2, false, .5, 1.5f), S::None);
+	TestEqual(TEXT("最初に数えてから1.5秒以内の増加は鳴らさない"), A::LobbyCountSound(2, 1, false, 1.4, 1.5f), S::None);
+	TestEqual(TEXT("最初に数えてから1.5秒以内の減少も鳴らさない"), A::LobbyCountSound(1, 2, false, .5, 1.5f), S::None);
+	TestEqual(TEXT("最初に数えて1.5秒たてば増加を鳴らす"), A::LobbyCountSound(2, 1, false, 1.5, 1.5f), S::Join);
+	// ワールドが変わってから長くたっていても、判断は最初に数えてからの秒数で決まる（渡す値が数え始めからの秒数）。
+	TestEqual(TEXT("ワールドが変わって2秒たっていても、数えて0.3秒なら鳴らさない"), A::LobbyCountSound(3, 2, false, .3, 1.5f), S::None);
 	TestEqual(TEXT("そろったあとに入れば鳴らす"), A::LobbyCountSound(3, 2, false, 3., 1.5f), S::Join);
 	TestEqual(TEXT("そろったあとに出れば鳴らす"), A::LobbyCountSound(2, 3, false, 3., 1.5f), S::Leave);
 	TestEqual(TEXT("人数が同じなら鳴らさない"), A::LobbyCountSound(2, 2, false, 3., 1.5f), S::None);
