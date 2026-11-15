@@ -4,6 +4,7 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBController.h"
+#include "Data/TBPresentationData.h"
 #include "Character/TBCharacter.h"
 #include "Character/TBMovement.h"
 #include "Components/BoxComponent.h"
@@ -72,7 +73,9 @@ bool FTBHousePartyTest::RunTest(const FString&)
  Mode->Finish(ETBWinner::Humans,TEXT("test victory"));
  TestFalse(TEXT("Winner can move"),Host->GetPawn<ATBCharacter>()->IsMovementLocked());
  for(auto* PC:Guests) TestTrue(TEXT("Losers cannot move"),PC->GetPawn<ATBCharacter>()->IsMovementLocked());
- TestTrue(TEXT("Ten-second celebration"),FMath::IsNearlyEqual(State->EndTime-State->GetServerWorldTimeSeconds(),10.,.1));
+ // 結果の画面は10秒。決着からの演出の分だけ延びる。
+ const auto& Feel=TB::PresentationData().Result;
+ TestTrue(TEXT("Ten-second celebration after the presentation"),FMath::IsNearlyEqual(State->EndTime-State->GetServerWorldTimeSeconds(),10.+Feel.CoverSeconds+Feel.RevealSeconds,.1));
  return !HasAnyErrors();
 }
 

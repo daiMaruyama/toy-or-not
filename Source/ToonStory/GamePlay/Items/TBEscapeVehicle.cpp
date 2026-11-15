@@ -5,6 +5,7 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Data/TBEscapeVehicleData.h"
+#include "GamePlay/TBRuleMath.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -171,6 +172,14 @@ void ATBEscapeVehicle::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	if (!HasAuthority() || !FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0) return;
 	const auto* Match = TB::GS(GetWorld());
+	if (ResultStart >= 0)
+	{
+		// 壁を抜けてもカメラの前を通れるよう、当たり判定なしで線の上を進める。
+		const double Elapsed = Match ? Match->GetServerWorldTimeSeconds() - ResultStart : ResultCover;
+		const float Alpha = TBRuleMath::ResultCarProgress(float(Elapsed), ResultCover);
+		SetActorLocation(FMath::Lerp(ResultFrom, ResultTo, Alpha), false, nullptr, ETeleportType::TeleportPhysics);
+		return;
+	}
 	if (Match && Match->bEscapePhase && Match->Phase == ETBPhase::Playing)
 	{
 		TArray<AActor*> Overlapping;
@@ -187,9 +196,37 @@ void ATBEscapeVehicle::Tick(float DeltaSeconds)
 	VehicleMovement->Advance(Delta, Rotation, Dt);
 }
 
+void ATBEscapeVehicle::StartResultDrive(const FVector& To, double StartTime, float CoverSeconds)
+{
+	if (!HasAuthority()) return;
+	DriveInput = FVector2D::ZeroVector;
+	VehicleMovement->ResetMotion();
+	ResultFrom = GetActorLocation();
+	ResultTo = FVector(To.X, To.Y, ResultFrom.Z);
+	const FVector Heading = (ResultTo - ResultFrom).GetSafeNormal2D();
+	if (!Heading.IsNearlyZero()) SetActorRotation(Heading.Rotation());
+	ResultStart = StartTime;
+	ResultCover = CoverSeconds;
+	ForceNetUpdate();
+}
+
+void ATBEscapeVehicle::ParkForResults(const FTransform& Where)
+{
+	if (!HasAuthority()) return;
+	ResultStart = -1;
+	ReleasePassengers();
+	// 床の高さに、車の当たり判定の半分だけ浮かせて置く。
+	const FVector Ground = Where.GetLocation() + FVector(0, 0, Collision->GetScaledBoxExtent().Z);
+	SetActorLocationAndRotation(Ground, Where.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	DriveInput = FVector2D::ZeroVector;
+	VehicleMovement->ResetMotion();
+	ForceNetUpdate();
+}
+
 void ATBEscapeVehicle::ResetRound()
 {
 	if (!HasAuthority()) return;
+	ResultStart = -1;
 	ReleasePassengers();
 	SetActorTransform(StartTransform, false, nullptr, ETeleportType::TeleportPhysics);
 	DriveInput = FVector2D::ZeroVector;

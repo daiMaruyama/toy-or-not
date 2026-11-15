@@ -200,6 +200,45 @@ namespace TBRuleMath
 		return State == EGazeState::None ? 0.f : State == EGazeState::Seen ? .5f : 1.f;
 	}
 
+	// 決着からの経過で、覆いの暗さ（0〜1）。覆いきる時刻の少し前から暗くし、抜けるまでに戻す。
+	inline float ResultDarkness(float Elapsed, float Cover, float Darken, float Reveal)
+	{
+		if (Elapsed < Cover - Darken) return 0.f;
+		if (Elapsed < Cover) return Darken > 0.f ? float((Elapsed - (Cover - Darken)) / Darken) : 1.f;
+		if (Elapsed < Cover + Reveal) return 1.f - float((Elapsed - Cover) / Reveal);
+		return 0.f;
+	}
+
+	// 車が門からカメラの先まで進んだ割合。決着を見せる間から動き出し、だんだん速くなって覆いきる時刻に着く。
+	inline float ResultCarProgress(float Elapsed, float Cover)
+	{
+		if (Cover <= 0.f || Elapsed >= Cover) return 1.f;
+		const float T = Elapsed <= 0 ? 0.f : float(Elapsed / Cover);
+		return T * T;
+	}
+
+	// ふたの開き具合。閉まる時間までは開いたまま、覆いきる時刻にちょうど閉まる。
+	inline float ResultLidOpen(float Elapsed, float Cover, float Slam)
+	{
+		if (Elapsed >= Cover) return 0.f;
+		if (Slam <= 0.f || Elapsed <= Cover - Slam) return 1.f;
+		const float T = float((Cover - Elapsed) / Slam);
+		return T * T;
+	}
+
+	// ママの吹き出しで覆うときの広がり具合（0〜1）。決着の後から広がり、覆いきる時刻で画面を埋め、抜けるまでに消える。
+	inline float ResultMomCover(float Elapsed, float Decisive, float Cover, float Reveal)
+	{
+		if (Elapsed < Decisive) return 0.f;
+		if (Elapsed < Cover)
+		{
+			const float T = Cover > Decisive ? float((Elapsed - Decisive) / (Cover - Decisive)) : 1.f;
+			return T * T * (3.f - 2.f * T);
+		}
+		if (Elapsed < Cover + Reveal) return Reveal > 0.f ? 1.f - float((Elapsed - Cover) / Reveal) : 0.f;
+		return 0.f;
+	}
+
 	// リザルトで映す勝者を選ぶ順。箱にしまわれた子は箱の中にいるので後に回す。次に自分、次に番号の小さい順。
 	inline bool ResultsViewBefore(bool BoxedA, bool MineA, int IdA, bool BoxedB, bool MineB, int IdB)
 	{

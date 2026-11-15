@@ -55,6 +55,14 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientPreparationTravelCancelled();
 	void ToggleLeaveMenu();
+	/** リザルトで自分が勝っておらず、勝った人を観戦している */
+	bool IsSpectatingResults() const;
+	/** 観戦で切り替えられる勝者。NPCを除き、箱の外 → 番号の小さい順 */
+	TArray<class ATBCharacter*> ResultViewCandidates() const;
+	/** 観戦中に映している勝者。いなければnull */
+	class ATBCharacter* GetResultViewCharacter() const;
+	/** 観戦で次の勝者へ切り替える。最後の次は最初に戻る */
+	void ViewNextResultPlayer();
 	/** 陣営に合わせてInput Mapping Contextを付け替える。設定が空なら何もしない */
 	void SyncInputContexts();
 	UFUNCTION(Exec)
@@ -126,6 +134,18 @@ private:
 	double LastChatAccepted = -1;
 	void ClearInputContexts();
 	TArray<TWeakObjectPtr<const UInputMappingContext>> AppliedContexts;
+	void UpdateResultView();
+	// 決着から覆いきるまでの演出を進める。結果の画面を映してよければtrue。
+	bool UpdateResultPresentation(const class ATBGameState& State);
+	void EndResultPresentation();
+	TWeakObjectPtr<class ACameraActor> ResultCamera;
+	bool bResultFade = false;
+	bool bResultCut = false;
+	bool bResultRevealed = false;
+	friend class FTBResultViewTest;
+	friend class FTBResultPresentationTest;
+	// 観戦で選んだ勝者。毎フレーム選び直さず、いなくなるまで保つ。
+	TWeakObjectPtr<APlayerState> ResultViewPlayer;
 	bool bPreparationTravelMask = false;
 	bool bPreparationStartMask = false;
 	bool bPreparationBlack = false;

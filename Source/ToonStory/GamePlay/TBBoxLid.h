@@ -30,7 +30,14 @@ public:
 	TObjectPtr<APostProcessVolume> RoomVolume;
 	// 開く角度・光の強さ・時間はマスターデータ（TB::PresentationData().Lid）にある。
 
+	/** リザルトの演出で開き具合を決める。負なら手放して閉じたふたに戻す */
+	void HoldForResult(float Alpha);
+	/** 箱の部屋の床から、ふたを見上げるカメラの位置。天井が無ければfalse */
+	bool ResultShot(FTransform& Out) const;
+	static ATBBoxLid* Find(const UWorld* World);
+
 private:
+	bool bResultHeld = false;
 	bool bBoundToBox = false;
 	float Elapsed = -1.f;
 	UPROPERTY(Transient)

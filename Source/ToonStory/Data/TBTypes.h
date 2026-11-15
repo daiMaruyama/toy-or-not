@@ -44,6 +44,15 @@ enum class ETBWinner : uint8
 	Humans,
 	Toys
 };
+// リザルトへの切り替え演出。車で脱出、箱のふたが閉まる、ママの吹き出しで覆う。
+UENUM(BlueprintType)
+enum class ETBResultStyle : uint8
+{
+	None,
+	Car,
+	Lid,
+	Mom
+};
 UENUM(BlueprintType)
 enum class ETBRemoteKey : uint8
 {

@@ -25,6 +25,10 @@ public:
 	// 同じマップで次の試合を始めるとき、置いた位置に戻して空にする。
 	void ResetRound();
 	void SetDrivingInput(ATBCharacter* Toy, FVector2D Input);
+	/** リザルトの演出で、決着の時刻からCover秒かけてToへ走らせる。操作は受け付けない */
+	void StartResultDrive(const FVector& To, double StartTime, float CoverSeconds);
+	/** 演出を終えて、乗っている子を降ろしてWhereに止める */
+	void ParkForResults(const FTransform& Where);
 	const UTBEscapeVehicleData& Data() const;
 	bool IsDriver(const ATBCharacter* Toy) const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出車両")
@@ -46,6 +50,11 @@ private:
 	FVector2D DriveInput = FVector2D::ZeroVector;
 	double LastInputAt = 0;
 	FTransform StartTransform;
+	// リザルトの演出の走り。開始時刻が負なら走っていない。
+	FVector ResultFrom = FVector::ZeroVector;
+	FVector ResultTo = FVector::ZeroVector;
+	double ResultStart = -1;
+	float ResultCover = 0.f;
 	void ReleasePassengers();
 	UFUNCTION()
 	void OnBoardingOverlap(UPrimitiveComponent* Component, AActor* Other, UPrimitiveComponent* OtherComponent,
