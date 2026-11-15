@@ -75,6 +75,8 @@ private:
 	// 移動を始めたときに決まった行き先のマップ名。新しいマップの GameState が届くまで、文字の向きはこれで決める。
 	FString TravelDestMap;
 	TWeakObjectPtr<UWorld> TravelFromWorld;
+	// 行き先が裏で切り替える移動（seamless）か。
+	bool bTravelSeamless = false;
 	FDelegateHandle PreClientTravelHandle;
 	// かぶせに今書いてある文字の向き（1:ロビーへ 0:試合へ -1:書いていない）。
 	int8 LabelReturning = -1;

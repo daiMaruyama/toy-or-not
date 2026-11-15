@@ -16,6 +16,9 @@ bool FTBTravelLabel::RunTest(const FString&)
 	TestEqual(TEXT("オプション付きの URL"), L::MapNameFromURL(TEXT("/Game/Maps/TB_StylizedHouse?listen")), FString(TEXT("TB_StylizedHouse")));
 	TestEqual(TEXT("ホスト付きの URL"), L::MapNameFromURL(TEXT("192.168.0.2:7777/Game/Maps/TB_Lobby")), FString(TEXT("TB_Lobby")));
 	TestTrue(TEXT("マップのない URL は空"), L::MapNameFromURL(TEXT("192.168.0.2:7777")).IsEmpty());
+	TestTrue(TEXT("空の URL は空"), L::MapNameFromURL(FString()).IsEmpty());
+	TestTrue(TEXT("オプションだけの URL は空"), L::MapNameFromURL(TEXT("?listen")).IsEmpty());
+	TestTrue(TEXT("末尾が / の URL は空"), L::MapNameFromURL(TEXT("/Game/Maps/")).IsEmpty());
 	TestTrue(TEXT("試合へ向かうなら、GameState が古くてもロビーへ戻るにならない"), !L::IsReturningLabel(TEXT("TB_StylizedHouse"), true));
 	TestTrue(TEXT("ロビーへ戻るなら、GameState が古くても試合へ向かうにならない"), L::IsReturningLabel(TEXT("TB_Lobby"), false));
 	TestTrue(TEXT("行き先がなければ GameState の値（戻る）"), L::IsReturningLabel(FString(), true));

@@ -41,12 +41,12 @@ bool UTBLoadingScreenSubsystem::IsReturningLabel(const FString& DestMap, bool bR
 	return DestMap.IsEmpty() ? bReturningFromState : IsLobbyMap(DestMap);
 }
 
-void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, ETravelType, bool)
+void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, ETravelType, bool bSeamless)
 {
-	const FString Map = MapNameFromURL(PendingURL);
-	if (Map.IsEmpty()) return;
-	TravelDestMap = Map;
+	// マップ名がない行き先（部屋に入るときの IP:ポートなど）では、古い行き先を残さず空にする。
+	TravelDestMap = MapNameFromURL(PendingURL);
 	TravelFromWorld = GetGameInstance()->GetWorld();
+	bTravelSeamless = bSeamless;
 }
 
 bool UTBLoadingScreenSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -120,6 +120,8 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FString& MapName)
 void UTBLoadingScreenSubsystem::PostLoadMap(UWorld* World)
 {
 	bHadWorld = true;
+	// マップを丸ごと読み直したら行き先は使い終わり。裏で切り替える移動は、この通知が GameState の届く前にも来るので、Tick の到着判定に任せる。
+	if (!bTravelSeamless) TravelDestMap.Reset();
 	if (!bHardLoad) return;
 	LoadedAt = FPlatformTime::Seconds();
 	ShowOverlay();
