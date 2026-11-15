@@ -4,6 +4,7 @@
 #include "TBEscapeExit.generated.h"
 
 class UBoxComponent;
+class USceneComponent;
 class UStaticMeshComponent;
 
 /** レベル担当者が車両の出口に設置する領域。 */
@@ -20,6 +21,9 @@ public:
 	TObjectPtr<UBoxComponent> ExitArea;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出")
 	TObjectPtr<UStaticMeshComponent> Marker;
+	/** 判定範囲の底面へ自動追従する演出の基準。位置の調整は子のカメラ・整列位置で行う */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出")
+	TObjectPtr<USceneComponent> ResultOrigin;
 	/** 脱出の決着で、車が横切るのを映すカメラ。門を抜けた先の脇に置き、来る車へ向ける */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="脱出")
 	TObjectPtr<USceneComponent> ResultCamera;

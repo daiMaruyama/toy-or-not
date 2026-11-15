@@ -509,7 +509,13 @@ bool FTBEmoteTest::RunTest(const FString&)
 	TArray<AActor*> Fixtures;
 	ON_SCOPE_EXIT
 	{
-		for (auto* Actor : Fixtures) if (IsValid(Actor)) Actor->Destroy();
+		for (auto* Actor : Fixtures)
+			if (IsValid(Actor))
+			{
+				// Simulated proxies also belong to this standalone fixture; restore authority for destruction.
+				Actor->SetRole(ROLE_Authority);
+				TestTrue(TEXT("Emote fixture actor is removed"), Actor->Destroy());
+			}
 		State->Phase = OriginalPhase; State->HidePreparation = OriginalHide; State->EndTime = OriginalEnd;
 		State->Winner = OriginalWinner;
 		State->bTravelPending = bOriginalTravelPending;

@@ -6,6 +6,7 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
@@ -30,18 +31,19 @@ ATBEscapeExit::ATBEscapeExit()
 	{
 		Marker->SetStaticMesh(Gate.Object);
 	}
-	RefreshAppearance();
 	// 既定は門を抜けて少し先の脇、車の高さ。マップごとにレベルで動かせる。
-	const float Floor = -ExitArea->GetUnscaledBoxExtent().Z;
+	ResultOrigin = CreateDefaultSubobject<USceneComponent>(TEXT("ResultOrigin"));
+	ResultOrigin->SetupAttachment(ExitArea);
 	ResultCamera = CreateDefaultSubobject<USceneComponent>(TEXT("ResultCamera"));
-	ResultCamera->SetupAttachment(ExitArea);
-	const FVector CameraAt(250, 70, Floor + 35);
+	ResultCamera->SetupAttachment(ResultOrigin);
+	const FVector CameraAt(250, 70, 35);
 	ResultCamera->SetRelativeLocation(CameraAt);
-	ResultCamera->SetRelativeRotation((FVector(-150, 0, Floor + 20) - CameraAt).Rotation());
+	ResultCamera->SetRelativeRotation((FVector(-150, 0, 20) - CameraAt).Rotation());
 	Lineup = CreateDefaultSubobject<USceneComponent>(TEXT("Lineup"));
-	Lineup->SetupAttachment(ExitArea);
-	Lineup->SetRelativeLocation(FVector(-250, 0, Floor));
+	Lineup->SetupAttachment(ResultOrigin);
+	Lineup->SetRelativeLocation(FVector(-250, 0, 0));
 	Lineup->SetRelativeRotation(FRotator(0, 180, 0));
+	RefreshAppearance();
 }
 
 void ATBEscapeExit::OnConstruction(const FTransform& Transform)
@@ -58,6 +60,8 @@ void ATBEscapeExit::BeginPlay()
 
 void ATBEscapeExit::RefreshAppearance()
 {
+	// 子の手動調整を保ち、保存済みインスタンスの判定高さに演出全体を合わせる。
+	ResultOrigin->SetRelativeLocation(FVector(0, 0, -ExitArea->GetUnscaledBoxExtent().Z));
 	if (const UStaticMesh* Gate = Marker->GetStaticMesh())
 	{
 		// 門の通過方向を +X に向け、出口範囲の幅と底面に揃える。
