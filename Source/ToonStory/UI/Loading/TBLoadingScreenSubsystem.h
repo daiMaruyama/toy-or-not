@@ -32,6 +32,8 @@ public:
 	// 移動の向きの文字を決める部品。移動の行き先（URLから取ったマップ名）がわかっていればそれを優先し、なければGameStateから決めた値を使う。
 	static FString MapNameFromURL(const FString& URL);
 	static bool IsReturningLabel(const FString& DestMap, bool bReturningFromState);
+	// かぶせの文字を書き直すか。Recordedは今書いてある向きの記録（-1は書いていない）。
+	static bool ShouldRewriteLabel(bool bNew, bool bHardLoad, int8 Recorded, bool bBack);
 	virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UTBLoadingScreenSubsystem, STATGROUP_Tickables); }
 	virtual bool IsTickable() const override { return !IsTemplate(); }
 	virtual ETickableTickType GetTickableTickType() const override { return ETickableTickType::Conditional; }

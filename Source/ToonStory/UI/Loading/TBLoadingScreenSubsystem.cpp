@@ -37,6 +37,12 @@ bool UTBLoadingScreenSubsystem::IsReturningLabel(const FString& DestMap, bool bR
 	return DestMap.IsEmpty() ? bReturningFromState : TBLobbySettings::IsLobbyMapName(DestMap);
 }
 
+bool UTBLoadingScreenSubsystem::ShouldRewriteLabel(bool bNew, bool bHardLoad, int8 Recorded, bool bBack)
+{
+	// 読み直しのあと（記録が-1）は、ロード中の絵の文字をそのまま続けるので、新しく作ったときしか書かない。
+	return !bHardLoad && (bNew || (Recorded >= 0 && Recorded != int8(bBack)));
+}
+
 void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, ETravelType, bool bSeamless)
 {
 	// マップ名がない行き先（部屋に入るときのIP:ポートなど）では、古い行き先を残さず空にする。
@@ -149,8 +155,11 @@ void UTBLoadingScreenSubsystem::ShowOverlay()
 	// 読み込み直後にエンジンが画面の部品を組み直して外すことがあるので、外れていたら付け直す。
 	if (Overlay && OverlayViewport.Get() == Viewport && Overlay->IsParentValid()) return;
 	const TSharedPtr<STBLoadingScreen> Keep = Screen;
+	const int8 KeepLabel = LabelReturning;
 	RemoveOverlay();
 	Screen = Keep;
+	// 付け直しでは、Screenと同じく文字の向きの記録も引き継ぐ。
+	if (Keep) LabelReturning = KeepLabel;
 	if (!Screen)
 	{
 		Screen = SNew(STBLoadingScreen);
@@ -252,7 +261,7 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		// 裏で切り替える移動は、ここから出しはじめる。読み直しのあとは、ロード中の絵をそのまま続ける。
 		// 向きは移動を始めたときの行き先を優先し、かぶせが出たままでも向きが変わったら書き直す。
 		const bool bBack = IsReturningLabel(TravelDestMap, bReturning);
-		if (!bHardLoad && (bNew || (LabelReturning >= 0 && LabelReturning != int8(bBack))))
+		if (ShouldRewriteLabel(bNew, bHardLoad, LabelReturning, bBack))
 		{
 			Screen->SetStatus(FText::FromString(bBack ? TEXT("ロビーにもどっています…") : TEXT("あそぶ準備をしています…")));
 			LabelReturning = bBack ? 1 : 0;

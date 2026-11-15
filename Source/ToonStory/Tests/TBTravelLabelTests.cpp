@@ -23,6 +23,12 @@ bool FTBTravelLabel::RunTest(const FString&)
 	TestTrue(TEXT("ロビーへ戻るなら、GameState が古くても試合へ向かうにならない"), L::IsReturningLabel(TEXT("TB_Lobby"), false));
 	TestTrue(TEXT("行き先がなければ GameState の値（戻る）"), L::IsReturningLabel(FString(), true));
 	TestTrue(TEXT("行き先がなければ GameState の値（向かう）"), !L::IsReturningLabel(FString(), false));
+	// 文字を書き直すか。
+	TestTrue(TEXT("新しく作ったときは書く"), L::ShouldRewriteLabel(true, false, -1, true));
+	TestTrue(TEXT("付け直しで記録を引き継げば、向きが変わったとき書き直す"), L::ShouldRewriteLabel(false, false, 0, true));
+	TestTrue(TEXT("向きが同じなら書き直さない"), !L::ShouldRewriteLabel(false, false, 1, true));
+	TestTrue(TEXT("読み直しのあとの記録-1は書き直さない"), !L::ShouldRewriteLabel(false, false, -1, true));
+	TestTrue(TEXT("読み直し中は書かない"), !L::ShouldRewriteLabel(true, true, -1, true));
 	return true;
 }
 
