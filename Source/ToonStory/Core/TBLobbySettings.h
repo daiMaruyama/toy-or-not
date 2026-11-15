@@ -37,6 +37,8 @@ namespace TBLobbySettings
 	void SelectStage(ATBController* Host, int32 Index);
 	void Restore(ATBGameMode* Mode);
 	bool IsLobby(const UWorld* World);
+	// マップ名（パスやPIEの接頭辞が付いていてもよい）がロビーか。ロビーかどうかの判断はここだけ。
+	bool IsLobbyMapName(const FString& MapName);
 	// Empty on success, otherwise a reason suitable for display.
 	FString TryTravel(ATBGameMode* Mode, bool StartMatch);
 	inline bool Travel(ATBGameMode* Mode, bool StartMatch) { return TryTravel(Mode, StartMatch).IsEmpty(); }

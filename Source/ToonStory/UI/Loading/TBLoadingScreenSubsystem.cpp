@@ -6,6 +6,7 @@
 #include "Character/TBCharacter.h"
 #include "Core/TBController.h"
 #include "Core/TBGameState.h"
+#include "Core/TBLobbySettings.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBSession.h"
 #include "UI/TBPaperStyle.h"
@@ -21,6 +22,7 @@
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/SWeakWidget.h"
 
+// FURLはマップ名がないとき既定のマップ（タイトル）を返すため使わない。
 FString UTBLoadingScreenSubsystem::MapNameFromURL(const FString& URL)
 {
 	// 「ホスト:ポート」だけで、マップがない行き先は空にする。
@@ -30,20 +32,14 @@ FString UTBLoadingScreenSubsystem::MapNameFromURL(const FString& URL)
 	return Path.FindLastChar('/', Index) ? Path.Mid(Index + 1) : FString();
 }
 
-// TBLobbySettings::IsLobby と同じ判定。
-bool UTBLoadingScreenSubsystem::IsLobbyMap(const FString& MapName)
-{
-	return MapName.EndsWith(TEXT("TB_Lobby"));
-}
-
 bool UTBLoadingScreenSubsystem::IsReturningLabel(const FString& DestMap, bool bReturningFromState)
 {
-	return DestMap.IsEmpty() ? bReturningFromState : IsLobbyMap(DestMap);
+	return DestMap.IsEmpty() ? bReturningFromState : TBLobbySettings::IsLobbyMapName(DestMap);
 }
 
 void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, ETravelType, bool bSeamless)
 {
-	// マップ名がない行き先（部屋に入るときの IP:ポートなど）では、古い行き先を残さず空にする。
+	// マップ名がない行き先（部屋に入るときのIP:ポートなど）では、古い行き先を残さず空にする。
 	TravelDestMap = MapNameFromURL(PendingURL);
 	TravelFromWorld = GetGameInstance()->GetWorld();
 	bTravelSeamless = bSeamless;
@@ -120,7 +116,7 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FString& MapName)
 void UTBLoadingScreenSubsystem::PostLoadMap(UWorld* World)
 {
 	bHadWorld = true;
-	// マップを丸ごと読み直したら行き先は使い終わり。裏で切り替える移動は、この通知が GameState の届く前にも来るので、Tick の到着判定に任せる。
+	// マップを丸ごと読み直したら行き先は使い終わり。裏で切り替える移動は、この通知がGameStateの届く前にも来るので、Tickの到着判定に任せる。
 	if (!bTravelSeamless) TravelDestMap.Reset();
 	if (!bHardLoad) return;
 	LoadedAt = FPlatformTime::Seconds();
@@ -203,7 +199,7 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	bool bCover = ShouldCoverSeamless();
 	// ロビーと試合の切り替わり。読み込みはほとんどないが、いきなり画面が変わらないよう、少しの間かぶせてフェードでつなぐ。
 	UWorld* World = GetGameInstance()->GetWorld();
-	// 行き先のマップに着いて GameState が届いたら、行き先は使い終わり。つなぎのマップでは残す。
+	// 行き先のマップに着いてGameStateが届いたら、行き先は使い終わり。つなぎのマップでは残す。
 	if (!TravelDestMap.IsEmpty() && World && World != TravelFromWorld.Get() && World->GetGameState<ATBGameState>() &&
 	    World->GetMapName().EndsWith(TravelDestMap))
 		TravelDestMap.Reset();

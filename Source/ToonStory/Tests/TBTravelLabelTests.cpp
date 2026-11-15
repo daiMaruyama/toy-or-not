@@ -6,7 +6,7 @@
 #include "Audio/TBAudioSubsystem.h"
 #include "UI/Loading/TBLoadingScreenSubsystem.h"
 
-// ロード画面の文字の向きは、移動の行き先で決まる。行き先がわからないときだけ GameState の値を使う。
+// ロード画面の文字の向きは、移動の行き先で決まる。行き先がわからないときだけGameStateの値を使う。
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBTravelLabel, "ToonStory.Review.TravelLabel",
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
 
