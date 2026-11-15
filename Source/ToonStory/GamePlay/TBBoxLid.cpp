@@ -38,10 +38,9 @@ void ATBBoxLid::BeginPlay()
 		// 毎フレーム動かすので、レベル側が Static のままでも動けるようにする。
 		Ceiling->GetRootComponent()->SetMobility(EComponentMobility::Movable);
 		CeilingRest = Ceiling->GetActorTransform();
-		FVector Origin, Extent;
-		Ceiling->GetActorBounds(false, Origin, Extent);
+		Ceiling->GetActorBounds(false, ClosedOrigin, ClosedExtent);
 		// 側面をPivotにして、反対側を持ち上げる。
-		Hinge = Origin + FVector(0.f, Extent.Y, Extent.Z);
+		Hinge = ClosedOrigin + FVector(0.f, ClosedExtent.Y, ClosedExtent.Z);
 		const FVector Arm = CeilingRest.GetLocation() - Hinge;
 		OpenSign = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(1.f)).RotateVector(Arm).Z > Arm.Z ? 1.f : -1.f;
 	}
@@ -127,8 +126,9 @@ void ATBBoxLid::HoldForResult(float Alpha)
 bool ATBBoxLid::ResultShot(FTransform& Out) const
 {
 	if (!Ceiling) return false;
-	FVector Origin, Extent;
-	Ceiling->GetActorBounds(false, Origin, Extent);
+	// 救助でふたが開いている途中に決着しても、閉じた天井から決める。
+	const FVector& Origin = ClosedOrigin;
+	const FVector& Extent = ClosedExtent;
 	// 床は落下エリアの底。無ければ天井から2.5m下とみなす。
 	const auto* Drop = ATBBox::FindDropArea(GetWorld());
 	const float FloorZ = Drop ? Drop->GetComponentLocation().Z - Drop->GetScaledBoxExtent().Z : Origin.Z - 250.f;

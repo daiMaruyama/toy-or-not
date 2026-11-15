@@ -40,6 +40,7 @@ private:
 	void DrawText(const FString& Text, FLinearColor Color, float X, float Y, UFont* Font = nullptr, float Scale = 1.f,
 	              bool ScalePosition = false);
 	void DrawResults(const class ATBGameState& MatchState);
+	void DrawResultCover(const class ATBGameState& MatchState);
 	void DrawMomBubble(const class ATBGameState& MatchState, float CenterX, float CenterY, float Width, float Height, float Alpha);
 	void DrawMatch(const class ATBGameState& MatchState, class ATBController& Controller);
 	void DrawLobby();

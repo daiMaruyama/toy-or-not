@@ -63,6 +63,10 @@ public:
 	class ATBCharacter* GetResultViewCharacter() const;
 	/** 観戦で次の勝者へ切り替える。最後の次は最初に戻る */
 	void ViewNextResultPlayer();
+	/** このPCで見えているリザルトの演出の経過秒。車の演出は、降ろして並べた様子が届くのを待った分だけ遅れる */
+	float ResultPresentationElapsed(const class ATBGameState& State) const;
+	/** このPCで演出が抜けて、結果の画面を出してよい */
+	bool IsResultShown() const { return bResultRevealed; }
 	/** 陣営に合わせてInput Mapping Contextを付け替える。設定が空なら何もしない */
 	void SyncInputContexts();
 	UFUNCTION(Exec)
@@ -142,6 +146,9 @@ private:
 	bool bResultFade = false;
 	bool bResultCut = false;
 	bool bResultRevealed = false;
+	// 車の演出で、降ろして並べた様子が届いたときの経過秒。届くまでは負。
+	float ResultPlacedAt = -1.f;
+	bool IsCarResultPlacedHere(const class ATBGameState& State) const;
 	friend class FTBResultViewTest;
 	friend class FTBResultPresentationTest;
 	// 観戦で選んだ勝者。毎フレーム選び直さず、いなくなるまで保つ。

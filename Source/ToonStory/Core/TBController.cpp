@@ -11,6 +11,7 @@
 #include "Core/TBLobbySettings.h"
 #include "GamePlay/TBHumanEntrance.h"
 #include "GamePlay/TBBoxLid.h"
+#include "GamePlay/Items/TBEscapeVehicle.h"
 #include "Data/TBPresentationData.h"
 #include "Camera/PlayerCameraManager.h"
 #include "GamePlay/TBRuleMath.h"
@@ -151,7 +152,7 @@ void ATBController::ViewNextResultPlayer()
 {
 	const auto* State = TB::GS(GetWorld());
 	const auto Candidates = ResultViewCandidates();
-	if (Candidates.Num() < 2 || IsChatOpen() || bLobbyInput || !State || !State->IsResultRevealed()) return;
+	if (Candidates.Num() < 2 || IsChatOpen() || bLobbyInput || !State || !IsResultShown()) return;
 	const int32 Current = Candidates.IndexOfByKey(GetResultViewCharacter());
 	ResultViewPlayer = Candidates[(Current + 1) % Candidates.Num()]->TBPS();
 	UpdateResultView();
@@ -206,7 +207,18 @@ bool ATBController::UpdateResultPresentation(const ATBGameState& State)
 {
 	const auto& Feel = TB::PresentationData().Result;
 	const ETBResultStyle Style = State.ResultStyle;
-	const float Elapsed = float(State.ResultElapsed());
+	// 車の演出は、サーバーが覆いきる時刻に降ろして並べる。その様子がこのPCに届くまで真っ暗のまま待ち、届いた時刻から抜ける。
+	// 届かないまま（退出など）でも止まり続けないよう、待つのはResultPlaceWaitLimit秒まで。
+	constexpr float ResultPlaceWaitLimit = 2.f;
+	const float ServerElapsed = float(State.ResultElapsed());
+	bool bWaitingPlace = false;
+	if (Style != ETBResultStyle::Car || ServerElapsed < Feel.CoverSeconds) ResultPlacedAt = -1.f;
+	else if (ResultPlacedAt < 0.f)
+	{
+		if (IsCarResultPlacedHere(State) || ServerElapsed >= Feel.CoverSeconds + ResultPlaceWaitLimit) ResultPlacedAt = ServerElapsed;
+		else bWaitingPlace = true;
+	}
+	const float Elapsed = ResultPresentationElapsed(State);
 	// 車とふたは、覆いきる直前に暗くして、抜けるまでに戻す。
 	const float Dark = Style == ETBResultStyle::Car || Style == ETBResultStyle::Lid
 	    ? TBRuleMath::ResultDarkness(Elapsed, Feel.CoverSeconds, Feel.DarkenSeconds, Feel.RevealSeconds) : 0.f;
@@ -222,7 +234,7 @@ bool ATBController::UpdateResultPresentation(const ATBGameState& State)
 	}
 	if (Style == ETBResultStyle::Lid)
 		if (auto* Lid = ATBBoxLid::Find(GetWorld())) Lid->HoldForResult(TBRuleMath::ResultLidOpen(Elapsed, Feel.CoverSeconds, Feel.LidSlamSeconds));
-	if (Style == ETBResultStyle::None || Elapsed >= Feel.CoverSeconds)
+	if (!bWaitingPlace && (Style == ETBResultStyle::None || Elapsed >= Feel.CoverSeconds))
 	{
 		if (!bResultRevealed) bResultCut = Style != ETBResultStyle::None;
 		bResultRevealed = true;
@@ -244,6 +256,25 @@ bool ATBController::UpdateResultPresentation(const ATBGameState& State)
 	return false;
 }
 
+float ATBController::ResultPresentationElapsed(const ATBGameState& State) const
+{
+	const float Elapsed = float(State.ResultElapsed());
+	const float Cover = TB::PresentationData().Result.CoverSeconds;
+	if (State.ResultStyle != ETBResultStyle::Car || Elapsed < Cover) return Elapsed;
+	// 待っているあいだは覆いきった瞬間で止め、届いてからの秒を足す。
+	return ResultPlacedAt < 0.f ? Cover : Cover + (Elapsed - ResultPlacedAt);
+}
+
+// 脱出した子がみな車から降り、車が走り終えて止まった様子が、このPCに届いている。
+bool ATBController::IsCarResultPlacedHere(const ATBGameState& State) const
+{
+	for (TActorIterator<ATBEscapeVehicle> It(GetWorld()); It; ++It)
+		if (It->IsResultDriving()) return false;
+	for (const APlayerState* Escaped : State.EscapedPlayers)
+		if (const auto* Toy = Escaped ? Escaped->GetPawn<ATBCharacter>() : nullptr; Toy && Toy->EscapeVehicle) return false;
+	return true;
+}
+
 void ATBController::EndResultPresentation()
 {
 	if (ResultCamera.IsValid()) ResultCamera->Destroy();
@@ -252,6 +283,7 @@ void ATBController::EndResultPresentation()
 	bResultFade = false;
 	bResultCut = false;
 	bResultRevealed = false;
+	ResultPlacedAt = -1.f;
 }
 
 // 画面比を測る。基準より横長なら黒帯を出し（ATBCharacter::CalcCamera）、画面が狭い人の視界の判定を映っている

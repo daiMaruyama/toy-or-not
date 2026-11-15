@@ -170,16 +170,18 @@ void ATBEscapeVehicle::SetDrivingInput(ATBCharacter* Toy, FVector2D Input)
 void ATBEscapeVehicle::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!HasAuthority() || !FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0) return;
+	if (!FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0) return;
 	const auto* Match = TB::GS(GetWorld());
 	if (ResultStart >= 0)
 	{
 		// 壁を抜けてもカメラの前を通れるよう、当たり判定なしで線の上を進める。
+		// 参加側も同じ式で動かし、届いた位置の同期を毎フレーム上書きしてカメラと暗転の時刻に合わせる。
 		const double Elapsed = Match ? Match->GetServerWorldTimeSeconds() - ResultStart : ResultCover;
 		const float Alpha = TBRuleMath::ResultCarProgress(float(Elapsed), ResultCover);
 		SetActorLocation(FMath::Lerp(ResultFrom, ResultTo, Alpha), false, nullptr, ETeleportType::TeleportPhysics);
 		return;
 	}
+	if (!HasAuthority()) return;
 	if (Match && Match->bEscapePhase && Match->Phase == ETBPhase::Playing)
 	{
 		TArray<AActor*> Overlapping;
@@ -267,4 +269,8 @@ void ATBEscapeVehicle::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ATBEscapeVehicle, Passengers);
+	DOREPLIFETIME(ATBEscapeVehicle, ResultFrom);
+	DOREPLIFETIME(ATBEscapeVehicle, ResultTo);
+	DOREPLIFETIME(ATBEscapeVehicle, ResultStart);
+	DOREPLIFETIME(ATBEscapeVehicle, ResultCover);
 }

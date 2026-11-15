@@ -109,6 +109,11 @@ public:
 	FTBRemoteFeel Remote;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト", meta = (ShowOnlyInnerProperties))
 	FTBResultFeel Result;
+
+#if WITH_EDITOR
+	// 1つずつの範囲は ClampMin で守り、ここでは値どうしの関係だけを確かめる。
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 };
 
 namespace TB

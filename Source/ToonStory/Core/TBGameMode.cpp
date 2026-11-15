@@ -1445,8 +1445,10 @@ void ATBGameMode::BeginResultPresentation()
 	State->ResultStyle = ETBResultStyle::Mom;
 	if (State->Winner == ETBWinner::Toys && State->bVehicleEscapeResult)
 	{
+		// 車が何台かあるときは、脱出した子が乗っている車を選ぶ。
 		for (TActorIterator<ATBEscapeVehicle> It(GetWorld()); It && !ResultVehicle.IsValid(); ++It)
-			if (!It->Passengers.IsEmpty()) ResultVehicle = *It;
+			for (const ATBCharacter* Toy : It->Passengers)
+				if (IsValid(Toy) && State->EscapedInVehicle(Toy->TBPS())) ResultVehicle = *It;
 		// 車にいちばん近い出口を、抜けていった出口とみなす。
 		float Best = TNumericLimits<float>::Max();
 		for (TActorIterator<ATBEscapeExit> It(GetWorld()); It && ResultVehicle.IsValid(); ++It)
@@ -1499,8 +1501,10 @@ void ATBGameMode::PlaceResults()
 		const FTransform Spot = ResultExit->LineupSpot(Index, Escaped.Num());
 		FVector Location = Spot.GetLocation() + FVector(0, 0, Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 2.f);
 		const FRotator Facing = Spot.Rotator();
-		GetWorld()->FindTeleportSpot(Toy, Location, Facing);
-		Toy->SetActorLocationAndRotation(Location, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+		// 家具などで列の位置にも近くにも立てなければ、車から降りた位置のまま向きだけそろえる。
+		if (GetWorld()->FindTeleportSpot(Toy, Location, Facing))
+			Toy->SetActorLocationAndRotation(Location, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+		else Toy->SetActorRotation(Facing);
 		if (AController* Controller = Toy->GetController()) Controller->SetControlRotation(Facing);
 		Toy->GetCharacterMovement()->StopMovementImmediately();
 		Toy->GetCharacterMovement()->SetMovementMode(MOVE_Falling);

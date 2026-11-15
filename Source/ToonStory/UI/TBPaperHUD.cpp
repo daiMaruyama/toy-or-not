@@ -338,28 +338,34 @@ void ATBHUD::DrawMomBubble(const ATBGameState& MatchState, float CenterX, float 
 	DrawText(TEXT("ママ"), Fade(TBPaper::Cream), TagX + 16 * S, Top - 38 * S, PaperFont, .95f * S);
 }
 
+// 吹き出しが広がって画面を覆い、覆いきったら薄れて結果の画面が出る。結果の画面より手前に描く。
+void ATBHUD::DrawResultCover(const ATBGameState& MatchState)
+{
+	const auto* PC = Cast<ATBController>(GetOwningPlayerController());
+	if (MatchState.Phase != ETBPhase::Results || MatchState.ResultStyle != ETBResultStyle::Mom || !PC) return;
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	const auto& Feel = TB::PresentationData().Result;
+	const float Elapsed = PC->ResultPresentationElapsed(MatchState);
+	const float W = Canvas->ClipX, H = Canvas->ClipY;
+	const float Cover = TBRuleMath::ResultMomCover(Elapsed, Feel.DecisiveSeconds, Feel.CoverSeconds, Feel.RevealSeconds);
+	if (Cover <= 0.f) return;
+	const bool bGrowing = Elapsed < Feel.CoverSeconds;
+	const float Grow = bGrowing ? Cover : 1.f;
+	const float BubbleW = FMath::Lerp(620 * S, W + 120 * S, FMath::Square(Grow));
+	const float BubbleH = FMath::Lerp(170 * S, H + 120 * S, FMath::Square(Grow));
+	const float Appear = bGrowing ? FMath::Min(1.f, Cover * 6.f) : Cover;
+	DrawMomBubble(MatchState, W * .5f, H * .5f, BubbleW, BubbleH, Appear);
+}
+
 void ATBHUD::DrawResults(const ATBGameState& MatchState)
 {
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
 	const float X = Canvas->ClipX * .5f - 300 * S;
 	const auto& Feel = TB::PresentationData().Result;
-	const float Elapsed = float(MatchState.ResultElapsed());
+	const auto* Viewer = Cast<ATBController>(GetOwningPlayerController());
+	const float Elapsed = Viewer ? Viewer->ResultPresentationElapsed(MatchState) : float(MatchState.ResultElapsed());
 	const float W = Canvas->ClipX, H = Canvas->ClipY;
-	if (MatchState.Phase == ETBPhase::Results && MatchState.ResultStyle == ETBResultStyle::Mom)
-	{
-		// 吹き出しが広がって画面を覆い、覆いきったら薄れて結果の画面が出る。
-		const float Cover = TBRuleMath::ResultMomCover(Elapsed, Feel.DecisiveSeconds, Feel.CoverSeconds, Feel.RevealSeconds);
-		if (Cover > 0.f)
-		{
-			const bool bGrowing = Elapsed < Feel.CoverSeconds;
-			const float Grow = bGrowing ? Cover : 1.f;
-			const float BubbleW = FMath::Lerp(620 * S, W + 120 * S, FMath::Square(Grow));
-			const float BubbleH = FMath::Lerp(170 * S, H + 120 * S, FMath::Square(Grow));
-			const float Appear = bGrowing ? FMath::Min(1.f, Cover * 6.f) : Cover;
-			DrawMomBubble(MatchState, W * .5f, H * .5f, BubbleW, BubbleH, Appear);
-		}
-	}
-	if (MatchState.Phase == ETBPhase::Results && !MatchState.IsResultRevealed()) return;
+	if (MatchState.Phase == ETBPhase::Results && !(Viewer ? Viewer->IsResultShown() : MatchState.IsResultRevealed())) return;
 	// 車とふたのときは、結果の画面にママのひと言を少しのあいだ重ねる。
 	const float SinceReveal = Elapsed - Feel.CoverSeconds - Feel.RevealSeconds * .5f;
 	if (MatchState.Phase == ETBPhase::Results && MatchState.ResultStyle != ETBResultStyle::Mom &&

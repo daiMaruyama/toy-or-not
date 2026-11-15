@@ -43,6 +43,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> CeilingMaterial;
 	FTransform CeilingRest;
+	// 閉じた天井の範囲。リザルトのカメラは、決着の瞬間にふたが開いていてもこの範囲から決める。
+	FVector ClosedOrigin = FVector::ZeroVector;
+	FVector ClosedExtent = FVector::ZeroVector;
 	FVector Hinge = FVector::ZeroVector;
 	float OpenSign = 1.f;
 	float RestExposure = 0.f;
