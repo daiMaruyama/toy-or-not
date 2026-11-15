@@ -55,7 +55,15 @@ public:
 private:
 	void ReturnFinishedMatchToLobby();
 	int32 LobbyReturnFailures = 0;
+	// リザルトへの切り替え演出。決着で流れを決め、覆いきる時刻に配置を変える。
+	void BeginResultPresentation();
+	void PlaceResults();
+	void ClearResultPresentation();
+	bool bResultPlaced = true;
+	TWeakObjectPtr<class ATBEscapeVehicle> ResultVehicle;
+	TWeakObjectPtr<class ATBEscapeExit> ResultExit;
 #if WITH_DEV_AUTOMATION_TESTS
+	friend class FTBResultPresentationTest;
 	friend class FTBRoundStartTest;
 	friend class FTBHousePartyTest;
 	friend class FTBMirrorGazeTest;

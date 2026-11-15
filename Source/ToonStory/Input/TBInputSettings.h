@@ -32,6 +32,9 @@ public:
 	/** ロビーの間だけ付ける。準備完了と開始のキーがある */
 	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "ロビー"))
 	TSoftObjectPtr<UInputMappingContext> LobbyContext;
+	/** リザルト中、負けて観戦している人だけに付ける。次のプレイヤーへのキーがある */
+	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "リザルト"))
+	TSoftObjectPtr<UInputMappingContext> ResultsContext;
 	/** キャラが結ぶInput Action。IMCのマッピングと同じアセットを指す */
 	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "視点"))
 	TSoftObjectPtr<UInputAction> LookAction;
@@ -59,6 +62,8 @@ public:
 	TSoftObjectPtr<UInputAction> StartAction;
 	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "メニュー"))
 	TSoftObjectPtr<UInputAction> MenuAction;
+	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "次のプレイヤー"))
+	TSoftObjectPtr<UInputAction> ResultNextAction;
 	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "手ふり"))
 	TSoftObjectPtr<UInputAction> EmoteWaveAction;
 	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "よろこび"))
@@ -70,9 +75,15 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "入力", meta = (DisplayName = "髪かくし"))
 	TSoftObjectPtr<UInputAction> EmoteHairDisappearAction;
 
-	/** 設定の4つのIMCを読み込んで返す（未設定は除く） */
+	/** IMCの並び。共通、人間、人形、ロビー、リザルト。キー設定の見出しも同じ順 */
+	TArray<const TSoftObjectPtr<UInputMappingContext>*> ContextSlots() const
+	{
+		return {&CommonContext, &HumanContext, &ToyContext, &LobbyContext, &ResultsContext};
+	}
+
+	/** 設定のIMCを読み込んで返す（未設定は除く） */
 	TArray<const UInputMappingContext*> GetAllContexts() const;
 
-	/** 4つのIMCをUserSettingsに登録する。登録したIMCは強参照で持たれ、IAもIMCから持たれる。何度呼んでも安全。 */
+	/** 設定のIMCをUserSettingsに登録する。登録したIMCは強参照で持たれ、IAもIMCから持たれる。何度呼んでも安全。 */
 	static void RegisterContexts(const ULocalPlayer* LocalPlayer);
 };

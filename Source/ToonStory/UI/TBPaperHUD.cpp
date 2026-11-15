@@ -12,6 +12,7 @@
 #include "Core/TBGameHelpers.h"
 #include "Character/TBCharacter.h"
 #include "Data/TBRuleData.h"
+#include "Data/TBPresentationData.h"
 #include "GamePlay/TBBox.h"
 #include "GamePlay/Events/TBMomArrivalZone.h"
 #include "GamePlay/TBBoxEscapeCourse.h"
@@ -316,10 +317,63 @@ void ATBHUD::DrawLobby()
 	Text(TEXT("おもちゃ：電池を集めて仲間を救助 ／ にんげん：おもちゃを見つけて箱へ"), 28, 722, .9f, TBPaper::Cream);
 }
 
+// ママのひと言。おもちゃが勝ったら散らかった部屋を叱り、人間が勝ったら片付けをほめる。絵は共通。
+void ATBHUD::DrawMomBubble(const ATBGameState& MatchState, float CenterX, float CenterY, float Width, float Height, float Alpha)
+{
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	const bool bToys = MatchState.Winner == ETBWinner::Toys;
+	const FString Lead = bToys ? TEXT("もう！") : TEXT("あら、");
+	const FString Line = bToys ? TEXT("ちゃんと片付けなさい！") : TEXT("きれいに片付いたじゃない");
+	auto Fade = [Alpha](FLinearColor Color) { Color.A *= Alpha; return Color; };
+	PaperPanel(Fade(TBPaper::Cream), CenterX - Width * .5f, CenterY - Height * .5f, Width, Height);
+	float LeadW = 0, LeadH = 0, LineW = 0, LineH = 0;
+	GetTextSize(Lead, LeadW, LeadH, PaperFont, 1.4f * S);
+	GetTextSize(Line, LineW, LineH, PaperFont, 1.9f * S);
+	const float Top = CenterY - (LeadH + LineH) * .5f;
+	DrawText(Lead, Fade(bToys ? TBPaper::Accent : FLinearColor::FromSRGBColor(FColor(81, 134, 120))), CenterX - LeadW * .5f, Top, PaperFont, 1.4f * S);
+	DrawText(Line, Fade(TBPaper::Ink), CenterX - LineW * .5f, Top + LeadH, PaperFont, 1.9f * S);
+	// 吹き出しの左上に、誰のひと言かを出す。
+	const float TagX = CenterX - FMath::Min(Width * .5f - 16 * S, LineW * .5f + 40 * S);
+	PaperPanel(Fade(TBPaper::Accent), TagX, Top - 44 * S, 76 * S, 36 * S);
+	DrawText(TEXT("ママ"), Fade(TBPaper::Cream), TagX + 16 * S, Top - 38 * S, PaperFont, .95f * S);
+}
+
+// 吹き出しが広がって画面を覆い、覆いきったら薄れて結果の画面が出る。結果の画面より手前に描く。
+void ATBHUD::DrawResultCover(const ATBGameState& MatchState)
+{
+	const auto* PC = Cast<ATBController>(GetOwningPlayerController());
+	if (MatchState.Phase != ETBPhase::Results || MatchState.ResultStyle != ETBResultStyle::Mom || !PC) return;
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	const auto& Feel = TB::PresentationData().Result;
+	const float Elapsed = PC->ResultPresentationElapsed(MatchState);
+	const float W = Canvas->ClipX, H = Canvas->ClipY;
+	const float Cover = TBRuleMath::ResultMomCover(Elapsed, Feel.DecisiveSeconds, Feel.CoverSeconds, Feel.RevealSeconds);
+	if (Cover <= 0.f) return;
+	const bool bGrowing = Elapsed < Feel.CoverSeconds;
+	const float Grow = bGrowing ? Cover : 1.f;
+	const float BubbleW = FMath::Lerp(620 * S, W + 120 * S, FMath::Square(Grow));
+	const float BubbleH = FMath::Lerp(170 * S, H + 120 * S, FMath::Square(Grow));
+	const float Appear = bGrowing ? FMath::Min(1.f, Cover * 6.f) : Cover;
+	DrawMomBubble(MatchState, W * .5f, H * .5f, BubbleW, BubbleH, Appear);
+}
+
 void ATBHUD::DrawResults(const ATBGameState& MatchState)
 {
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
 	const float X = Canvas->ClipX * .5f - 300 * S;
+	const auto& Feel = TB::PresentationData().Result;
+	const auto* Viewer = Cast<ATBController>(GetOwningPlayerController());
+	const float Elapsed = Viewer ? Viewer->ResultPresentationElapsed(MatchState) : float(MatchState.ResultElapsed());
+	const float W = Canvas->ClipX, H = Canvas->ClipY;
+	if (MatchState.Phase == ETBPhase::Results && !(Viewer ? Viewer->IsResultShown() : MatchState.IsResultRevealed())) return;
+	// 車とふたのときは、結果の画面にママのひと言を少しのあいだ重ねる。
+	const float SinceReveal = Elapsed - Feel.CoverSeconds - Feel.RevealSeconds * .5f;
+	if (MatchState.Phase == ETBPhase::Results && MatchState.ResultStyle != ETBResultStyle::Mom &&
+	    MatchState.ResultStyle != ETBResultStyle::None && SinceReveal >= 0.f && SinceReveal < Feel.MomLineSeconds)
+	{
+		const float Alpha = FMath::Min(1.f, SinceReveal / .2f) * FMath::Min(1.f, (Feel.MomLineSeconds - SinceReveal) / .3f);
+		DrawMomBubble(MatchState, W * .5f, H * .68f, 560 * S, 150 * S, Alpha);
+	}
 	const bool ShowError = !MatchState.bTravelPending && !MatchState.LobbyReturnError.IsEmpty();
 	PaperPanel(FLinearColor::White, X, 24 * S, 600 * S, (ShowError ? 150 : 100) * S);
 	const auto* ResultPlayer = GetOwningPlayerController()->GetPlayerState<ATBPlayerState>();
@@ -349,6 +403,35 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 	const FString Status = MatchState.bTravelPending ? TEXT("ロビーに移動しています") :
 	    FString::Printf(TEXT("あと%d秒でみんなでロビーへ"), Seconds);
 	DrawText(Status, TBPaper::Ink, X + 24 * S, 85 * S, PaperFont, S);
+	auto* PC = Cast<ATBController>(GetOwningPlayerController());
+	if (MatchState.Phase != ETBPhase::Results || !PC) return;
+	const float Y = 132 * S;
+	const auto* Mine = PC->GetPawn<ATBCharacter>();
+	if (Mine && Mine->IsCelebrating())
+	{
+		// 勝った人は自分のキャラを映しているので、エモートを促す。
+		const FString HairKey = ResultPlayer && ResultPlayer->Team == ETBTeam::Human
+		    ? FString::Printf(TEXT("・%s"), *TB::KeyLabel(PC, TB::Keys::EmoteHairDisappear)) : FString();
+		PaperPanel(FLinearColor::White, X, Y, 600 * S, 76 * S);
+		DrawText(MatchState.Winner == ETBWinner::Humans ? TEXT("お片付け完了！ エモートでよろこぼう！") : TEXT("エモートでよろこぼう！"),
+		         TBPaper::Ink, X + 24 * S, Y + 10 * S, PaperFont, S);
+		DrawText(FString::Printf(TEXT("エモート %s・%s・%s・%s%s"), *TB::KeyLabel(PC, TB::Keys::EmoteWave), *TB::KeyLabel(PC, TB::Keys::EmoteCheer),
+		                         *TB::KeyLabel(PC, TB::Keys::EmoteDance), *TB::KeyLabel(PC, TB::Keys::EmoteSurprise), *HairKey),
+		         TBPaper::Muted, X + 24 * S, Y + 42 * S, PaperFont, .8f * S);
+		return;
+	}
+	// 観戦中は、映している勝者の名前と、切り替えられるときだけ切り替えのキーを出す。
+	const auto* Watched = PC->GetResultViewCharacter();
+	if (!Watched) return;
+	const bool bTeamWon = ResultPlayer && ((ResultPlayer->Team == ETBTeam::Toy && MatchState.Winner == ETBWinner::Toys) ||
+	                                       (ResultPlayer->Team == ETBTeam::Human && MatchState.Winner == ETBWinner::Humans));
+	const int32 Count = PC->ResultViewCandidates().Num();
+	PaperPanel(FLinearColor::White, X, Y, 600 * S, (Count > 1 ? 76 : 48) * S);
+	DrawText(FString::Printf(TEXT("%s観戦中：%s"), bTeamWon ? TEXT("") : TEXT("あなたは負け　"), *Watched->TBPS()->GetPlayerName()),
+	         TBPaper::Ink, X + 24 * S, Y + 10 * S, PaperFont, S);
+	if (Count > 1)
+		DrawText(FString::Printf(TEXT("%s：次のプレイヤー"), *TB::KeyLabel(PC, TB::Keys::ResultsNext)), TBPaper::Muted, X + 24 * S, Y + 42 * S,
+		         PaperFont, .8f * S);
 }
 
 void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller)

@@ -66,7 +66,7 @@ bool FTBRegisteredSurviveGCTest::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Controller input"), ControllerInput) || !TestNotNull(TEXT("Pawn input"), PawnInput)) return false;
 
 	const auto* Settings = GetDefault<UTBInputSettings>();
-	for (const auto* Soft : {&Settings->CommonContext, &Settings->HumanContext, &Settings->ToyContext, &Settings->LobbyContext})
+	for (const auto* Soft : Settings->ContextSlots())
 	{
 		TestTrue(*FString::Printf(TEXT("%s is registered"), *Soft->GetAssetName()), User->IsMappingContextRegistered(Soft->LoadSynchronous()));
 	}

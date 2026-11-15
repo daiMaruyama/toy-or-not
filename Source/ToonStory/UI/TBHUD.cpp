@@ -140,6 +140,7 @@ void ATBHUD::DrawHUD()
 	if (State->Phase == ETBPhase::Results || State->Phase == ETBPhase::Aborted)
 	{
 		DrawResults(*State);
+		DrawResultCover(*State);
 	}
 	else
 	{
