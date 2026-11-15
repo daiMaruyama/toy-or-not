@@ -1501,7 +1501,7 @@ void ATBGameMode::PlaceResults()
 		const FRotator Facing = Spot.Rotator();
 		GetWorld()->FindTeleportSpot(Toy, Location, Facing);
 		Toy->SetActorLocationAndRotation(Location, Facing, false, nullptr, ETeleportType::TeleportPhysics);
-		if (AController* Owner = Toy->GetController()) Owner->SetControlRotation(Facing);
+		if (AController* Controller = Toy->GetController()) Controller->SetControlRotation(Facing);
 		Toy->GetCharacterMovement()->StopMovementImmediately();
 		Toy->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
 		Toy->ForceNetUpdate();
