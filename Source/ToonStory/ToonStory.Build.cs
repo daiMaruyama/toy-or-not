@@ -47,6 +47,10 @@ public class ToonStory : ModuleRules
 		PrivateDefinitions.Add("WITH_TB_STEAM=" + (bSteam ? "1" : "0"));
 		if (Target.ProjectFile != null)
 		{
+			string UILocalization = System.IO.Path.Combine(Target.ProjectFile.Directory.FullName, "Content", "Localization", "UI");
+			if (System.IO.Directory.Exists(UILocalization))
+				foreach (string File in System.IO.Directory.GetFiles(UILocalization, "*.csv"))
+					RuntimeDependencies.Add(File, StagedFileType.NonUFS);
 			foreach (string Relative in new[] { "UI/PaperClub/Fonts", "ThirdPartyNotices/PaperClub" })
 			{
 				string Directory = System.IO.Path.Combine(Target.ProjectFile.Directory.FullName, "Content", Relative);

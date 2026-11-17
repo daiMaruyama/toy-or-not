@@ -2,6 +2,7 @@
 
 #include "TBHUD.h"
 #include "TBPaperStyle.h"
+#include "TBUIText.h"
 #include "Core/TBLobbySettings.h"
 #include "Core/TBChat.h"
 #include "Core/TBPlayerState.h"
@@ -16,56 +17,159 @@
 #include "GamePlay/TBBox.h"
 #include "GamePlay/Events/TBMomArrivalZone.h"
 #include "GamePlay/TBBoxEscapeCourse.h"
+#include "GamePlay/TBRuleMath.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Canvas.h"
+#include "CanvasItem.h"
+#include "GlobalRenderResources.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
+#include "Misc/PackageName.h"
 
 static TAutoConsoleVariable<int32> CVarTBDebugHUD(TEXT("tb.DebugHUD"), 0, TEXT("Show detailed match diagnostics."));
 
+void ATBHUD::BeginStageDraft()
+{
+	if (const auto* State = TB::GS(GetWorld()))
+	{
+		StageDraft = State->Settings;
+		LastDraftNPCCounts = StageDraft.NPCHumans + StageDraft.NPCToys > 0
+		    ? FIntPoint(StageDraft.NPCHumans, StageDraft.NPCToys) : FIntPoint(0, 1);
+		DraftStage = State->SelectedStage;
+		DraftPlayerCount = StageDraft.Humans + StageDraft.Toys;
+		StageDraftNotice = NAME_None;
+		NormalizeStageDraft();
+	}
+}
+
+void ATBHUD::NormalizeStageDraft()
+{
+	const auto* State = TB::GS(GetWorld());
+	if (!State) return;
+	int32 Count = 0, HumanPreferences = 0, ToyPreferences = 0;
+	for (const APlayerState* Player : State->PlayerArray)
+	{
+		const auto* Info = Cast<ATBPlayerState>(Player);
+		if (!Info || Info->IsABot()) continue;
+		++Count;
+		HumanPreferences += Info->Preference == ETBTeam::Human ? 1 : 0;
+		ToyPreferences += Info->Preference == ETBTeam::Toy ? 1 : 0;
+	}
+	if (DraftPlayerCount != Count) StageDraftNotice = TEXT("Stage.RosterChanged");
+	DraftPlayerCount = Count;
+	StageDraft.NPCHumans = FMath::Clamp(StageDraft.NPCHumans, 0, FMath::Max(0, State->PlayerLimit - Count));
+	StageDraft.NPCToys = FMath::Clamp(StageDraft.NPCToys, 0,
+	    FMath::Max(0, State->PlayerLimit - Count - StageDraft.NPCHumans));
+	const FTBSettings Defaults;
+	StageDraft.Humans = TBRuleMath::AutoHumanPlayers(Count, HumanPreferences, ToyPreferences,
+	    StageDraft.NPCHumans, StageDraft.NPCToys, Defaults.Humans, Defaults.Toys);
+	StageDraft.Toys = Count - StageDraft.Humans;
+	StageDraft.Duration = FMath::Clamp(StageDraft.Duration, TB::Rules().Match.MinDuration, TB::Rules().Match.MaxDuration);
+	StageDraft.RequiredItems = FMath::Clamp(StageDraft.RequiredItems, 1, TBLobbySettings::StageItemCount(DraftStage));
+}
+
 bool ATBHUD::HandleLobbyPanelClick(FName Name)
 {
-	if (Name == TEXT("OpenSettings"))
+	if (Name == TEXT("OpenSettings") || Name == TEXT("ChangeStage"))
 	{
+		const auto* State = TB::GS(GetWorld());
+		if (!State || State->Phase != ETBPhase::Lobby || State->bTravelPending) return true;
+		if (!bStagePickerOpen) BeginStageDraft();
 		bLobbySettingsOpen = true;
-		bStagePickerOpen = false;
+		bStagePickerOpen = true;
 		return true;
 	}
-	if (Name == TEXT("CloseSettings"))
+	if (Name == TEXT("CloseSettings") || Name == TEXT("CancelStage"))
 	{
 		bLobbySettingsOpen = false;
 		bStagePickerOpen = false;
+		DraftStage = INDEX_NONE;
+		StageDraftNotice = NAME_None;
 		return true;
 	}
 	if (Name == TEXT("Ready") || Name == TEXT("Start"))
 	{
-		return false;
+		return bStagePickerOpen;
 	}
 	if (!bLobbySettingsOpen)
 	{
 		return true;
 	}
-	if (Name == TEXT("ChangeStage"))
+	if (Name == TEXT("Child") || Name == TEXT("Toy") || Name == TEXT("Either"))
 	{
-		bStagePickerOpen = true;
-		return true;
-	}
-	if (Name == TEXT("CancelStage"))
-	{
-		bStagePickerOpen = false;
+		if (auto* PC = Cast<ATBController>(GetOwningPlayerController()))
+			PC->TBPrefer(Name == TEXT("Child") ? 1 : Name == TEXT("Toy") ? 2 : 0);
 		return true;
 	}
 	const int32 Stage = Name == TEXT("StageExpanded") ? TBLobbySettings::DemoStageId
 	                    : Name == TEXT("StagePlayroom") ? TBLobbySettings::HouseStageId
 	                                                    : INDEX_NONE;
-	if (bStagePickerOpen && Stage != INDEX_NONE)
+	if (bStagePickerOpen)
 	{
-		if (auto* PC = Cast<ATBController>(GetOwningPlayerController()))
+		auto* PC = Cast<ATBController>(GetOwningPlayerController());
+		auto* State = TB::GS(GetWorld());
+		if (!PC || !PC->HasAuthority() || !PC->IsLocalController() || !State ||
+		    State->Phase != ETBPhase::Lobby || State->bTravelPending) return true;
+		NormalizeStageDraft();
+		const auto& Match = TB::Rules().Match;
+		if (Name == TEXT("SaveStage"))
 		{
-			PC->ServerSelectStage(Stage);
+			if (!FPackageName::DoesPackageExist(TBLobbySettings::StagePath(DraftStage)))
+			{
+				StageDraftNotice = TEXT("Stage.SaveFailed");
+				return true;
+			}
+			PC->ServerSelectStage(DraftStage);
+			if (State->SelectedStage != DraftStage)
+			{
+				StageDraftNotice = TEXT("Stage.SaveFailed");
+				return true;
+			}
+			StageDraft.RequiredItems = FMath::Clamp(StageDraft.RequiredItems, 1,
+			    FMath::Max(1, TBLobbySettings::AvailableItems(GetWorld())));
+			PC->ServerRules(StageDraft);
+			bLobbySettingsOpen = false;
+			bStagePickerOpen = false;
+			DraftStage = INDEX_NONE;
+			StageDraftNotice = NAME_None;
+			return true;
 		}
-		bStagePickerOpen = false;
+		if (Stage != INDEX_NONE) DraftStage = Stage;
+		else if (Name == TEXT("DraftNextStage"))
+			DraftStage = DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::DemoStageId : TBLobbySettings::HouseStageId;
+		else if (Name == TEXT("DraftLessTime")) StageDraft.Duration -= Match.DurationStep;
+		else if (Name == TEXT("DraftMoreTime")) StageDraft.Duration += Match.DurationStep;
+		else if (Name == TEXT("DraftFewerItems")) --StageDraft.RequiredItems;
+		else if (Name == TEXT("DraftMoreItems")) ++StageDraft.RequiredItems;
+		else if (Name == TEXT("ToggleDraftNPCs"))
+		{
+			if (StageDraft.NPCHumans + StageDraft.NPCToys > 0)
+			{
+				LastDraftNPCCounts = FIntPoint(StageDraft.NPCHumans, StageDraft.NPCToys);
+				StageDraft.NPCHumans = StageDraft.NPCToys = 0;
+			}
+			else
+			{
+				StageDraft.NPCHumans = LastDraftNPCCounts.X;
+				StageDraft.NPCToys = LastDraftNPCCounts.Y;
+			}
+		}
+		else if (Name == TEXT("DraftMoreNPCHumans") || Name == TEXT("DraftFewerNPCHumans") ||
+		         Name == TEXT("DraftMoreNPCToys") || Name == TEXT("DraftFewerNPCToys"))
+		{
+			if (StageDraft.NPCHumans + StageDraft.NPCToys <= 0) return true;
+			if ((Name == TEXT("DraftMoreNPCHumans") || Name == TEXT("DraftMoreNPCToys")) &&
+			    DraftPlayerCount + StageDraft.NPCHumans + StageDraft.NPCToys >= State->PlayerLimit) return true;
+			LastDraftNPCCounts = FIntPoint(StageDraft.NPCHumans, StageDraft.NPCToys);
+			if (Name == TEXT("DraftMoreNPCHumans")) ++StageDraft.NPCHumans;
+			else if (Name == TEXT("DraftFewerNPCHumans")) --StageDraft.NPCHumans;
+			else if (Name == TEXT("DraftMoreNPCToys")) ++StageDraft.NPCToys;
+			else --StageDraft.NPCToys;
+		}
+		NormalizeStageDraft();
+		if (StageDraft.NPCHumans + StageDraft.NPCToys > 0)
+			LastDraftNPCCounts = FIntPoint(StageDraft.NPCHumans, StageDraft.NPCToys);
 		return true;
 	}
 	return bStagePickerOpen || Stage != INDEX_NONE || Name == TEXT("StageDemo");
@@ -128,7 +232,7 @@ void ATBHUD::DrawLobby()
 			}
 		}
 		FString Line;
-		const FString Message = PC->Notice.Replace(TEXT("\r"), TEXT(""));
+		const FString Message = TBText::TranslateNotice(PC->Notice).Replace(TEXT("\r"), TEXT(""));
 		for (int32 Index = 0; Index < Message.Len(); ++Index)
 		{
 			const TCHAR Character = Message[Index] == TEXT('\t') ? TEXT(' ') : Message[Index];
@@ -151,28 +255,14 @@ void ATBHUD::DrawLobby()
 		for (int32 Index = 0; Index < Lines.Num(); ++Index)
 			Text(Lines[Index], 42, PY + 8.f + 10.f * FontScale + Index * LineHeight, FontScale, Ink);
 	};
-	auto Button =
-	    [&](FName Id, const FString& Label, float PX, float PY, float W, bool Enabled = true, bool Selected = false, float Height = 42)
+	auto Button = [&](FName Id, const FString& Label, float PX, float PY, float W,
+	                  bool Enabled = true, bool Selected = false, float Height = 42)
 	{
-		float MX = 0, MY = 0;
-		const bool Hovered = PC->GetMousePosition(MX, MY) && MX >= X + PX * S && MX < X + (PX + W) * S &&
-		                     MY >= Y + PY * S && MY < Y + (PY + Height) * S;
-		const FLinearColor Fill = Selected ? TBPaper::Cream : Enabled && Hovered ? TBPaper::Cream : FLinearColor::White;
-		const float Age = GetWorld()->GetTimeSeconds() - LastButtonClickTime;
-		const float Lift = Enabled ? (Id == LastClickedButton && Age >= 0 && Age < .25f
-		    ? 7.f * (1.f - Age / .25f) : Hovered ? 3.f : 0.f) : 0.f;
-		Panel(PX + 2, PY + 4, W, Height, FLinearColor(0, 0, 0, .18f));
-		Panel(PX, PY - Lift, W, Height, Fill);
-		Panel(PX, PY + Height - 2 - Lift, W, 2, Selected ? Accent : FLinearColor(.20f, .31f, .32f, .8f));
-		float TextWidth = 0, TextHeight = 0;
-		GetTextSize(Label, TextWidth, TextHeight, PaperFont, 1.05f);
-		Text(Label, PX + 14, PY + 5 - Lift, FMath::Min(1.05f, 1.05f * (W - 28) / FMath::Max(TextWidth, 1.f)),
-		     Enabled ? Ink : Muted);
-		if (Enabled)
-		{
-			AddHitBox(FVector2D(X + PX * S, Y + PY * S), FVector2D(W * S, Height * S), Id, true);
-		}
+		DrawButton(Id, Label, X + PX * S, Y + PY * S, W * S, Height * S, Enabled, Selected,
+		    Id == TEXT("Leave") || Id.ToString().StartsWith(TEXT("Kick_")));
 	};
+	auto Art = [&](FName Name, float PX, float PY, float W, float H)
+	{ DrawArt(Name, X + PX * S, Y + PY * S, W * S, H * S); };
 	const auto* Local = PC->GetPlayerState<ATBPlayerState>();
 	int32 ReadyCount = 0, PlayerCount = 0;
 	for (APlayerState* Player : State->PlayerArray)
@@ -191,131 +281,141 @@ void ATBHUD::DrawLobby()
 	if (!bLobbySettingsOpen)
 	{
 		const float Bottom = (Canvas->ClipY - Y) / S - 84;
-		Panel(28, Bottom - 40, 1144, 100, TBPaper::Cream);
-		Text(!EnoughPlayers ? TEXT("にんげんとおもちゃの両方が必要です。設定で陣営かNPCを変更してください。")
-		     : !EveryoneReady ? TEXT("全員の準備ができたら、はじめよう。")
-		     : State->bTravelPending ? TEXT("ステージへ移動中…") : TEXT("準備がそろいました！"),
+		FramePanel(X + 28 * S, Y + (Bottom - 42) * S, 1144 * S, 110 * S);
+		Art(TEXT("Tape_Cream"), 52, Bottom - 53, 104, 22);
+		Art(TEXT("Icon_Check"), 1130, Bottom - 32, 24, 24);
+		Text(!EnoughPlayers ? TBText::Literal(TEXT("Canvas.NeedsTeams"))
+		     : !EveryoneReady ? TBText::Literal(TEXT("Canvas.WaitReady"))
+		     : State->bTravelPending ? TBText::Literal(TEXT("Canvas.TravelStage")) : TBText::Literal(TEXT("Canvas.EveryoneReady")),
 		     48, Bottom - 30, .9f, Ink);
 		const FString ReadyKey = TB::KeyLabel(PC, TB::Keys::LobbyReady);
 		const FString StartKey = TB::KeyLabel(PC, TB::Keys::LobbyStart);
 		Button(TEXT("Ready"),
-		       Local && Local->bReady ? FString::Printf(TEXT("準備をやめる [%s]"), *ReadyKey) : FString::Printf(TEXT("準備OK [%s]"), *ReadyKey),
+		       Local && Local->bReady ? FString::Format(TBText::Literal(TEXT("Canvas.UnreadyKey")), {*ReadyKey}) : FString::Format(TBText::Literal(TEXT("Canvas.ReadyKey")), {*ReadyKey}),
 		       48, Bottom, 240, Local != nullptr && !State->bTravelPending, Local && Local->bReady);
-		Text(FString::Printf(TEXT("%d / %d人 準備OK"), ReadyCount, PlayerCount), 308, Bottom + 8, 1.05f, Ink);
-		Button(TEXT("OpenSettings"), TEXT("設定 [Esc]"), 622, Bottom, 216);
+		Text(FString::Format(TBText::Literal(TEXT("Canvas.ReadyCount")), {ReadyCount, PlayerCount}), 308, Bottom + 2, 1.05f, Ink);
+		DrawProgress(float(ReadyCount) / FMath::Max(1, PlayerCount), X + 308 * S, Y + (Bottom + 30) * S, 220 * S, 8 * S, TBPaper::Teal);
+		Button(TEXT("OpenSettings"), TBText::Literal(TEXT("Canvas.SettingsKey")), 622, Bottom, 216);
 		Button(TEXT("Start"),
-		       PC->HasAuthority() ? FString::Printf(TEXT("あそびはじめる [%s]"), *StartKey) : FString(TEXT("ホストを待っています")),
+		       PC->HasAuthority() ? FString::Format(TBText::Literal(TEXT("Canvas.StartKey")), {*StartKey}) : FString(TBText::Literal(TEXT("Canvas.WaitHost"))),
 		       858, Bottom, 294, CanStart, CanStart);
 		DrawNotice(Bottom - 166, 1144, 110);
-		const auto* LobbyCharacter = PC->GetPawn<ATBCharacter>();
-		const FString HairHint = LobbyCharacter && LobbyCharacter->SupportsEmoteKind(ETBEmoteKind::HairDisappear)
-		    ? FString::Printf(TEXT("・%s"), *TB::KeyLabel(PC, TB::Keys::EmoteHairDisappear)) : FString();
-		Text(FString::Printf(TEXT("移動キーで歩く / エモート %s・%s・%s・%s%s / Escで設定"),
-		    *TB::KeyLabel(PC, TB::Keys::EmoteWave), *TB::KeyLabel(PC, TB::Keys::EmoteCheer),
-		    *TB::KeyLabel(PC, TB::Keys::EmoteDance), *TB::KeyLabel(PC, TB::Keys::EmoteSurprise), *HairHint), 48, Bottom - 76, .8f, Ink);
 		return;
 	}
-	DrawRect(FLinearColor(.009f, .018f, .027f, .48f), 0, 0, Canvas->ClipX, Canvas->ClipY);
+	DrawRect(FLinearColor(.025f, .019f, .015f, .64f), 0, 0, Canvas->ClipX, Canvas->ClipY);
 	if (bStagePickerOpen)
 	{
-		Panel(280, 150, 640, 470, FLinearColor::White);
-		Text(TEXT("ステージを選ぶ"), 312, 194, 1.6f, Accent);
-		Text(TEXT("試合開始時に、選んだステージへ移動します。"), 312, 241, .95f, Muted);
-		const int32 Current = State->SelectedStage;
-		Button(TEXT("StagePlayroom"), TEXT("Stylized House"), 312, 284, 576, PC->HasAuthority(), Current == 3);
-		Text(TEXT("家具のおうち"), 328, 330, .85f, Muted);
-		Button(TEXT("StageExpanded"), TEXT("Demo ＋ こども部屋"), 312, 352, 576, PC->HasAuthority(), Current == 1);
-		Text(TEXT("リビングと子ども部屋"), 328, 398, .85f, Muted);
-		Button(TEXT("CancelStage"), TEXT("設定にもどる"), 654, 557, 234);
-		DrawNotice(640, 1144, 100);
+		// Guests view the host's current selection instead of retaining an editable snapshot.
+		if (DraftStage == INDEX_NONE || !PC->HasAuthority()) BeginStageDraft();
+		NormalizeStageDraft();
+		const bool Host = PC->HasAuthority() && PC->IsLocalController() && !State->bTravelPending;
+		const bool House = DraftStage == TBLobbySettings::HouseStageId;
+		const int32 NPCCount = StageDraft.NPCHumans + StageDraft.NPCToys;
+		const bool CanAddNPC = DraftPlayerCount + NPCCount < State->PlayerLimit;
+		auto Number = [&](const TCHAR* Key, int32 Value)
+		{ return FText::Format(TBText::Get(Key), FText::AsNumber(Value)).ToString(); };
+		auto Label = [&](const TCHAR* Key, float PX, float PY, float Width, float Size = 1.f)
+		{ DrawFittedText(TBText::String(Key), Ink, X + PX * S, Y + PY * S, Width * S, Size * S, true); };
+		auto Stepper = [&](FName Less, FName More, const FString& Value, float PX, float PY, float Width,
+		                   bool CanLess, bool CanMore, FLinearColor Color = TBPaper::Muted)
+		{
+			RoundedPanel(TBPaper::Paper, X + PX * S, Y + PY * S, Width * S, 38 * S, 7, 2, Color);
+			Button(Less, TEXT("−"), PX, PY, 34, Host && CanLess, false, 38);
+			Button(More, TEXT("+"), PX + Width - 34, PY, 34, Host && CanMore, false, 38);
+			DrawFittedText(Value, Ink, X + (PX + 38) * S, Y + (PY + 11) * S,
+			    (Width - 76) * S, .95f * S, false, true);
+		};
+		PaperSign(TBPaper::Gold, X + 28 * S, Y, 1144 * S, 104 * S);
+		Art(TEXT("TitleLogo"), 46, 4, 180, 90);
+		DrawFittedText(TBText::String(TEXT("Stage.Title")), Ink,
+		    X + 248 * S, Y + 32 * S, 510 * S, 1.5f * S, true);
+		DrawFittedText(TBText::String(TEXT("Stage.HostOnly")), Ink,
+		    X + 250 * S, Y + 74 * S, 510 * S, .78f * S);
+		Button(TEXT("Players"), TBText::String(TEXT("Canvas.PlayersLine1")), 778, 32, 114);
+		Button(TEXT("OpenOptions"), TBText::String(TEXT("Stage.Options")), 906, 32, 114);
+		Button(TEXT("Leave"), TBText::String(TEXT("Stage.Leave")), 1034, 32, 122);
+		FramePanel(X + 28 * S, Y + 130 * S, 486 * S, 455 * S);
+		PaperSign(TBPaper::Gold, X + 43 * S, Y + 140 * S, 456 * S, 54 * S);
+		Art(TEXT("Icon_Settings"), 49, 151, 40, 40);
+		Label(TEXT("Canvas.RulesTitle"), 102, 166, 388, 1.28f);
+		DrawFittedText(TBText::String(TEXT("Stage.DraftHint")), Muted, X + 102 * S, Y + 204 * S, 388 * S, .76f * S);
+		for (const float LineY : {224.f, 292.f, 366.f, 438.f})
+			DrawRect(Muted.CopyWithNewOpacity(.35f), X + 48 * S, Y + LineY * S, 446 * S, 2 * S);
+		Art(TEXT("Icon_Stage"), 51, 237, 34, 34);
+		Label(TEXT("Stage.Stage"), 100, 247, 150);
+		Button(TEXT("DraftNextStage"), TBText::String(House ? TEXT("Stage.House") : TEXT("Stage.Demo")) + TEXT("  ›"),
+		    262, 231, 230, Host, false, 42);
+		Art(TEXT("Icon_Hourglass"), 54, 313, 28, 34);
+		Label(TEXT("Stage.Time"), 100, 323, 150);
+		const int32 Seconds = FMath::RoundToInt(StageDraft.Duration);
+		Stepper(TEXT("DraftLessTime"), TEXT("DraftMoreTime"),
+		    Number(Seconds % 60 == 0 ? TEXT("Stage.Minutes") : TEXT("Stage.Seconds"), Seconds % 60 == 0 ? Seconds / 60 : Seconds),
+		    278, 306, 202, StageDraft.Duration > TB::Rules().Match.MinDuration, StageDraft.Duration < TB::Rules().Match.MaxDuration);
+		Art(TEXT("Icon_BatteryPickup"), 54, 383, 28, 36);
+		Label(TEXT("Stage.Batteries"), 100, 393, 160);
+		Stepper(TEXT("DraftFewerItems"), TEXT("DraftMoreItems"), Number(TEXT("Stage.Items"), StageDraft.RequiredItems),
+		    278, 378, 202, StageDraft.RequiredItems > 1, StageDraft.RequiredItems < TBLobbySettings::StageItemCount(DraftStage));
+		Art(TEXT("Icon_Npc"), 51, 454, 34, 34);
+		Label(TEXT("Stage.NPCs"), 100, 466, 160);
+		const bool NPCEnabled = NPCCount > 0;
+		const bool CanToggleNPC = Host && (NPCEnabled || CanAddNPC);
+		DrawFittedText(Number(TEXT("Stage.Count"), NPCCount), Muted,
+		    X + 270 * S, Y + 464 * S, 80 * S, .84f * S, false, true);
+		const float ToggleX = X + 366 * S, ToggleY = Y + 450 * S;
+		RoundedPanel(NPCEnabled ? TBPaper::Teal : TBPaper::Lavender, ToggleX, ToggleY, 114 * S, 38 * S, 19, 2);
+		RoundedPanel(CanToggleNPC ? TBPaper::Gold : TBPaper::Cream,
+		    ToggleX + (NPCEnabled ? 78 : 6) * S, ToggleY + 4 * S, 30 * S, 30 * S, 15, 2);
+		DrawFittedText(TBText::String(NPCEnabled ? TEXT("Options.On") : TEXT("Options.Off")), Ink,
+		    ToggleX + (NPCEnabled ? 8 : 42) * S, ToggleY + 12 * S, 62 * S, .83f * S, true, true);
+		if (CanToggleNPC) AddHitBox({ToggleX, ToggleY}, {114 * S, 38 * S}, TEXT("ToggleDraftNPCs"), true);
+		if (NPCEnabled)
+		{
+			DrawFittedText(TBText::String(TEXT("Stage.Human")), TBPaper::HumanBlue, X + 66 * S, Y + 496 * S, 172 * S, .76f * S, false, true);
+			DrawFittedText(TBText::String(TEXT("Stage.Toy")), Accent, X + 302 * S, Y + 496 * S, 172 * S, .76f * S, false, true);
+			Stepper(TEXT("DraftFewerNPCHumans"), TEXT("DraftMoreNPCHumans"), FString::FromInt(StageDraft.NPCHumans),
+			    66, 515, 172, StageDraft.NPCHumans > 0, CanAddNPC, TBPaper::HumanBlue);
+			Stepper(TEXT("DraftFewerNPCToys"), TEXT("DraftMoreNPCToys"), FString::FromInt(StageDraft.NPCToys),
+			    302, 515, 172, StageDraft.NPCToys > 0, CanAddNPC, Accent);
+		}
+		else
+		{
+			DrawFittedText(TBText::String(CanAddNPC ? TEXT("Stage.NPCDisabledHint") : TEXT("Stage.NPCFullHint")), Muted,
+			    X + 66 * S, Y + 523 * S, 408 * S, .84f * S);
+		}
+		FramePanel(X + 538 * S, Y + 130 * S, 634 * S, 455 * S);
+		PaperSign(TBPaper::Teal, X + 553 * S, Y + 138 * S, 604 * S, 40 * S);
+		Label(TEXT("Stage.Preview"), 574, 157, 560, .95f);
+		PaperPanel(TBPaper::Outline, X + 554 * S, Y + 184 * S, 602 * S, 348 * S);
+		DrawArt(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo"),
+		    X + 561 * S, Y + 191 * S, 588 * S, 334 * S);
+		DrawFittedText(TBText::String(House ? TEXT("Stage.HouseDescription") : TEXT("Stage.DemoDescription")),
+		    Ink, X + 562 * S, Y + 552 * S, 586 * S, .95f * S);
+		FramePanel(X + 28 * S, Y + 601 * S, 1144 * S, 78 * S);
+		Label(TEXT("Canvas.ChooseTeam"), 48, 622, 440, 1.02f);
+		Label(TEXT("Stage.RandomHint"), 48, 655, 440, .72f);
+		Button(TEXT("Child"), TBText::String(TEXT("Canvas.Human")), 510, 620, 202,
+		    !State->bTravelPending, Local && Local->Preference == ETBTeam::Human, 40);
+		Button(TEXT("Toy"), TBText::String(TEXT("Canvas.Toy")), 728, 620, 202,
+		    !State->bTravelPending, Local && Local->Preference == ETBTeam::Toy, 40);
+		Button(TEXT("Either"), TBText::String(TEXT("Canvas.Either")), 946, 620, 210,
+		    !State->bTravelPending, Local && Local->Preference == ETBTeam::None, 40);
+		float MX = 0, MY = 0;
+		PC->GetMousePosition(MX, MY);
+		auto Action = [&](FName Id, const TCHAR* Key, float PX, float Width, FLinearColor Color, bool Enabled)
+		{
+			const float AX = X + PX * S, AY = Y + 694 * S;
+			const bool Hovered = Enabled && MX >= AX && MX < AX + Width * S && MY >= AY && MY < AY + 48 * S;
+			PaperSign(Enabled ? Color : TBPaper::Lavender, AX, AY - (Hovered ? 3 * S : 0), Width * S, 48 * S);
+			DrawFittedText(TBText::String(Key), Ink, AX + 16 * S, AY + 14 * S, (Width - 32) * S, 1.15f * S, true, true);
+			if (Enabled) AddHitBox(FVector2D(AX, AY), FVector2D(Width * S, 48 * S), Id, true);
+		};
+		Action(TEXT("CancelStage"), TEXT("Stage.Cancel"), 554, 254, TBPaper::Teal, true);
+		Action(TEXT("SaveStage"), TEXT("Stage.Save"), 862, 310, TBPaper::Gold, Host);
+		if (!StageDraftNotice.IsNone())
+			DrawFittedText(TBText::String(*StageDraftNotice.ToString()), TBPaper::Paper, X + 48 * S, Y + 713 * S, 466 * S, .85f * S);
 		return;
 	}
-	Text(TEXT("TOON STORY"), 28, 22, 2.3f, TBPaper::Cream);
-	Text(TEXT("おもちゃたちの、ひみつの時間。"), 30, 70, 1.0f, TBPaper::Cream);
-	Button(TEXT("CloseSettings"), TEXT("設定を閉じる"), 946, 34, 226);
-	Panel(28, 106, 1144, 2, Accent);
-	Panel(28, 130, 690, 360, FLinearColor::White);
-	Text(TEXT("いっしょにあそぶ仲間"), 48, 146, 1.25f, Accent);
-	int32 Ready = 0, Row = 0;
-	for (APlayerState* Player : State->PlayerArray)
-	{
-		const auto* P = Cast<ATBPlayerState>(Player);
-		if (!P || P->IsABot())
-		{
-			continue;
-		}
-		Ready += P->bReady ? 1 : 0;
-		const FString PreferredRole = P->Preference == ETBTeam::Human ? TEXT("にんげん")
-		                              : P->Preference == ETBTeam::Toy ? TEXT("おもちゃ")
-		                                                              : TEXT("どちらでも");
-		const float PY = 182 + Row++ * 21;
-		Panel(40, PY - 4, 666, 20, FLinearColor(.10f, .15f, .18f, Row % 2 ? .42f : .18f));
-		Panel(48, PY + 4, 4, 12, P->bReady ? Accent : Muted);
-		Text(TB::Chat::DisplayName(P), 62, PY - 5, .8f, Ink);
-		Text(PreferredRole, 320, PY - 5, .8f, Muted);
-		Text(P->bReady ? TEXT("準備OK") : TEXT("準備中"), 455, PY - 5, .8f, P->bReady ? Accent : Muted);
-		if (PC->HasAuthority() && P != Local)
-		{
-			Button(FName(*FString::Printf(TEXT("Kick_%d"), P->GetPlayerId())), TEXT("キック"),
-			       610, PY - 4, 88, !State->bTravelPending, false, 20);
-		}
-	}
-	const bool CanEditNPC = PC->HasAuthority() && !State->bTravelPending;
-	const int32 NPCCount = State->Settings.NPCHumans + State->Settings.NPCToys;
-	const bool CanAddNPC = State->Settings.Humans + State->Settings.Toys + NPCCount < State->PlayerLimit;
-	Text(FString::Printf(TEXT("NPC（0人で参加なし・参加者と合わせて%d人まで）"), State->PlayerLimit), 48, 356, .85f, Muted);
-	Text(FString::Printf(TEXT("にんげんNPC  %d人"), State->Settings.NPCHumans), 48, 390, .95f, Ink);
-	Button(TEXT("FewerNPCHumans"), TEXT("-"), 250, 382, 50, CanEditNPC && State->Settings.NPCHumans > 0, false, 36);
-	Button(TEXT("MoreNPCHumans"), TEXT("+"), 308, 382, 50, CanEditNPC && CanAddNPC, false, 36);
-	Text(FString::Printf(TEXT("おもちゃNPC  %d体"), State->Settings.NPCToys), 380, 390, .95f, Ink);
-	Button(TEXT("FewerNPCToys"), TEXT("-"), 580, 382, 50, CanEditNPC && State->Settings.NPCToys > 0, false, 36);
-	Button(TEXT("MoreNPCToys"), TEXT("+"), 638, 382, 50, CanEditNPC && CanAddNPC, false, 36);
-	Text(TEXT("NPCは自動で準備完了になります。"), 48, 430, .8f, Muted);
-	Panel(738, 130, 434, 360, FLinearColor::White);
-	Text(TEXT("今回のあそび"), 758, 146, 1.25f, Accent);
-	const bool Host = PC->HasAuthority();
-	Button(TEXT("ChangeStage"), State->StageName + TEXT("  ／ 選択"), 758, 180, 392, Host);
-	// 刻みはマスターデータで変えられるので、分で割り切れないときは秒も出す。
-	const int32 Seconds = FMath::RoundToInt(State->Settings.Duration);
-	const FString Limit = Seconds % 60 == 0 ? FString::Printf(TEXT("制限時間  %d分"), Seconds / 60)
-	                                        : FString::Printf(TEXT("制限時間  %d分%d秒"), Seconds / 60, Seconds % 60);
-	Text(Limit, 758, 245, 1.1f, Ink);
-	const auto& Match = TB::Rules().Match;
-	Button(TEXT("LessTime"), TEXT("-"), 1032, 235, 52, Host && State->Settings.Duration > Match.MinDuration);
-	Button(TEXT("MoreTime"), TEXT("+"), 1098, 235, 52, Host && State->Settings.Duration < Match.MaxDuration);
-	Text(FString::Printf(TEXT("集める電池  %d個"), State->Settings.RequiredItems), 758, 301, 1.1f, Ink);
-	Button(TEXT("FewerBatteries"), TEXT("-"), 1032, 291, 52, Host && State->Settings.RequiredItems > 1);
-	Button(TEXT("MoreBatteries"), TEXT("+"), 1098, 291, 52,
-	       Host && State->Settings.RequiredItems < TBLobbySettings::AvailableItems(GetWorld()));
-	Button(TEXT("FewerToys"), TEXT("- おもちゃ"), 758, 350, 184, Host && State->Settings.Toys > (State->Settings.NPCToys > 0 ? 0 : 1));
-	Button(TEXT("MoreToys"), TEXT("+ おもちゃ"), 956, 350, 194,
-	       Host && State->Settings.Humans > (State->Settings.NPCHumans > 0 ? 0 : 1));
-	Text(FString::Printf(TEXT("参加者：にんげん %d人 ／ おもちゃ %d体"), State->Settings.Humans, State->Settings.Toys), 758,
-	     405, .95f, Ink);
-	Text(FString::Printf(TEXT("%d / %d人 準備OK"), Ready, State->Settings.Humans + State->Settings.Toys), 758, 430,
-	     1.25f, Accent);
-	Text(TEXT("どちらであそぶ？"), 28, 514, 1.f, TBPaper::Cream);
-	Button(TEXT("Child"), TEXT("にんげん"), 28, 542, 190, true, Local && Local->Preference == ETBTeam::Human);
-	Button(TEXT("Toy"), TEXT("おもちゃ"), 230, 542, 190, true, Local && Local->Preference == ETBTeam::Toy);
-	Button(TEXT("Either"), TEXT("どちらでも"), 432, 542, 180, true, Local && Local->Preference == ETBTeam::None);
-	const FString ReadyKey = TB::KeyLabel(PC, TB::Keys::LobbyReady);
-	const FString StartKey = TB::KeyLabel(PC, TB::Keys::LobbyStart);
-	Button(TEXT("Ready"),
-	       Local && Local->bReady ? FString::Printf(TEXT("準備をやめる [%s]"), *ReadyKey) : FString::Printf(TEXT("準備OK [%s]"), *ReadyKey),
-	       632, 542, 240, Local != nullptr, Local && Local->bReady);
-	Button(TEXT("Start"), Host ? FString::Printf(TEXT("あそびはじめる [%s]"), *StartKey) : FString(TEXT("ホストを待っています")),
-	       890, 542, 282, CanStart, CanStart);
-	if (!EveryoneReady || !EnoughPlayers)
-	{
-		Text(!EnoughPlayers
-		         ? TEXT("両陣営をそろえてください。NPCとも遊べます。")
-		         : TEXT("全員の準備ができたら、はじめよう。"),
-		     48, 456, .85f, Muted);
-	}
-	Button(TEXT("OpenOptions"), TEXT("オプション"), 700, 600, 200);
-	Button(TEXT("Leave"), Host ? TEXT("部屋を閉じてタイトルへ") : TEXT("部屋を出てタイトルへ"), 922, 600, 250);
-	DrawNotice(592, 650, 120, true);
-	Text(TEXT("おもちゃ：電池を集めて仲間を救助 ／ にんげん：おもちゃを見つけて箱へ"), 28, 722, .9f, TBPaper::Cream);
+
 }
 
 // ママのひと言。おもちゃが勝ったら散らかった部屋を叱り、人間が勝ったら片付けをほめる。絵は共通。
@@ -323,8 +423,8 @@ void ATBHUD::DrawMomBubble(const ATBGameState& MatchState, float CenterX, float 
 {
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
 	const bool bToys = MatchState.Winner == ETBWinner::Toys;
-	const FString Lead = bToys ? TEXT("もう！") : TEXT("あら、");
-	const FString Line = bToys ? TEXT("ちゃんと片付けなさい！") : TEXT("きれいに片付いたじゃない");
+	const FString Lead = bToys ? TBText::Literal(TEXT("Canvas.MomAngryLead")) : TBText::Literal(TEXT("Canvas.MomHappyLead"));
+	const FString Line = bToys ? TBText::Literal(TEXT("Canvas.MomAngry")) : TBText::Literal(TEXT("Canvas.MomHappy"));
 	auto Fade = [Alpha](FLinearColor Color) { Color.A *= Alpha; return Color; };
 	PaperPanel(Fade(TBPaper::Cream), CenterX - Width * .5f, CenterY - Height * .5f, Width, Height);
 	float LeadW = 0, LeadH = 0, LineW = 0, LineH = 0;
@@ -336,7 +436,7 @@ void ATBHUD::DrawMomBubble(const ATBGameState& MatchState, float CenterX, float 
 	// 吹き出しの左上に、誰のひと言かを出す。
 	const float TagX = CenterX - FMath::Min(Width * .5f - 16 * S, LineW * .5f + 40 * S);
 	PaperPanel(Fade(TBPaper::Accent), TagX, Top - 44 * S, 76 * S, 36 * S);
-	DrawText(TEXT("ママ"), Fade(TBPaper::Cream), TagX + 16 * S, Top - 38 * S, PaperFont, .95f * S);
+	DrawText(TBText::Literal(TEXT("Canvas.Mom")), Fade(TBPaper::Cream), TagX + 16 * S, Top - 38 * S, PaperFont, .95f * S);
 }
 
 // 吹き出しが広がって画面を覆い、覆いきったら薄れて結果の画面が出る。結果の画面より手前に描く。
@@ -361,7 +461,7 @@ void ATBHUD::DrawResultCover(const ATBGameState& MatchState)
 void ATBHUD::DrawResults(const ATBGameState& MatchState)
 {
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	const float X = Canvas->ClipX * .5f - 300 * S;
+	const float X = Canvas->ClipX * .5f - 340 * S;
 	const auto& Feel = TB::PresentationData().Result;
 	const auto* Viewer = Cast<ATBController>(GetOwningPlayerController());
 	const float Elapsed = Viewer ? Viewer->ResultPresentationElapsed(MatchState) : float(MatchState.ResultElapsed());
@@ -376,48 +476,51 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 		DrawMomBubble(MatchState, W * .5f, H * .68f, 560 * S, 150 * S, Alpha);
 	}
 	const bool ShowError = !MatchState.bTravelPending && !MatchState.LobbyReturnError.IsEmpty();
-	PaperPanel(FLinearColor::White, X, 24 * S, 600 * S, (ShowError ? 150 : 100) * S);
+	PaperSign(TBPaper::Gold, X, 24 * S, 680 * S, (ShowError ? 196 : 126) * S);
+	DrawArt(TEXT("Tape_Cream"), X + 296 * S, 13 * S, 88 * S, 30 * S);
+	DrawArt(TEXT("Icon_Crown"), X + 24 * S, 45 * S, 62 * S, 62 * S);
+	DrawFittedText(MatchState.Phase == ETBPhase::Aborted ? TBText::Literal(TEXT("Canvas.Again")) : TBText::Literal(TEXT("Canvas.Results")),
+	    TBPaper::Ink, X + 104 * S, 46 * S, 550 * S, .78f * S);
 	const auto* ResultPlayer = GetOwningPlayerController()->GetPlayerState<ATBPlayerState>();
-	const FString Title = MatchState.Phase == ETBPhase::Aborted ? TEXT("あそびはおしまい") :
+	const FString Title = MatchState.Phase == ETBPhase::Aborted ? TBText::Literal(TEXT("Canvas.GameOver")) :
 	    MatchState.bVehicleEscapeResult && ResultPlayer && ResultPlayer->Team == ETBTeam::Toy ?
-	        (MatchState.EscapedInVehicle(ResultPlayer) ? TEXT("脱出成功！") : TEXT("脱出できなかった")) :
-	    MatchState.Winner == ETBWinner::Toys ? TEXT("おもちゃの勝ち！") : TEXT("にんげんの勝ち！");
-	DrawText(Title, TBPaper::Accent, X + 24 * S, 36 * S, PaperFont, 1.8f * S);
+	        (MatchState.EscapedInVehicle(ResultPlayer) ? TBText::Literal(TEXT("Canvas.Escaped")) : TBText::Literal(TEXT("Canvas.NotEscaped"))) :
+	    MatchState.Winner == ETBWinner::Toys ? TBText::Literal(TEXT("Canvas.ToysWin")) : TBText::Literal(TEXT("Canvas.HumansWin"));
+	DrawFittedText(Title, MatchState.Winner == ETBWinner::Humans ? TBPaper::HumanBlue : TBPaper::Accent,
+	    X + 104 * S, 65 * S, 548 * S, 1.8f * S, true);
 	const int32 Seconds = FMath::CeilToInt(FMath::Max(0., MatchState.EndTime - MatchState.GetServerWorldTimeSeconds()));
 	if (ShowError)
 	{
-		DrawText(MatchState.LobbyReturnError, TBPaper::Ink, X + 24 * S, 85 * S, PaperFont, S);
+		DrawFittedText(TBText::TranslateNotice(MatchState.LobbyReturnError), TBPaper::Danger, X + 24 * S, 112 * S, 632 * S, .9f * S);
 		if (MatchState.IsLobbyReturnStopped() && GetOwningPlayerController()->HasAuthority())
 		{
-			PaperPanel(TBPaper::Cream, X + 24 * S, 117 * S, 280 * S, 44 * S);
-			DrawText(TEXT("ロビー復帰を再試行"), TBPaper::Ink, X + 38 * S, 125 * S, PaperFont, S);
-			AddHitBox(FVector2D(X + 24 * S, 117 * S), FVector2D(280 * S, 44 * S), TEXT("RetryLobbyReturn"), true);
+			DrawButton(TEXT("RetryLobbyReturn"), TBText::Literal(TEXT("Canvas.RetryLobby")), X + 24 * S, 155 * S, 632 * S, 44 * S);
 		}
 		else
 		{
-			const FString Status = MatchState.IsLobbyReturnStopped() ? TEXT("ホストの再試行を待っています") :
-			    FString::Printf(TEXT("あと%d秒で再試行します"), Seconds);
-			DrawText(Status, TBPaper::Ink, X + 24 * S, 125 * S, PaperFont, S);
+			const FString Status = MatchState.IsLobbyReturnStopped() ? TBText::Literal(TEXT("Canvas.WaitHostRetry")) :
+			    FString::Format(TBText::Literal(TEXT("Canvas.RetrySeconds")), {Seconds});
+			DrawFittedText(Status, TBPaper::Muted, X + 24 * S, 163 * S, 632 * S, S);
 		}
 		return;
 	}
-	const FString Status = MatchState.bTravelPending ? TEXT("ロビーに移動しています") :
-	    FString::Printf(TEXT("あと%d秒でみんなでロビーへ"), Seconds);
-	DrawText(Status, TBPaper::Ink, X + 24 * S, 85 * S, PaperFont, S);
+	const FString Status = MatchState.bTravelPending ? TBText::Literal(TEXT("Canvas.TravelLobby")) :
+	    FString::Format(TBText::Literal(TEXT("Canvas.LobbySeconds")), {Seconds});
+	DrawFittedText(Status, TBPaper::Muted, X + 104 * S, 116 * S, 548 * S, .9f * S);
 	auto* PC = Cast<ATBController>(GetOwningPlayerController());
 	if (MatchState.Phase != ETBPhase::Results || !PC) return;
-	const float Y = 132 * S;
+	const float Y = 168 * S;
 	const auto* Mine = PC->GetPawn<ATBCharacter>();
 	if (Mine && Mine->IsCelebrating())
 	{
 		// 勝った人は自分のキャラを映しているので、エモートを促す。
 		const FString HairKey = ResultPlayer && ResultPlayer->Team == ETBTeam::Human
-		    ? FString::Printf(TEXT("・%s"), *TB::KeyLabel(PC, TB::Keys::EmoteHairDisappear)) : FString();
-		PaperPanel(FLinearColor::White, X, Y, 600 * S, 76 * S);
-		DrawText(MatchState.Winner == ETBWinner::Humans ? TEXT("お片付け完了！ エモートでよろこぼう！") : TEXT("エモートでよろこぼう！"),
+		    ? FString::Format(TBText::Literal(TEXT("Canvas.EmoteExtra")), {*TB::KeyLabel(PC, TB::Keys::EmoteHairDisappear)}) : FString();
+		PaperPanel(TBPaper::Cream, X, Y, 680 * S, 78 * S);
+		DrawText(MatchState.Winner == ETBWinner::Humans ? TBText::Literal(TEXT("Canvas.TidiedCelebrate")) : TBText::Literal(TEXT("Canvas.Celebrate")),
 		         TBPaper::Ink, X + 24 * S, Y + 10 * S, PaperFont, S);
-		DrawText(FString::Printf(TEXT("エモート %s・%s・%s・%s%s"), *TB::KeyLabel(PC, TB::Keys::EmoteWave), *TB::KeyLabel(PC, TB::Keys::EmoteCheer),
-		                         *TB::KeyLabel(PC, TB::Keys::EmoteDance), *TB::KeyLabel(PC, TB::Keys::EmoteSurprise), *HairKey),
+		DrawText(FString::Format(TBText::Literal(TEXT("Canvas.EmoteKeys")), {*TB::KeyLabel(PC, TB::Keys::EmoteWave), *TB::KeyLabel(PC, TB::Keys::EmoteCheer),
+		                         *TB::KeyLabel(PC, TB::Keys::EmoteDance), *TB::KeyLabel(PC, TB::Keys::EmoteSurprise), *HairKey}),
 		         TBPaper::Muted, X + 24 * S, Y + 42 * S, PaperFont, .8f * S);
 		return;
 	}
@@ -427,11 +530,11 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 	const bool bTeamWon = ResultPlayer && ((ResultPlayer->Team == ETBTeam::Toy && MatchState.Winner == ETBWinner::Toys) ||
 	                                       (ResultPlayer->Team == ETBTeam::Human && MatchState.Winner == ETBWinner::Humans));
 	const int32 Count = PC->ResultViewCandidates().Num();
-	PaperPanel(FLinearColor::White, X, Y, 600 * S, (Count > 1 ? 76 : 48) * S);
-	DrawText(FString::Printf(TEXT("%s観戦中：%s"), bTeamWon ? TEXT("") : TEXT("あなたは負け　"), *Watched->TBPS()->GetPlayerName()),
-	         TBPaper::Ink, X + 24 * S, Y + 10 * S, PaperFont, S);
+	PaperPanel(TBPaper::Cream, X, Y, 680 * S, (Count > 1 ? 78 : 48) * S);
+	DrawFittedText(FString::Format(TBText::Literal(TEXT("Canvas.Spectating")), {bTeamWon ? TEXT("") : TBText::Literal(TEXT("Canvas.NextTime")), *Watched->TBPS()->GetPlayerName()}),
+	         TBPaper::Ink, X + 24 * S, Y + 13 * S, 632 * S, S);
 	if (Count > 1)
-		DrawText(FString::Printf(TEXT("%s：次のプレイヤー"), *TB::KeyLabel(PC, TB::Keys::ResultsNext)), TBPaper::Muted, X + 24 * S, Y + 42 * S,
+		DrawText(FString::Format(TBText::Literal(TEXT("Canvas.NextPlayer")), {*TB::KeyLabel(PC, TB::Keys::ResultsNext)}), TBPaper::Muted, X + 24 * S, Y + 42 * S,
 		         PaperFont, .8f * S);
 }
 
@@ -440,52 +543,58 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	const auto* State = &MatchState;
 	auto* PC = &Controller;
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	// Keep the playfield open; menus retain their own full-size layout.
+	const float HUDScale = .8f * S;
 	const float W = Canvas->ClipX, H = Canvas->ClipY;
-	const FLinearColor Ink = TBPaper::Ink, Accent = TBPaper::Accent, Panel = FLinearColor::White;
+	const FLinearColor Ink = TBPaper::Ink, Accent = TBPaper::Accent, Panel = TBPaper::Paper;
 	const auto* Player = Controller.GetPlayerState<ATBPlayerState>();
-	if (MatchState.bEscapePhase && !Controller.ShouldHidePreparationView())
-		DrawText(Player && Player->Team == ETBTeam::Human ? TEXT("電池が集まった！脱出を阻止しよう！") :
-		    TEXT("電池が集まった！車で出口へ脱出しよう！"), TBPaper::Accent, 300 * S, 110 * S, PaperFont, 1.2f * S);
 	if (Controller.ShouldHidePreparationView())
 	{
 		if (!Controller.IsShowingEntranceApproach()) DrawRect(FLinearColor::Black, 0, 0, W, H);
 		const FString Wait = Player && Player->Team == ETBTeam::Human && MatchState.HidePreparation.bValid && MatchState.HidePreparation.bHiding
-		    ? FString::Printf(TEXT("にんげん：おもちゃが隠れるまで待とう　あと%d秒"), FMath::CeilToInt(MatchState.HideRemaining()))
-		    : TEXT("あそぶ準備をしています…");
+		    ? FString::Format(TBText::Literal(TEXT("Canvas.WaitHide")), {FMath::CeilToInt(MatchState.HideRemaining())})
+		    : TBText::Literal(TEXT("Canvas.Preparing"));
 		if (Controller.IsShowingEntranceApproach())
 		{
 			PaperPanel(Panel, W * .5f - 300 * S, H - 130 * S, 600 * S, 75 * S);
-			DrawText(FString::Printf(TEXT("にんげん：片付けへ　あと%d秒"), FMath::CeilToInt(MatchState.HideRemaining())),
+			DrawText(FString::Format(TBText::Literal(TEXT("Canvas.EntranceSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}),
 			         Ink, W * .5f - 265 * S, H - 100 * S, PaperFont, 1.2f * S);
 		}
 		else DrawText(Wait, TBPaper::Cream, W * .5f - 220 * S, H * .5f, PaperFont, 1.3f * S);
 		return;
 	}
 	DrawGazeEffects(Controller);
+	float BannerY = 128 * S;
+	auto Banner = [&](const FString& Label, FLinearColor Color)
+	{
+		PaperSign(TBPaper::Cream, W * .5f - 290 * S, BannerY, 580 * S, 42 * S);
+		DrawFittedText(Label, Color == TBPaper::Teal ? TBPaper::Ink : Color, W * .5f - 270 * S,
+		    BannerY + 16 * S, 540 * S, 1.05f * S, true, true);
+		BannerY += 52 * S;
+	};
+	if (MatchState.bEscapePhase)
+		Banner(Player && Player->Team == ETBTeam::Human ? TBText::Literal(TEXT("Canvas.StopEscape")) :
+		    TBText::Literal(TEXT("Canvas.EscapeNow")), TBPaper::Teal);
 	if (MatchState.IsPreparing())
-		DrawText(FString::Printf(TEXT("隠れよう！ あと%d秒"), FMath::CeilToInt(MatchState.HideRemaining())),
-		         TBPaper::Accent, W * .5f - 145 * S, 115 * S, PaperFont, 1.3f * S);
+		Banner(FString::Format(TBText::Literal(TEXT("Canvas.HideSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}), TBPaper::Accent);
 	const bool Child = Player && Player->Team == ETBTeam::Human;
 	if (const auto* Mom = ATBMomArrivalZone::FindActive(GetWorld()); Mom && !MatchState.IsPreparing())
 	{
 		const auto& Event = Mom->State;
-		const FLinearColor Warning(1.f,.03f,.025f,1.f);
-		PaperPanel(Panel,W*.5f-290*S,112*S,580*S,(Child ? 82 : 48)*S);
-		DrawText(FString::Printf(TEXT("ママが来るまで%d秒！！"),FMath::CeilToInt(Event.Remaining)),
-		         Warning,W*.5f-265*S,122*S,PaperFont,1.5f*S);
+		const FLinearColor Warning = TBPaper::Danger;
+		Banner(FString::Format(TBText::Literal(TEXT("Canvas.MomSeconds")), {FMath::CeilToInt(Event.Remaining)}), Warning);
 		if (Child)
 		{
-			DrawText(TEXT("指定位置に向かいママを説得しよう！"),Warning,W*.5f-265*S,157*S,PaperFont,1.1f*S);
+			Banner(TBText::Literal(TEXT("Canvas.PersuadeMom")), Warning);
 			if (Event.bOccupied)
 			{
 				// 箱にしまう際と同じパネル・ゲージ寸法を使う。
-				PaperPanel(Panel,W*.5f-235*S,H*.64f,470*S,64*S);
-				DrawText(FString::Printf(TEXT("説得中… %.1f / %.1f秒"),Event.Held,Event.RequiredHold),
-				         Ink,W*.5f-220*S,H*.64f+9*S,PaperFont,S);
-				DrawRect(FLinearColor(.1f,.14f,.16f,1),W*.5f-220*S,H*.64f+37*S,440*S,7*S);
-				DrawRect(Accent,W*.5f-220*S,H*.64f+37*S,440*S*FMath::Clamp(Event.Held/FMath::Max(.1f,Event.RequiredHold),0.f,1.f),7*S);
-				DrawText(TEXT("到着カウント停止中 ／ 全員が範囲を出ると説得をやり直します"),
-				         Ink,W*.5f-220*S,H*.64f+49*S,PaperFont,.7f*S);
+				FramePanel(W*.5f-235*S,H*.60f,470*S,100*S);
+				DrawText(FString::Format(TBText::Literal(TEXT("Canvas.Persuading")), {FString::Printf(TEXT("%.1f"), Event.Held), FString::Printf(TEXT("%.1f"), Event.RequiredHold)}),
+				         Ink,W*.5f-220*S,H*.60f+19*S,PaperFont,S);
+				DrawProgress(Event.Held/FMath::Max(.1f,Event.RequiredHold), W*.5f-220*S, H*.60f+40*S, 440*S, 40*S, TBPaper::Gold);
+				DrawText(TBText::Literal(TEXT("Canvas.PersuadePause")),
+				         Ink,W*.5f-220*S,H*.60f+86*S,PaperFont,.7f*S);
 			}
 		}
 	}
@@ -493,75 +602,83 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	{
 		if (const auto* Course = ATBBoxEscapeCourse::Find(GetWorld(), MatchState.Box))
 		{
-			DrawText(TEXT("箱の高いところへ登って脱出しよう"),
-			         Accent, 24 * S, H * .65f, PaperFont, 1.1f * S);
+			DrawText(TBText::Literal(TEXT("Canvas.ClimbEscape")),
+			         Accent, 330 * S, H * .65f, PaperFont, 1.1f * S);
 		}
 	}
-	PaperPanel(Panel, 24 * S, 24 * S, 310 * S, 77 * S);
-	DrawText(Child ? TEXT("にんげん") : TEXT("おもちゃ"), Accent, 40 * S, 35 * S, PaperFont, 1.4f * S);
-	const TCHAR* Objective = Child ? TEXT("おもちゃを見つけて、箱へ。") : TEXT("電池を集めて、仲間を救助。");
+	const FLinearColor TeamColor = Child ? TBPaper::HumanBlue : Accent;
+	PaperSign(TBPaper::Cream, 24 * HUDScale, 44 * HUDScale, 394 * HUDScale, 80 * HUDScale);
+	PaperSign(TBPaper::Gold, 78 * HUDScale, 25 * HUDScale, 126 * HUDScale, 41 * HUDScale);
+	DrawFittedText(TBText::String(TEXT("Canvas.Goal")), Ink, 87 * HUDScale, 39 * HUDScale, 108 * HUDScale, 1.08f * HUDScale, true, true);
+	// The flag illustration has no text; crop away the baked goal label.
+	if (const auto* Flag = ArtTextures.Find(Child ? TEXT("Goal_Human") : TEXT("Goal_Toy")); Flag && *Flag)
+		DrawTexture(Flag->Get(), 15 * HUDScale, 22 * HUDScale, 68 * HUDScale, 108 * HUDScale, 0, 0, .19f, 1);
+	DrawFittedText(Child ? TBText::Literal(TEXT("Canvas.Human")) : TBText::Literal(TEXT("Canvas.Toy")), TeamColor,
+	    256 * HUDScale, 65 * HUDScale, 141 * HUDScale, .75f * HUDScale, true, true);
+	const TCHAR* Objective = Child ? TBText::Literal(TEXT("Canvas.HumanObjective")) : TBText::Literal(TEXT("Canvas.ToyObjective"));
 	if (MatchState.IsPreparing() && Player && Player->Team == ETBTeam::Toy)
-		Objective = TEXT("物かげに隠れよう。電池は開始後！");
+		Objective = TBText::Literal(TEXT("Canvas.HideObjective"));
 	FTBEmoteSample Emote;
 	if (const auto* EmoteCharacter = Controller.GetPawn<ATBCharacter>(); EmoteCharacter && EmoteCharacter->GetEmoteSample(Emote))
-		Objective = Emote.Kind == ETBEmoteKind::Wave ? TEXT("手ふり中。移動するとやめます。") :
-		    Emote.Kind == ETBEmoteKind::Cheer ? TEXT("よろこび中。移動するとやめます。") :
-		    Emote.Kind == ETBEmoteKind::HairDisappear ? TEXT("髪かくし中。移動するとやめます。") :
-		    Emote.Kind == ETBEmoteKind::Surprise ? TEXT("びっくり中。移動するとやめます。") : TEXT("ダンス中。移動するとやめます。");
+		Objective = Emote.Kind == ETBEmoteKind::Wave ? TBText::Literal(TEXT("Canvas.Waving")) :
+		    Emote.Kind == ETBEmoteKind::Cheer ? TBText::Literal(TEXT("Canvas.Cheering")) :
+		    Emote.Kind == ETBEmoteKind::HairDisappear ? TBText::Literal(TEXT("Canvas.HidingHair")) :
+		    Emote.Kind == ETBEmoteKind::Surprise ? TBText::Literal(TEXT("Canvas.Surprised")) : TBText::Literal(TEXT("Canvas.Dancing"));
 	if (Player && Player->Team == ETBTeam::Toy)
 	{
 		switch (Player->ToyState)
 		{
 			case ETBToyState::Grabbed:
-				Objective = TEXT("捕まった！ 持ち上げられています。");
+				Objective = TBText::Literal(TEXT("Canvas.Caught"));
 				break;
 			case ETBToyState::Carried:
-				Objective = TEXT("運ばれています。今は動けません。");
+				Objective = TBText::Literal(TEXT("Canvas.Carried"));
 				break;
 			case ETBToyState::Storing:
-				Objective = TEXT("箱にしまわれています…");
+				Objective = TBText::Literal(TEXT("Canvas.Storing"));
 				break;
 			case ETBToyState::Boxed:
 				Objective = ATBBoxEscapeCourse::Find(GetWorld(), MatchState.Box)
-				    ? TEXT("上へ登って脱出。仲間の救助も！") : TEXT("箱のなか。仲間の救助を待とう。");
+				    ? TBText::Literal(TEXT("Canvas.BoxClimb")) : TBText::Literal(TEXT("Canvas.BoxWait"));
 				break;
 			case ETBToyState::Free:
 				break;
 		}
 	}
-	float ObjectiveWidth = 0, ObjectiveHeight = 0;
-	GetTextSize(Objective, ObjectiveWidth, ObjectiveHeight, PaperFont, 1.f);
-	DrawText(Objective, Ink, 40 * S, 67 * S, PaperFont,
-	         FMath::Min(.95f, 278.f / FMath::Max(ObjectiveWidth, 1.f)) * S);
+	DrawFittedText(Objective, Ink, 85 * HUDScale, 88 * HUDScale, 307 * HUDScale, 1.05f * HUDScale, true, true);
 	const int32 Seconds = FMath::Max(0, FMath::CeilToInt(MatchState.Remaining()));
-	PaperPanel(Panel, W * .5f - 64 * S, 24 * S, 128 * S, 56 * S);
-	DrawText(FString::Printf(TEXT("%02d:%02d"), Seconds / 60, Seconds % 60), Seconds < 60 ? Accent : Ink,
-	         W * .5f - 42 * S, 36 * S, PaperFont, 2.f * S);
-	PaperPanel(Panel, W - 286 * S, 24 * S, 262 * S, 77 * S);
-	DrawText(FString::Printf(TEXT("電池  %d / %d"), MatchState.Collected, MatchState.Settings.RequiredItems), Ink,
-	         W - 270 * S, 36 * S, PaperFont, 1.35f * S);
-	DrawText(FString::Printf(TEXT("箱のなか  %d / %d"), MatchState.BoxedCount, MatchState.Settings.Toys + MatchState.Settings.NPCToys), Accent,
-	         W - 270 * S, 68 * S, PaperFont, .95f * S);
-	PaperPanel(Panel, 24 * S, H - 62 * S, (Child ? 900 : 700) * S, 38 * S);
-	DrawText(TB::MatchHintText(PC, Child), Ink, 40 * S, H - 51 * S, PaperFont, .95f * S);
+	PaperSign(TBPaper::Gold, W * .5f - 110 * HUDScale, 28 * HUDScale, 220 * HUDScale, 80 * HUDScale);
+	DrawArt(TEXT("Icon_Hourglass"), W * .5f - 90 * HUDScale, 41 * HUDScale, 42 * HUDScale, 54 * HUDScale);
+	const FString Clock = FString::Printf(TEXT("%02d:%02d"), Seconds / 60, Seconds % 60);
+	DrawText(Clock, Seconds < 60 ? TBPaper::Danger : Ink, W * .5f - 34 * HUDScale, 57 * HUDScale, NumericFont, 2.7f * HUDScale);
+	FramePanel(W - 264 * HUDScale, 24 * HUDScale, 240 * HUDScale, 174 * HUDScale);
+	DrawArt(TEXT("Icon_BatteryPickup"), W - 242 * HUDScale, 39 * HUDScale, 54 * HUDScale, 60 * HUDScale);
+	DrawText(FString::Printf(TEXT("%d/%d"), MatchState.Collected, MatchState.Settings.RequiredItems), Ink,
+	    W - 160 * HUDScale, 58 * HUDScale, NumericFont, 2.5f * HUDScale);
+	DrawRect(TBPaper::Teal, W - 246 * HUDScale, 107 * HUDScale, 204 * HUDScale, 3 * HUDScale);
+	DrawArt(MatchState.BoxedCount > 0 ? TEXT("Icon_ToyBoxFull") : TEXT("Icon_ToyBoxEmpty"),
+	    W - 245 * HUDScale, 121 * HUDScale, 64 * HUDScale, 55 * HUDScale);
+	DrawText(FString::Printf(TEXT("%d/%d"), MatchState.BoxedCount, MatchState.Settings.Toys + MatchState.Settings.NPCToys),
+	    Ink, W - 160 * HUDScale, 141 * HUDScale, NumericFont, 2.5f * HUDScale);
 	if (Player && Player->bFrozen)
 	{
 		// 赤で怖がらせず、紙の札で知らせる。止まった間の色はセピアの画面が伝える。
 		PaperPanel(TBPaper::Cream, W * .5f - 165 * S, H * .7f, 330 * S, 44 * S);
-		DrawText(TEXT("見られている！ 動けない…"), Ink, W * .5f - 146 * S, H * .7f + 12 * S, PaperFont, 1.15f * S);
+		DrawText(TBText::Literal(TEXT("Canvas.Frozen")), Ink, W * .5f - 146 * S, H * .7f + 12 * S, PaperFont, 1.15f * S);
 	}
 	if (auto* Character = Cast<ATBCharacter>(Controller.GetPawn()); Character && Character->ContactItem)
 	{
-		PaperPanel(Panel, W * .5f - 150 * S, H * .78f, 300 * S, 38 * S);
-		DrawRect(Accent, W * .5f - 150 * S, H * .78f + 34 * S,
-		         300 * S * FMath::Clamp(Character->ItemProgress, 0.f, 1.f), 4 * S);
-		DrawText(Character->IsGazeFrozen() ? TEXT("見られている間は集められません") : TEXT("電池を集めています…"), Ink,
-		         W * .5f - 130 * S, H * .78f + 10 * S, PaperFont, 1.f * S);
+		FramePanel(W * .5f - 164 * S, H * .76f, 328 * S, 76 * S);
+		DrawProgress(Character->ItemProgress, W * .5f - 146 * S, H * .76f + 40 * S, 292 * S, 27 * S, TBPaper::Gold);
+		DrawText(Character->IsGazeFrozen() ? TBText::Literal(TEXT("Canvas.CannotCollect")) : TBText::Literal(TEXT("Canvas.Collecting")), Ink,
+		         W * .5f - 146 * S, H * .76f + 18 * S, PaperFont, .95f * S);
 	}
 	if (Player && Player->Team == ETBTeam::Toy && MatchState.Box && MatchState.Box->Rescuers > 0)
 	{
-		DrawText(FString::Printf(TEXT("救助中  %.0f%%"), MatchState.Box->RescueProgress * 100), Accent,
-		         W * .5f - 70 * S, 108 * S, PaperFont, 1.2f * S);
+		PaperPanel(TBPaper::Paper, W * .5f - 150 * S, BannerY, 300 * S, 54 * S);
+		DrawFittedText(FString::Format(TBText::Literal(TEXT("Canvas.Rescuing")), {FMath::RoundToInt(MatchState.Box->RescueProgress * 100)}), Ink,
+		    W * .5f - 134 * S, BannerY + 14 * S, 268 * S, 1.05f * S, false, true);
+		DrawProgress(MatchState.Box->RescueProgress, W * .5f - 130 * S, BannerY + 38 * S, 260 * S, 7 * S, TBPaper::Teal);
 	}
 	if (auto* Character = Cast<ATBCharacter>(Controller.GetPawn());
 	    Child && Character && Character->HasCarriedToy() && MatchState.Box)
@@ -572,8 +689,7 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		if (Controller.ProjectWorldLocationToScreen(BoxLocation + FVector(0, 0, 90), BoxScreen) &&
 		    BoxScreen.X > 70 * S && BoxScreen.X < W - 70 * S && BoxScreen.Y > 150 * S && BoxScreen.Y < H * .7f)
 		{
-			DrawText(FString::Printf(TEXT("おもちゃ箱  %.1f m"),
-			                         FVector::Distance(Character->GetActorLocation(), BoxLocation) / 100.f),
+			DrawText(FString::Format(TBText::Literal(TEXT("Canvas.BoxDistance")), {FString::Printf(TEXT("%.1f"), FVector::Distance(Character->GetActorLocation(), BoxLocation) / 100.f)}),
 			         Accent, BoxScreen.X - 60 * S, BoxScreen.Y, PaperFont, 1.f * S);
 		}
 		const bool Storing = Character->StoreStarted >= 0;
@@ -584,23 +700,22 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		        : 0.f;
 		const FString InteractKey = TB::KeyLabel(PC, TB::Keys::HumanInteract);
 		const FString Prompt = Storing
-		                           ? FString::Printf(TEXT("%s 長押し  しまっています… %.1f / %.0f秒"), *InteractKey, Elapsed, Duration)
-		                           : (NearBox ? FString::Printf(TEXT("%sを%.0f秒長押しして箱にしまう"), *InteractKey, Duration)
-		                                      : TEXT("おもちゃを運搬中。箱の正面へ。"));
-		PaperPanel(Panel, W * .5f - 235 * S, H * .76f, 470 * S, 64 * S);
-		DrawText(Prompt, Ink, W * .5f - 220 * S, H * .76f + 9 * S, PaperFont, 1.f * S);
-		DrawRect(FLinearColor(.1f, .14f, .16f, 1), W * .5f - 220 * S, H * .76f + 37 * S, 440 * S, 7 * S);
-		DrawRect(Accent, W * .5f - 220 * S, H * .76f + 37 * S, 440 * S * Elapsed / Duration, 7 * S);
-		DrawText(FString::Printf(TEXT("%sを離すと中止 ／ %sでおろす"), *InteractKey, *TB::KeyLabel(PC, TB::Keys::HumanDrop)), Ink, W * .5f - 220 * S, H * .76f + 49 * S, PaperFont, .75f * S);
+		                           ? FString::Format(TBText::Literal(TEXT("Canvas.StoreHeld")), {*InteractKey, FString::Printf(TEXT("%.1f"), Elapsed), FMath::RoundToInt(Duration)})
+		                           : (NearBox ? FString::Format(TBText::Literal(TEXT("Canvas.StorePrompt")), {*InteractKey, FMath::RoundToInt(Duration)})
+		                                      : TBText::Literal(TEXT("Canvas.CarryPrompt")));
+		FramePanel(W * .5f - 235 * S, H * .73f, 470 * S, 100 * S);
+		DrawFittedText(Prompt, Ink, W * .5f - 214 * S, H * .73f + 19 * S, 428 * S, S, true, true);
+		DrawProgress(Elapsed / Duration, W * .5f - 220 * S, H * .73f + 40 * S, 440 * S, 40 * S, TBPaper::Gold);
+		DrawText(FString::Format(TBText::Literal(TEXT("Canvas.StoreCancel")), {*InteractKey, *TB::KeyLabel(PC, TB::Keys::HumanDrop)}), Ink, W * .5f - 220 * S, H * .73f + 86 * S, PaperFont, .75f * S);
 	}
 	if (Controller.bStuckHint)
 	{
-		DrawText(TEXT("動けない場合：Esc → スタック解除"), TBPaper::Accent, 24 * S, H * .65f, PaperFont, S);
+		DrawFittedText(TBText::Literal(TEXT("Canvas.StuckHelp")), TBPaper::Accent, 330 * S, H * .65f, W - 360 * S, S);
 	}
 	if (!Controller.Notice.IsEmpty())
 	{
-		PaperPanel(FLinearColor::White, W - 450 * S, H - 155 * S, 426 * S, 70 * S);
-		DrawText(Controller.Notice.Left(80), TBPaper::Ink, W - 428 * S, H - 132 * S, PaperFont, .72f * S);
+		PaperPanel(TBPaper::Cream, W - 450 * S, H - 155 * S, 426 * S, 70 * S);
+		DrawFittedText(TBText::TranslateNotice(Controller.Notice).Left(80), TBPaper::Ink, W - 428 * S, H - 132 * S, 382 * S, .85f * S);
 	}
 	DrawRect(Ink, W * .5f - 3 * S, H * .5f - 1 * S, 6 * S, 2 * S);
 	DrawRect(Ink, W * .5f - 1 * S, H * .5f - 3 * S, 2 * S, 6 * S);
@@ -614,33 +729,344 @@ void ATBHUD::BeginPlay()
 {
 	Super::BeginPlay();
 	PaperFont = TBPaper::Font(this);
+	HeadingFont = TBPaper::Font(this, TBPaper::EFontRole::Heading);
+	NumericFont = TBPaper::Font(this, TBPaper::EFontRole::Numeric);
 	PaperTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/PaperClub/Panel.Panel"));
+	const TCHAR* Names[] = {TEXT("Icon_Stage"), TEXT("Icon_Settings"), TEXT("Icon_PlayerRatio"),
+	    TEXT("Icon_Npc"), TEXT("Icon_Hourglass"), TEXT("Icon_Crown"), TEXT("Icon_Check"),
+	    TEXT("Icon_Battery"), TEXT("Icon_BatteryPickup"), TEXT("Icon_ToyBoxEmpty"), TEXT("Icon_ToyBoxFull"),
+	    TEXT("Tape_Cream"), TEXT("Tag_Toy"), TEXT("Tag_Human"),
+	    TEXT("Tag_Any"), TEXT("Burst_Yellow"), TEXT("Burst_Teal"), TEXT("TitleLogo"),
+	    TEXT("PauseHeader"), TEXT("Underline_Coral"), TEXT("Card_Hanging"), TEXT("Tape_Brown"),
+	    TEXT("Card_HangingActive"), TEXT("Goal_Human"), TEXT("Goal_Toy"), TEXT("Progress_Yellow"), TEXT("Progress_Track"),
+	    TEXT("Button_Gear"), TEXT("Button_Leave"), TEXT("Mark_TriangleBrown"), TEXT("Label_You"),
+	    TEXT("Frame_Settings"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")};
+	for (const TCHAR* Name : Names)
+	{
+		const FString Asset = FString::Printf(TEXT("T_UI_%s"), Name);
+		if (auto* Texture = LoadObject<UTexture2D>(nullptr,
+		    *FString::Printf(TEXT("/Game/UI/Designer/Imported/%s.%s"), *Asset, *Asset)))
+			ArtTextures.Add(FName(Name), Texture);
+	}
 }
 
 void ATBHUD::DrawText(const FString& Text, FLinearColor Color, float X, float Y, UFont* Font, float Scale,
                       bool ScalePosition)
 {
-	// Zen Maru's ascender padding is larger than the old debug font's. Align the ink to the authored rows.
-	Super::DrawText(Text, Color, X, Y - 10.f * Scale, Font ? Font : PaperFont.Get(), Scale, ScalePosition);
+	if (!Canvas || Scale <= 0.f) return;
+	UFont* Face = Font ? Font : PaperFont.Get();
+	if (!Face) return;
+	if (ScalePosition) { X *= Scale; Y *= Scale; }
+	// Rasterize at the displayed size, instead of enlarging a cached 14pt glyph.
+	// Keep the authored baseline and dimensions used by the fitted-text layout.
+	const float Points = Face->LegacyFontSize * Scale;
+	const int32 RasterPoints = FMath::Max(1, FMath::RoundToInt(Points));
+	FCanvasTextItem Item(FVector2D(X, Y - 10.f * Scale), FText::FromString(Text),
+	    FSlateFontInfo(Face, RasterPoints), Color);
+	Item.Scale = FVector2D(Points / RasterPoints);
+	Canvas->DrawItem(Item);
+}
+
+void ATBHUD::DrawArt(FName Name, float X, float Y, float W, float H, FLinearColor Tint)
+{
+	const auto* Found = ArtTextures.Find(Name);
+	if (!Found || !*Found || W <= 0 || H <= 0) return;
+	UTexture2D* Texture = Found->Get();
+	const float Scale = FMath::Min(W / FMath::Max(1, Texture->GetSizeX()), H / FMath::Max(1, Texture->GetSizeY()));
+	const float AW = Texture->GetSizeX() * Scale, AH = Texture->GetSizeY() * Scale;
+	DrawTexture(Texture, X + (W - AW) * .5f, Y + (H - AH) * .5f, AW, AH, 0, 0, 1, 1, Tint);
+}
+
+void ATBHUD::DrawFittedText(const FString& Text, FLinearColor Color, float X, float Y, float Width,
+                           float Scale, bool Heading, bool Center)
+{
+	UFont* Font = Heading && HeadingFont ? HeadingFont.Get() : PaperFont.Get();
+	float TW = 0, TH = 0;
+	GetTextSize(Text, TW, TH, Font, Scale);
+	const float Fit = FMath::Min(1.f, Width / FMath::Max(1.f, TW));
+	DrawText(Text, Color, X + (Center ? (Width - TW * Fit) * .5f : 0.f), Y, Font, Scale * Fit);
+}
+
+void ATBHUD::DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
+                      bool Enabled, bool Selected, bool Destructive)
+{
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	float MX = 0, MY = 0;
+	const auto* PC = GetOwningPlayerController();
+	const bool Hovered = Enabled && PC && PC->GetMousePosition(MX, MY) &&
+	    MX >= X && MX < X + W && MY >= Y && MY < Y + H;
+	const double Age = GetWorld()->GetTimeSeconds() - LastButtonClickTime;
+	const float Lift = Enabled ? (Id == LastClickedButton && Age >= 0 && Age < .18
+	    ? -2.f : Hovered ? 2.f : 0.f) * S : 0.f;
+	const bool ReadyAction = Id == TEXT("Ready"), StartAction = Id == TEXT("Start");
+	FLinearColor Active = Destructive ? TBPaper::Danger : Id == TEXT("Child") ? TBPaper::HumanBlue :
+	    Id == TEXT("Toy") ? TBPaper::Accent : TBPaper::Teal;
+	if (ReadyAction || StartAction)
+	{
+		const FLinearColor ActionColor = !Enabled || (ReadyAction && Selected) ? FLinearColor::FromSRGBColor(FColor(105, 105, 105)) :
+		    ReadyAction ? TBPaper::ReadyGreen : TBPaper::StartOrange;
+		PaperSign(ActionColor, X, Y - Lift, W, H);
+		const bool ShowKey = Enabled && PC;
+		if (ShowKey)
+			DrawKeycap(TB::KeyLabel(PC, ReadyAction ? TB::Keys::LobbyReady : TB::Keys::LobbyStart),
+			    X + 12 * S, Y + 8 * S - Lift, 38 * S, H - 16 * S);
+		const FString ActionLabel = ReadyAction ? Selected ? TBText::Literal(TEXT("Canvas.Unready")) : TBText::Literal(TEXT("Canvas.Ready")) :
+		    Enabled ? TBText::Literal(TEXT("Canvas.Start")) : TBText::Literal(TEXT("Canvas.Waiting"));
+		DrawFittedText(ActionLabel, TBPaper::Paper, X + (ShowKey ? 62 : 12) * S,
+		    Y + H * .5f - 7 * S - Lift, W - (ShowKey ? 74 : 24) * S, 1.15f * S, true, true);
+	}
+	else
+	{
+		const bool Primary = Id == TEXT("ChangeStage") || Id == TEXT("OpenSettings") || Id == TEXT("RetryLobbyReturn") ||
+		    Id == TEXT("DraftNextStage");
+		const bool Secondary = Id == TEXT("CloseSettings") || Id == TEXT("OpenOptions");
+		const FLinearColor Fill = !Enabled ? TBPaper::Lavender : Selected ? Active :
+		    Hovered || Primary ? TBPaper::Gold : Secondary ? TBPaper::Teal : TBPaper::Cream;
+		if (W > 85 * S && H >= 30 * S) PaperSign(Fill, X, Y - Lift, W, H);
+		else PaperPanel(Fill, X, Y - Lift, W, H);
+		float TextScale = FMath::Min(1.05f, H / (40 * S)) * S;
+		if (H < 30 * S)
+		{
+			TextScale = FMath::Max(.75f * S, TextScale);
+		}
+		const bool Heading = H >= 30 * S;
+		float TW = 0, TH = 0;
+		GetTextSize(Label, TW, TH, Heading ? HeadingFont.Get() : PaperFont.Get(), TextScale);
+		const float Fit = FMath::Min(1.f, (W - 16 * S) / FMath::Max(1.f, TW));
+		const float TextY = Y + (H - TH * Fit) * .5f + 10 * TextScale * Fit - Lift;
+		const bool LightText = Selected && (Id == TEXT("Child") || Id == TEXT("Toy") || Destructive);
+		DrawFittedText(Label, !Enabled ? TBPaper::Muted : LightText ? TBPaper::Paper :
+		    Destructive ? TBPaper::Danger : TBPaper::Ink,
+		    X + 8 * S, TextY, W - 16 * S, TextScale, Heading, true);
+	}
+	if (Enabled) AddHitBox(FVector2D(X, Y), FVector2D(W, H), Id, true);
+}
+
+void ATBHUD::DrawProgress(float Value, float X, float Y, float W, float H, FLinearColor Color)
+{
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	if (H >= 18 * S)
+	{
+		const auto* Track = ArtTextures.Find(TEXT("Progress_Track"));
+		const auto* Gold = ArtTextures.Find(TEXT("Progress_Yellow"));
+		if (Track && *Track && Gold && *Gold)
+		{
+			const float Scale = FMath::Min(W / 293.f, H / 27.f);
+			const float PX = X + (W - 293 * Scale) * .5f, PY = Y + (H - 27 * Scale) * .5f;
+			DrawTexture(Track->Get(), PX, PY, 293 * Scale, 27 * Scale, 0, 0, 1, 1);
+			const float Fraction = FMath::Clamp(Value, 0.f, 1.f);
+			if (Fraction > 0.f)
+				DrawTexture(Gold->Get(), PX + 5 * Scale, PY + 5 * Scale, 283 * Scale * Fraction, 17 * Scale,
+				    0, 0, Fraction, 1);
+			return;
+		}
+	}
+	const float Inset = FMath::Min(2.f * S, H * .2f);
+	DrawRect(TBPaper::Outline, X, Y, W, H);
+	DrawRect(FLinearColor(.80f, .77f, .68f), X + Inset, Y + Inset, W - 2 * Inset, H - 2 * Inset);
+	const float Fill = FMath::Clamp(Value, 0.f, 1.f) * (W - 2 * Inset);
+	if (Fill > 0.f)
+	{
+		DrawRect(Color, X + Inset, Y + Inset, Fill, H - 2 * Inset);
+		DrawRect(FLinearColor(1, 1, 1, .24f), X + Inset, Y + Inset, Fill, (H - 2 * Inset) * .3f);
+	}
 }
 
 void ATBHUD::PaperPanel(FLinearColor Tint, float X, float Y, float W, float H)
 {
-	if (!PaperTexture)
+	if (W <= 0 || H <= 0) return;
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	auto Layer = [&](FLinearColor Color, float LX, float LY, float LW, float LH)
 	{
-		DrawRect(Tint, X, Y, W, H);
+		if (!PaperTexture)
+		{
+			DrawRect(Color, LX, LY, LW, LH);
+			return;
+		}
+		const float Edge = FMath::Min(16.f * S, FMath::Min(LW, LH) * .3f);
+		const float PX[] = {LX, LX + Edge, LX + LW - Edge, LX + LW};
+		const float PY[] = {LY, LY + Edge, LY + LH - Edge, LY + LH};
+		const float UV[] = {.04f, .25f, .70f, .93f};
+		for (int32 Row = 0; Row < 3; ++Row)
+			for (int32 Col = 0; Col < 3; ++Col)
+				DrawTexture(PaperTexture, PX[Col], PY[Row], PX[Col + 1] - PX[Col], PY[Row + 1] - PY[Row], UV[Col], UV[Row],
+				    UV[Col + 1] - UV[Col], UV[Row + 1] - UV[Row], Color);
+	};
+	FLinearColor Shadow = TBPaper::Shadow, Outline = TBPaper::Outline;
+	Shadow.A *= Tint.A;
+	Outline.A *= Tint.A;
+	Layer(Shadow, X + 2 * S, Y + 5 * S, W, H);
+	Layer(Outline, X, Y, W, H);
+	const float Border = FMath::Min(3.f * S, FMath::Min(W, H) * .08f);
+	Layer(Tint, X + Border, Y + Border, W - 2 * Border, H - 2 * Border);
+}
+
+void ATBHUD::FramePanel(float X, float Y, float W, float H)
+{
+	const auto* Frame = ArtTextures.Find(TEXT("Frame_Settings"));
+	if (!Frame || !*Frame)
+	{
+		PaperPanel(TBPaper::Cream, X, Y, W, H);
 		return;
 	}
-	const float Edge = FMath::Min(20.f * Canvas->ClipY / 800.f, FMath::Min(W, H) * .35f);
-	const float PX[] = {X, X + Edge, X + W - Edge, X + W};
-	const float PY[] = {Y, Y + Edge, Y + H - Edge, Y + H};
-	const float UV[] = {.04f, .25f, .70f, .93f};
-	for (int32 Row = 0; Row < 3; ++Row)
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	const float Edge = FMath::Min(24.f * S, FMath::Min(W, H) * .25f);
+	const float UV[] = {0.f, .25f, .75f, 1.f};
+	// Keep the original drawn corners and border width, including on large settings cards.
+	for (int32 Layer = 0; Layer < 2; ++Layer)
 	{
-		for (int32 Col = 0; Col < 3; ++Col)
-		{
-			DrawTexture(PaperTexture, PX[Col], PY[Row], PX[Col + 1] - PX[Col], PY[Row + 1] - PY[Row], UV[Col], UV[Row],
-			            UV[Col + 1] - UV[Col], UV[Row + 1] - UV[Row], Tint);
-		}
+		const float LX = X + (Layer == 0 ? 3 * S : 0), LY = Y + (Layer == 0 ? 5 * S : 0);
+		const float PX[] = {LX, LX + Edge, LX + W - Edge, LX + W};
+		const float PY[] = {LY, LY + Edge, LY + H - Edge, LY + H};
+		for (int32 Row = 0; Row < 3; ++Row)
+			for (int32 Col = 0; Col < 3; ++Col)
+				DrawTexture(Frame->Get(), PX[Col], PY[Row], PX[Col + 1] - PX[Col], PY[Row + 1] - PY[Row],
+				    UV[Col], UV[Row], UV[Col + 1] - UV[Col], UV[Row + 1] - UV[Row],
+				    Layer == 0 ? TBPaper::Shadow : FLinearColor::White);
 	}
+}
+
+void ATBHUD::PaperSign(FLinearColor Fill, float X, float Y, float W, float H)
+{
+	if (!Canvas || W <= 0.f || H <= 0.f) return;
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	// The title's illustrated buttons are gently bowed paper labels. Keep all text live.
+	static const TArray<FVector2D> Edge = []
+	{
+		TArray<FVector2D> Points;
+		Points.Reserve(26);
+		for (int32 Step = 0; Step <= 12; ++Step)
+		{
+			const float T = Step / 12.f, U = 1.f - T;
+			Points.Add(U * U * FVector2D(.02f, .06f) + 2 * U * T * FVector2D(.5f, .14f) + T * T * FVector2D(.978f, .015f));
+		}
+		for (int32 Step = 0; Step <= 12; ++Step)
+		{
+			const float T = Step / 12.f, U = 1.f - T;
+			Points.Add(U * U * FVector2D(.995f, .895f) + 2 * U * T * FVector2D(.5f, 1.03f) + T * T * FVector2D(.005f, .9f));
+		}
+		return Points;
+	}();
+	auto Layer = [&](FLinearColor Color, float LX, float LY, float LW, float LH)
+	{
+		TArray<FVector2D> Points;
+		Points.Reserve(Edge.Num());
+		for (const FVector2D& Point : Edge) Points.Emplace(LX + Point.X * LW, LY + Point.Y * LH);
+		DrawSmoothPolygon(Points, Color);
+	};
+	const float Border = FMath::Min(3.f * S, FMath::Min(W, H) * .1f);
+	Layer(TBPaper::Shadow.CopyWithNewOpacity(TBPaper::Shadow.A * Fill.A), X + 2 * S, Y + 4 * S, W, H);
+	Layer(TBPaper::Outline.CopyWithNewOpacity(Fill.A), X, Y, W, H);
+	Layer(Fill, X + Border, Y + Border, W - 2 * Border, H - 2 * Border);
+}
+
+// Canvas triangles do not inherit the scene's AA. A one-pixel coverage fringe keeps
+// the authored curved edge sharp without stair steps or overlapping translucent corners.
+// Callers supply an ordered outline whose centre sees every edge (rounded cards / bowed labels).
+void ATBHUD::DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color)
+{
+	if (!Canvas || Color.A <= 0.f || Points.Num() < 3) return;
+	TArray<FVector2D, TInlineAllocator<64>> Boundary;
+	for (const FVector2D& Point : Points)
+	{
+		if (Boundary.IsEmpty() || !Point.Equals(Boundary.Last(), .001f)) Boundary.Add(Point);
+	}
+	if (Boundary.Num() > 1 && Boundary[0].Equals(Boundary.Last(), .001f)) Boundary.Pop(EAllowShrinking::No);
+	const int32 Count = Boundary.Num();
+	if (Count < 3) return;
+	FVector2D Center = FVector2D::ZeroVector;
+	double Area = 0;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector2D& A = Boundary[Index];
+		const FVector2D& B = Boundary[(Index + 1) % Count];
+		Center += A;
+		Area += A.X * B.Y - B.X * A.Y;
+	}
+	if (FMath::IsNearlyZero(Area)) return;
+	Center /= Count;
+	const float Direction = Area > 0 ? 1.f : -1.f;
+	TArray<FVector2D, TInlineAllocator<64>> Normals, Inner, Outer;
+	Normals.SetNumUninitialized(Count);
+	Inner.SetNumUninitialized(Count);
+	Outer.SetNumUninitialized(Count);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector2D Edge = (Boundary[(Index + 1) % Count] - Boundary[Index]).GetSafeNormal();
+		Normals[Index] = FVector2D(Edge.Y, -Edge.X) * Direction;
+	}
+	// Positions are already in viewport pixels: keep coverage independent of UI scale.
+	constexpr float HalfFringe = .65f;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector2D Miter = (Normals[(Index + Count - 1) % Count] + Normals[Index]).GetSafeNormal();
+		const double Projection = FMath::Max(.5, FVector2D::DotProduct(Miter, Normals[Index]));
+		const FVector2D Offset = Miter * (HalfFringe / Projection);
+		Inner[Index] = Boundary[Index] - Offset;
+		Outer[Index] = Boundary[Index] + Offset;
+	}
+	TArray<FCanvasUVTri> Triangles;
+	Triangles.Reserve(Count * 3);
+	auto Add = [&](FVector2D A, FVector2D B, FVector2D C, FLinearColor CA, FLinearColor CB, FLinearColor CC)
+	{
+		FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
+		Triangle.V0_Pos = A; Triangle.V1_Pos = B; Triangle.V2_Pos = C;
+		Triangle.V0_UV = Triangle.V1_UV = Triangle.V2_UV = FVector2D::ZeroVector;
+		Triangle.V0_Color = CA; Triangle.V1_Color = CB; Triangle.V2_Color = CC;
+	};
+	const FLinearColor Transparent = Color.CopyWithNewOpacity(0.f);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const int32 Next = (Index + 1) % Count;
+		Add(Center, Inner[Index], Inner[Next], Color, Color, Color);
+		Add(Inner[Index], Outer[Index], Outer[Next], Color, Transparent, Transparent);
+		Add(Inner[Index], Outer[Next], Inner[Next], Color, Transparent, Color);
+	}
+	FCanvasTriangleItem Item(FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector, GWhiteTexture);
+	Item.TriangleList = MoveTemp(Triangles);
+	Item.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(Item);
+}
+
+// Reference UI uses a simple cream fill and a continuous brown rounded outline.
+void ATBHUD::RoundedPanel(FLinearColor Fill, float X, float Y, float W, float H, float Radius,
+                         float Border, FLinearColor Outline)
+{
+	if (!Canvas || W <= 0.f || H <= 0.f) return;
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	if (Outline.A <= 0.f) Outline = TBPaper::Outline;
+	auto Layer = [&](FLinearColor Color, float LX, float LY, float LW, float LH, float R)
+	{
+		R = FMath::Clamp(R, 0.f, FMath::Min(LW, LH) * .5f);
+		static const TArray<FVector2D> UnitArc = []
+		{
+			TArray<FVector2D> Result;
+			Result.Reserve(44);
+			for (int32 Corner = 0; Corner < 4; ++Corner)
+				for (int32 Segment = 0; Segment <= 10; ++Segment)
+				{
+					const float Angle = (-90.f + Corner * 90.f + Segment * 9.f) * PI / 180.f;
+					Result.Emplace(FMath::Cos(Angle), FMath::Sin(Angle));
+				}
+			return Result;
+		}();
+		TArray<FVector2D> Points;
+		Points.Reserve(44);
+		const FVector2D Centers[] = {{LX + LW - R, LY + R}, {LX + LW - R, LY + LH - R},
+		    {LX + R, LY + LH - R}, {LX + R, LY + R}};
+		for (int32 Corner = 0; Corner < 4; ++Corner)
+			for (int32 Segment = 0; Segment <= 10; ++Segment)
+				Points.Add(Centers[Corner] + UnitArc[Corner * 11 + Segment] * R);
+		DrawSmoothPolygon(Points, Color);
+	};
+	const float B = FMath::Min(Border * S, FMath::Min(W, H) * .25f);
+	Layer(Outline, X, Y, W, H, Radius * S);
+	Layer(Fill, X + B, Y + B, W - 2 * B, H - 2 * B, FMath::Max(0.f, Radius * S - B));
+}
+
+void ATBHUD::DrawKeycap(const FString& Key, float X, float Y, float W, float H)
+{
+	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
+	RoundedPanel(TBPaper::Cream, X, Y, W, H, 5, 2);
+	DrawFittedText(Key, TBPaper::Ink, X + 5 * S, Y + H * .5f - 6 * S, W - 10 * S, .95f * S, true, true);
 }

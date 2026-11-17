@@ -3,6 +3,7 @@
 #include "UI/TBOptionsMenu.h"
 #include "Audio/TBAudioSubsystem.h"
 #include "Blueprint/WidgetTree.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -28,6 +29,7 @@
 #include "TBOptionRow.h"
 #include "TBOptionsPages.h"
 #include "TBPaperStyle.h"
+#include "TBUIText.h"
 
 UTBOptionsMenu* UTBOptionsMenu::Open(APlayerController* Player, TFunction<void()> OnClosed)
 {
@@ -50,13 +52,15 @@ void UTBOptionsMenu::NativeOnInitialized()
 	{
 		Build(*Settings);
 		ShowPage(0);
+		LanguageChangedHandle = TBText::OnLanguageChanged().AddUObject(this, &ThisClass::RefreshLocalizedText);
 	}
 }
 
 void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 {
 	PaperFont = TBPaper::Font(this);
-	PaperTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/PaperClub/Panel.Panel"));
+	HeadingFont = TBPaper::Font(this, TBPaper::EFontRole::Heading);
+	PaperTexture = TBPaper::Art(TEXT("Frame_Settings"));
 	auto* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
 	WidgetTree->RootWidget = Root;
 	auto Fill = [&](UWidget* Widget)
@@ -66,7 +70,7 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		Slot->SetOffsets(FMargin(0));
 	};
 	auto* Dim = WidgetTree->ConstructWidget<UImage>();
-	Dim->SetColorAndOpacity(FLinearColor(0.015f, .025f, .02f, .78f));
+	Dim->SetColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.76f));
 	Fill(Dim);
 	auto* Scale = WidgetTree->ConstructWidget<UScaleBox>();
 	Scale->SetStretch(EStretch::ScaleToFit);
@@ -83,66 +87,115 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		Slot->SetPosition(FVector2D(X, Y));
 		Slot->SetSize(FVector2D(W, H));
 	};
-	auto Label = [this](const FString& Text, int32 FontSize, FLinearColor Color) { return MakeLabel(Text, FontSize, Color); };
-	auto AddButton = [&](UCanvasPanel* Panel, const FString& Text, float X, float Y, float W, bool Secondary = false)
+	auto Label = [this](const FText& Text, int32 FontSize, FLinearColor Color) { return MakeLabel(Text, FontSize, Color); };
+	auto AddButton = [&](UCanvasPanel* Panel, const FText& Text, float X, float Y, float W, bool Secondary = false)
 	{
 		auto* Button = WidgetTree->ConstructWidget<UButton>();
-		Button->SetStyle(TBPaper::ButtonStyle(PaperTexture, Secondary));
-		Button->SetContent(Label(Text, 20, TBPaper::Ink));
+		Button->SetStyle(TBPaper::CompactButtonStyle(Secondary));
+		auto* Caption = Label(Text, 20, TBPaper::Ink);
+		Caption->SetFont(FSlateFontInfo(HeadingFont, 20));
+		Caption->SetJustification(ETextJustify::Center);
+		Button->SetContent(Caption);
+		Button->SetToolTipText(Text);
 		Place(Panel, Button, X, Y, W, 56);
 		return Button;
 	};
+	auto* Shadow = WidgetTree->ConstructWidget<UBorder>();
+	Shadow->SetBrush(TBPaper::Brush(PaperTexture, TBPaper::Shadow));
+	Shadow->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(Canvas, Shadow, 208, 50, 880, 720);
 	auto* Card = WidgetTree->ConstructWidget<UBorder>();
-	Card->SetBrush(TBPaper::Brush(PaperTexture, TBPaper::Cream));
+	Card->SetBrush(TBPaper::Brush(PaperTexture));
+	Card->SetVisibility(ESlateVisibility::HitTestInvisible);
 	Place(Canvas, Card, 200, 40, 880, 720);
-	Place(Canvas, Label(TEXT("オプション"), 30, TBPaper::Accent), 240, 74, 260, 50);
-	Tabs.Add(AddButton(Canvas, TEXT("音"), 520, 68, 160));
-	Tabs.Add(AddButton(Canvas, TEXT("画面"), 690, 68, 160));
-	Tabs.Add(AddButton(Canvas, TEXT("操作"), 860, 68, 160));
+	auto* SettingsIcon = WidgetTree->ConstructWidget<UImage>();
+	SettingsIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+	    TEXT("/Game/UI/Designer/Imported/T_UI_Icon_Settings.T_UI_Icon_Settings")));
+	SettingsIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(Canvas, SettingsIcon, 236, 72, 36, 36);
+	auto* Title = Label(TBText::Get(TEXT("Options.Title")), 30, TBPaper::Ink);
+	Title->SetFont(FSlateFontInfo(HeadingFont, 30));
+	Place(Canvas, Title, 284, 68, 224, 50);
+	Place(Canvas, Label(TBText::Get(TEXT("Options.Subtitle")), 15, TBPaper::Muted), 240, 120, 550, 26);
+	const TCHAR* TabKeys[] = {TEXT("Options.Audio"), TEXT("Options.Display"), TEXT("Options.Controls"), TEXT("Options.Language")};
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(TabKeys); ++Index)
+	{
+		auto* Tab = AddButton(Canvas, TBText::Get(TabKeys[Index]), 240 + Index * 204, 154, 196);
+		CastChecked<UTextBlock>(Tab->GetContent())->SetFont(FSlateFontInfo(HeadingFont, 16));
+		Tabs.Add(Tab);
+	}
 	Tabs[0]->OnClicked.AddDynamic(this, &ThisClass::ShowAudio);
 	Tabs[1]->OnClicked.AddDynamic(this, &ThisClass::ShowDisplay);
 	Tabs[2]->OnClicked.AddDynamic(this, &ThisClass::ShowControls);
+	Tabs[3]->OnClicked.AddDynamic(this, &ThisClass::ShowLanguage);
 	for (int32 Index = 0; Index < Tabs.Num(); ++Index)
 	{
 		auto* Box = WidgetTree->ConstructWidget<UVerticalBox>();
 		Pages.Add(Box);
-		if (Index == TBOptionsPage::Controls)
-		{
-			// キーの行が多いので、スクロールで包む。右にスクロールバーの分を空ける。
-			ControlsScroll = WidgetTree->ConstructWidget<UScrollBox>();
-			ControlsScroll->AddChild(Box);
-			Place(Canvas, ControlsScroll, 240, 150, 824, 500);
-			PageRoots.Add(ControlsScroll);
-		}
-		else
-		{
-			Place(Canvas, Box, 240, 150, 800, 500);
-			PageRoots.Add(Box);
-		}
+		// 画面設定の長い説明も、キー一覧と同じスクロール領域に収める。
+		auto* Scroll = WidgetTree->ConstructWidget<UScrollBox>();
+		Scroll->SetScrollbarThickness(FVector2D(6, 6));
+		Scroll->SetScrollbarPadding(FMargin(10, 0, 0, 0));
+		FScrollBoxStyle ScrollStyle = Scroll->GetWidgetStyle();
+		ScrollStyle.SetTopShadowBrush(FSlateNoResource()).SetBottomShadowBrush(FSlateNoResource());
+		Scroll->SetWidgetStyle(ScrollStyle);
+		FScrollBarStyle BarStyle = Scroll->GetWidgetBarStyle();
+		BarStyle.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::Teal, 3.f));
+		BarStyle.SetHoveredThumbImage(FSlateRoundedBoxBrush(TBPaper::Teal, 3.f));
+		BarStyle.SetDraggedThumbImage(FSlateRoundedBoxBrush(TBPaper::Teal, 3.f));
+		BarStyle.SetVerticalBackgroundImage(FSlateRoundedBoxBrush(TBPaper::Outline.CopyWithNewOpacity(.08f), 3.f));
+		Scroll->SetWidgetBarStyle(BarStyle);
+		Scroll->AddChild(Box);
+		Place(Canvas, Scroll, 240, 222, 824, 422);
+		PageRoots.Add(Scroll);
+		if (Index == TBOptionsPage::Controls) ControlsScroll = Scroll;
 	}
-	ResetButton = AddButton(Canvas, TEXT("初期設定に戻す"), 240, 672, 360, true);
+	ResetButton = AddButton(Canvas, TBText::Get(TEXT("Options.ResetAll")), 240, 672, 360, true);
 	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetPage);
-	CloseButton = AddButton(Canvas, TEXT("閉じる [Esc]"), 680, 672, 360);
+	CloseButton = AddButton(Canvas, TBText::Get(TEXT("Options.Close")), 680, 672, 360);
+	FButtonStyle CloseStyle = TBPaper::CompactButtonStyle();
+	CloseStyle.SetNormal(FSlateRoundedBoxBrush(TBPaper::Teal, 8.f, TBPaper::Outline, 2.5f));
+	CloseButton->SetStyle(CloseStyle);
 	CloseButton->OnClicked.AddDynamic(this, &ThisClass::Close);
 
 	TBOptionsPages::BuildAudio(*this, Settings);
+	AddHeading(TBOptionsPage::Audio, TBText::Get(TEXT("Options.AudioHeading")));
+	AddNote(TBOptionsPage::Audio, TBText::Get(TEXT("Options.AudioNote")));
 	TBOptionsPages::BuildDisplay(*this, Settings);
 	TBOptionsPages::BuildControls(*this, Settings);
+	auto* Language = AddRow(TBOptionsPage::Language, TBText::Get(TEXT("Options.Language")), false);
+	auto* SavedSettings = &Settings;
+	Language->Value = [SavedSettings]
+	{
+		return TBText::String(SavedSettings->GetLanguage() == TEXT("en") ? TEXT("Language.English") : TEXT("Language.Japanese"));
+	};
+	Language->CanStep = [SavedSettings](int32 Steps) { return (Steps > 0) != (SavedSettings->GetLanguage() == TEXT("en")); };
+	Language->Step = [SavedSettings](int32 Steps)
+	{
+		SavedSettings->SetLanguage(Steps > 0 ? TEXT("en") : TEXT("ja"));
+		SavedSettings->CommitLanguage();
+	};
+	AddHeading(TBOptionsPage::Language, TBText::Get(TEXT("Options.LanguageHeading")));
+	AddNote(TBOptionsPage::Language, TBText::Get(TEXT("Options.LanguageNote")));
 
 	// 解像度と画面モードを変えたあとの確認。
 	auto* Confirm = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Place(Canvas, Confirm, 0, 0, 1280, 800);
 	auto* ConfirmDim = WidgetTree->ConstructWidget<UImage>();
-	ConfirmDim->SetColorAndOpacity(FLinearColor(0.015f, .025f, .02f, .6f));
+	ConfirmDim->SetColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.66f));
 	Place(Confirm, ConfirmDim, 0, 0, 1280, 800);
 	auto* ConfirmCard = WidgetTree->ConstructWidget<UBorder>();
 	ConfirmCard->SetBrush(TBPaper::Brush(PaperTexture));
-	Place(Confirm, ConfirmCard, 380, 280, 520, 240);
-	ConfirmText = Label(TEXT(""), 22, TBPaper::Ink);
-	Place(Confirm, ConfirmText, 420, 310, 440, 90);
-	KeepButton = AddButton(Confirm, TEXT("このままにする"), 420, 430, 210);
+	Place(Confirm, ConfirmCard, 360, 244, 560, 312);
+	auto* ConfirmHeading = Label(TBText::Get(TEXT("Options.ConfirmTitle")), 27, TBPaper::Ink);
+	ConfirmHeading->SetFont(FSlateFontInfo(HeadingFont, 27));
+	Place(Confirm, ConfirmHeading, 400, 270, 480, 48);
+	ConfirmText = Label(FText::GetEmpty(), 20, TBPaper::Ink);
+	ConfirmText->SetAutoWrapText(true);
+	Place(Confirm, ConfirmText, 400, 330, 480, 96);
+	KeepButton = AddButton(Confirm, TBText::Get(TEXT("Options.Keep")), 400, 464, 232);
 	KeepButton->OnClicked.AddDynamic(this, &ThisClass::KeepVideoMode);
-	AddButton(Confirm, TEXT("元に戻す"), 650, 430, 210, true)->OnClicked.AddDynamic(this, &ThisClass::RevertVideoMode);
+	AddButton(Confirm, TBText::Get(TEXT("Options.Revert")), 648, 464, 232, true)->OnClicked.AddDynamic(this, &ThisClass::RevertVideoMode);
 	ConfirmOverlay = Confirm;
 	ConfirmOverlay->SetVisibility(ESlateVisibility::Collapsed);
 
@@ -150,29 +203,32 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 	auto* KeyLayer = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Place(Canvas, KeyLayer, 0, 0, 1280, 800);
 	auto* KeyDim = WidgetTree->ConstructWidget<UImage>();
-	KeyDim->SetColorAndOpacity(FLinearColor(0.015f, .025f, .02f, .6f));
+	KeyDim->SetColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.66f));
 	KeyDim->SetVisibility(ESlateVisibility::Visible);
 	Place(KeyLayer, KeyDim, 0, 0, 1280, 800);
 	auto* KeyCard = WidgetTree->ConstructWidget<UBorder>();
 	KeyCard->SetBrush(TBPaper::Brush(PaperTexture));
-	Place(KeyLayer, KeyCard, 380, 260, 520, 280);
-	KeyPromptText = Label(TEXT(""), 22, TBPaper::Ink);
+	Place(KeyLayer, KeyCard, 360, 214, 560, 372);
+	auto* KeyHeading = Label(TBText::Get(TEXT("Keys.Title")), 27, TBPaper::Ink);
+	KeyHeading->SetFont(FSlateFontInfo(HeadingFont, 27));
+	Place(KeyLayer, KeyHeading, 400, 238, 480, 44);
+	KeyPromptText = Label(FText::GetEmpty(), 20, TBPaper::Ink);
 	KeyPromptText->SetAutoWrapText(true);
-	Place(KeyLayer, KeyPromptText, 420, 290, 440, 110);
-	KeyErrorText = Label(TEXT(""), 18, FLinearColor(.75f, .1f, .08f));
+	Place(KeyLayer, KeyPromptText, 400, 298, 480, 110);
+	KeyErrorText = Label(FText::GetEmpty(), 17, TBPaper::Danger);
 	KeyErrorText->SetAutoWrapText(true);
-	Place(KeyLayer, KeyErrorText, 420, 400, 440, 40);
-	KeySwapButton = AddButton(KeyLayer, TEXT("入れ替える"), 420, 460, 210);
+	Place(KeyLayer, KeyErrorText, 400, 410, 480, 70);
+	KeySwapButton = AddButton(KeyLayer, TBText::Get(TEXT("Keys.Swap")), 400, 500, 232);
 	KeySwapButton->OnClicked.AddDynamic(this, &ThisClass::SwapKey);
-	KeyCancelButton = AddButton(KeyLayer, TEXT("やめる"), 650, 460, 210, true);
+	KeyCancelButton = AddButton(KeyLayer, TBText::Get(TEXT("Keys.Cancel")), 648, 500, 232, true);
 	KeyCancelButton->OnClicked.AddDynamic(this, &ThisClass::CancelKey);
-	KeyCloseButton = AddButton(KeyLayer, TEXT("とじる"), 535, 460, 210);
+	KeyCloseButton = AddButton(KeyLayer, TBText::Get(TEXT("Keys.Close")), 524, 500, 232);
 	KeyCloseButton->OnClicked.AddDynamic(this, &ThisClass::CancelKey);
 	KeyOverlay = KeyLayer;
 	KeyOverlay->SetVisibility(ESlateVisibility::Collapsed);
 }
 
-UTBOptionRow* UTBOptionsMenu::AddRow(int32 PageIndex, const FString& Label, bool bBar)
+UTBOptionRow* UTBOptionsMenu::AddRow(int32 PageIndex, const FText& Label, bool bBar)
 {
 	auto* Row = CreateWidget<UTBOptionRow>(this);
 	Row->Build(Label, PaperFont, PaperTexture, bBar);
@@ -187,17 +243,22 @@ UTBOptionRow* UTBOptionsMenu::AddRow(int32 PageIndex, const FString& Label, bool
 	return Row;
 }
 
-void UTBOptionsMenu::AddNote(int32 PageIndex, const FString& Text)
+void UTBOptionsMenu::AddNote(int32 PageIndex, const FText& Text)
 {
-	Pages[PageIndex]->AddChildToVerticalBox(MakeLabel(Text, 15, TBPaper::Muted));
+	auto* Note = MakeLabel(Text, 15, TBPaper::Muted);
+	Note->SetAutoWrapText(true);
+	Note->SetWrapTextAt(780);
+	Pages[PageIndex]->AddChildToVerticalBox(Note)->SetPadding(FMargin(8, 10, 8, 8));
 }
 
-void UTBOptionsMenu::AddHeading(int32 PageIndex, const FString& Text)
+void UTBOptionsMenu::AddHeading(int32 PageIndex, const FText& Text)
 {
-	Pages[PageIndex]->AddChildToVerticalBox(MakeLabel(Text, 22, TBPaper::Accent))->SetPadding(FMargin(0, 14, 0, 4));
+	auto* Heading = MakeLabel(Text, 22, TBPaper::Ink);
+	Heading->SetFont(FSlateFontInfo(HeadingFont, 22));
+	Pages[PageIndex]->AddChildToVerticalBox(Heading)->SetPadding(FMargin(8, 18, 0, 8));
 }
 
-UTBKeyRow* UTBOptionsMenu::AddKeyRow(int32 PageIndex, const FString& Label, FName MappingName)
+UTBKeyRow* UTBOptionsMenu::AddKeyRow(int32 PageIndex, const FText& Label, FName MappingName)
 {
 	auto* Row = CreateWidget<UTBKeyRow>(this);
 	Row->Build(Label, MappingName, PaperFont, PaperTexture);
@@ -208,10 +269,10 @@ UTBKeyRow* UTBOptionsMenu::AddKeyRow(int32 PageIndex, const FString& Label, FNam
 	return Row;
 }
 
-UTextBlock* UTBOptionsMenu::MakeLabel(const FString& Text, int32 FontSize, FLinearColor Color)
+UTextBlock* UTBOptionsMenu::MakeLabel(const FText& Text, int32 FontSize, FLinearColor Color)
 {
 	auto* Block = WidgetTree->ConstructWidget<UTextBlock>();
-	Block->SetText(FText::FromString(Text));
+	Block->SetText(Text);
 	Block->SetFont(FSlateFontInfo(PaperFont, FontSize));
 	Block->SetColorAndOpacity(Color);
 	return Block;
@@ -220,10 +281,24 @@ UTextBlock* UTBOptionsMenu::MakeLabel(const FString& Text, int32 FontSize, FLine
 void UTBOptionsMenu::ShowPage(int32 Index)
 {
 	Page = FMath::Clamp(Index, 0, Pages.Num() - 1);
+	const TCHAR* TabKeys[] = {TEXT("Options.Audio"), TEXT("Options.Display"), TEXT("Options.Controls"), TEXT("Options.Language")};
 	for (int32 Other = 0; Other < PageRoots.Num(); ++Other)
 	{
 		PageRoots[Other]->SetVisibility(Other == Page ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		Tabs[Other]->SetStyle(TBPaper::ButtonStyle(PaperTexture, Other != Page));
+		FButtonStyle Style = TBPaper::CompactButtonStyle(Other != Page);
+		if (Other == Page)
+		{
+			Style.SetNormal(FSlateRoundedBoxBrush(TBPaper::Gold, 8.f, TBPaper::Outline, 2.5f));
+			Style.SetHovered(FSlateRoundedBoxBrush(TBPaper::Gold, 8.f, TBPaper::Outline, 3.f));
+			Style.SetPressed(FSlateRoundedBoxBrush(TBPaper::Gold, 8.f, TBPaper::Outline, 3.f));
+		}
+		Tabs[Other]->SetStyle(Style);
+		if (auto* Caption = Cast<UTextBlock>(Tabs[Other]->GetContent()))
+		{
+			Caption->SetText(Other == Page ? FText::Format(TBText::Get(TEXT("Options.SelectedTab")), TBText::Get(TabKeys[Other])) : TBText::Get(TabKeys[Other]));
+			Tabs[Other]->SetToolTipText(TBText::Get(TabKeys[Other]));
+			Caption->SetColorAndOpacity(TBPaper::Ink);
+		}
 	}
 	if (Page == TBOptionsPage::Controls && ControlsScroll)
 	{
@@ -251,6 +326,18 @@ void UTBOptionsMenu::ShowControls()
 	if (IsCapturing()) return;
 	PlayClick();
 	ShowPage(2);
+}
+
+void UTBOptionsMenu::ShowLanguage()
+{
+	if (IsCapturing()) return;
+	PlayClick();
+	ShowPage(TBOptionsPage::Language);
+}
+
+void UTBOptionsMenu::RefreshLocalizedText()
+{
+	ShowPage(Page);
 }
 
 void UTBOptionsMenu::RefreshRows()
@@ -281,6 +368,11 @@ void UTBOptionsMenu::ResetPage()
 	{
 		Settings->ResetDisplay();
 		Settings->CommitDisplay();
+	}
+	else if (Page == TBOptionsPage::Language)
+	{
+		Settings->SetLanguage(TEXT("ja"));
+		Settings->CommitLanguage();
 	}
 	else
 	{
@@ -362,8 +454,7 @@ void UTBOptionsMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 		RevertVideoMode();
 		return;
 	}
-	ConfirmText->SetText(FText::FromString(
-	    FString::Printf(TEXT("この表示でよろしいですか？\nあと %d 秒で元に戻ります。"), FMath::CeilToInt(Left))));
+	ConfirmText->SetText(FText::Format(TBText::Get(TEXT("Options.ConfirmCountdown")), FMath::CeilToInt(Left)));
 }
 
 void UTBOptionsMenu::BeginKeyCapture(FName MappingName)
@@ -684,6 +775,8 @@ void UTBOptionsMenu::Close()
 
 void UTBOptionsMenu::NativeDestruct()
 {
+	TBText::OnLanguageChanged().Remove(LanguageChangedHandle);
+	LanguageChangedHandle.Reset();
 	// 確認していない解像度・画面モードは、閉じるときに元に戻す。ステージの移動で画面ごと消えたときも、ここを通る。
 	if (IsConfirming())
 	{

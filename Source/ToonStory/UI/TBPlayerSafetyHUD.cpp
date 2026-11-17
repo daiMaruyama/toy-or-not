@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
+#include "UI/TBUIText.h"
 #include "TBHUD.h"
 #include "TBPaperStyle.h"
 #include "Core/TBController.h"
@@ -88,57 +89,44 @@ void ATBHUD::DrawPlayers()
 		return;
 	}
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	const float X = (Canvas->ClipX - 700 * S) * .5f, Y = (Canvas->ClipY - 600 * S) * .5f;
-	DrawRect(FLinearColor(0, 0, 0, .6f), 0, 0, Canvas->ClipX, Canvas->ClipY);
-	PaperPanel(TBPaper::Cream, X, Y, 700 * S, 600 * S);
-	auto Text = [&](const FString& Value, float PX, float PY, float Scale = 1.f)
-	{ DrawText(Value, TBPaper::Ink, X + PX * S, Y + PY * S, PaperFont, Scale * S); };
-	auto Button = [&](FName Id, const FString& Label, float PX, float PY, float W)
-	{
-		PaperPanel(FLinearColor::White, X + PX * S, Y + PY * S, W * S, 42 * S);
-		Text(Label, PX + 12, PY + 7, .9f);
-		AddHitBox(FVector2D(X + PX * S, Y + PY * S), FVector2D(W * S, 42 * S), Id, true);
-	};
-	Text(TEXT("参加者一覧"), 30, 24, 1.5f);
-	if (KickSelection.IsValid() && !State->PlayerArray.Contains(KickSelection.Get()))
-	{
-		KickSelection.Reset();
-	}
+	const float X = (Canvas->ClipX - 740 * S) * .5f, Y = (Canvas->ClipY - 630 * S) * .5f;
+	DrawRect(FLinearColor(.025f, .019f, .015f, .76f), 0, 0, Canvas->ClipX, Canvas->ClipY);
+	PaperPanel(TBPaper::Paper, X, Y, 740 * S, 630 * S);
+	DrawArt(TEXT("Tape_Cream"), X + 325 * S, Y - 16 * S, 90 * S, 34 * S);
+	auto Text = [&](const FString& Value, float PX, float PY, float Scale = 1.f, FLinearColor Color = TBPaper::Ink)
+	{ DrawFittedText(Value, Color, X + PX * S, Y + PY * S, (704 - PX) * S, Scale * S); };
+	auto Button = [&](FName Id, const FString& Label, float PX, float PY, float W, bool Danger = false)
+	{ DrawButton(Id, Label, X + PX * S, Y + PY * S, W * S, 44 * S, true, false, Danger); };
+	DrawArt(TEXT("Icon_PlayerRatio"), X + 36 * S, Y + 30 * S, 44 * S, 44 * S);
+	DrawFittedText(TBText::Literal(TEXT("Root.Players.Title")), TBPaper::Ink, X + 100 * S, Y + 34 * S, 600 * S, 1.5f * S, true);
+	if (KickSelection.IsValid() && !State->PlayerArray.Contains(KickSelection.Get())) KickSelection.Reset();
 	if (KickSelection.IsValid())
 	{
-		Text(KickSelection->GetPlayerName().Left(28), 30, 130, 1.2f);
-		Text(TEXT("このプレイヤーを部屋から退出させますか？"), 30, 190);
-		Text(TEXT("これはキックです。再参加を禁止するものではありません。"), 30, 240, .8f);
-		Button(TEXT("ConfirmKick"), TEXT("退出させる"), 30, 330, 300);
-		Button(TEXT("CancelKick"), TEXT("キャンセル"), 360, 330, 300);
+		PaperPanel(TBPaper::Cream, X + 36 * S, Y + 126 * S, 668 * S, 254 * S);
+		DrawFittedText(TBText::Literal(TEXT("Root.Players.KickTitle")), TBPaper::Danger, X + 60 * S, Y + 150 * S, 620 * S, 1.3f * S, true);
+		DrawFittedText(KickSelection->GetPlayerName(), TBPaper::Ink, X + 60 * S, Y + 209 * S, 620 * S, 1.2f * S);
+		Text(TBText::Literal(TEXT("Root.Players.Confirm")), 60, 268, 1.f);
+		Text(TBText::Literal(TEXT("Root.Players.Rejoin")), 60, 316, .9f, TBPaper::Muted);
+		Button(TEXT("CancelKick"), TBText::Literal(TEXT("Root.Common.Cancel")), 36, 430, 320);
+		Button(TEXT("ConfirmKick"), TBText::Literal(TEXT("Root.Players.Kick")), 384, 430, 320, true);
 	}
 	else
 	{
-		Text(PC->HasAuthority() ? TEXT("キックできるのはホストだけです。") : TEXT("ホストが参加者を管理します。"), 30,
-		     70, .85f);
+		Text(PC->HasAuthority() ? TBText::Literal(TEXT("Root.Players.HostHint")) : TBText::Literal(TEXT("Root.Players.GuestHint")), 36, 91, .9f, TBPaper::Muted);
 		int32 Row = 0;
 		for (APlayerState* Player : State->PlayerArray)
 		{
-			if (!Player || Row >= 8)
-			{
-				continue;
-			}
-			const float PY = 112 + Row++ * 48;
-			Text(Player->GetPlayerName().Left(28), 30, PY + 6, .95f);
-			if (Player == PC->PlayerState)
-			{
-				Text(TEXT("あなた"), 540, PY + 6, .85f);
-			}
-			else if (Player->IsABot())
-			{
-				Text(TEXT("NPC"), 540, PY + 6, .85f);
-			}
+			if (!Player || Row >= 8) continue;
+			const float PY = 133 + Row++ * 48;
+			DrawRect(Row % 2 ? TBPaper::Cream : FLinearColor(.94f, .91f, .84f), X + 36 * S, Y + PY * S, 668 * S, 43 * S);
+			DrawArt(Player->IsABot() ? TEXT("Icon_Npc") : TEXT("Icon_PlayerRatio"), X + 48 * S, Y + (PY + 6) * S, 30 * S, 30 * S);
+			DrawFittedText(Player->GetPlayerName(), TBPaper::Ink, X + 94 * S, Y + (PY + 14) * S, 430 * S, .95f * S);
+			if (Player == PC->PlayerState) Text(TBText::Literal(TEXT("Root.Common.You")), 568, PY + 14, .9f, TBPaper::Teal);
+			else if (Player->IsABot()) Text(TEXT("NPC"), 568, PY + 14, .9f, TBPaper::Muted);
 			else if (PC->HasAuthority() && !State->bTravelPending)
-			{
-				Button(FName(*FString::Printf(TEXT("Kick_%d"), Player->GetPlayerId())), TEXT("キック"), 540, PY, 120);
-			}
+				Button(FName(*FString::Printf(TEXT("Kick_%d"), Player->GetPlayerId())), TBText::Literal(TEXT("Root.Players.Remove")), 566, PY, 126, true);
 		}
-		Text(PC->Notice.Left(65), 30, 505, .75f);
-		Button(TEXT("ClosePlayers"), TEXT("もどる"), 450, 545, 210);
+		Text(TBText::TranslateNotice(PC->Notice).Left(65), 36, 530, .8f, TBPaper::Muted);
+		Button(TEXT("ClosePlayers"), TBText::Literal(TEXT("Root.Common.Back")), 466, 568, 238);
 	}
 }

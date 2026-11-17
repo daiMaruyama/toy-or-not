@@ -1,75 +1,113 @@
 #pragma once
+#include "UI/TBUIText.h"
 #include "CoreMinimal.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
 #include "Misc/Paths.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 
 namespace TBPaper
 {
-	inline const FLinearColor Ink = FLinearColor::FromSRGBColor(FColor(59, 59, 54));
-	inline const FLinearColor Accent = FLinearColor::FromSRGBColor(FColor(190, 83, 61));
-	inline const FLinearColor Cream = FLinearColor::FromSRGBColor(FColor(246, 237, 207));
-	inline const FLinearColor Muted = FLinearColor::FromSRGBColor(FColor(111, 111, 101));
+	inline const FLinearColor Ink = FLinearColor::FromSRGBColor(FColor(53, 24, 5));
+	inline const FLinearColor Accent = FLinearColor::FromSRGBColor(FColor(177, 64, 46));
+	inline const FLinearColor Cream = FLinearColor::FromSRGBColor(FColor(248, 223, 179));
+	inline const FLinearColor Muted = FLinearColor::FromSRGBColor(FColor(105, 86, 72));
+	inline const FLinearColor Paper = FLinearColor::FromSRGBColor(FColor(255, 237, 207));
+	inline const FLinearColor Teal = FLinearColor::FromSRGBColor(FColor(89, 189, 181));
+	inline const FLinearColor HumanBlue = FLinearColor::FromSRGBColor(FColor(44, 126, 152));
+	inline const FLinearColor ReadyGreen = FLinearColor::FromSRGBColor(FColor(56, 160, 126));
+	inline const FLinearColor StartOrange = FLinearColor::FromSRGBColor(FColor(216, 122, 48));
+	inline const FLinearColor Lavender = FLinearColor::FromSRGBColor(FColor(211, 204, 229));
+	inline const FLinearColor Gold = FLinearColor::FromSRGBColor(FColor(255, 214, 91));
+	inline const FLinearColor Danger = FLinearColor::FromSRGBColor(FColor(166, 48, 40));
+	inline const FLinearColor Outline = FLinearColor::FromSRGBColor(FColor(59, 27, 9));
+	inline const FLinearColor Shadow = FLinearColor(0.025f, 0.012f, 0.006f, .24f);
+	enum class EFontRole : uint8 { Body, Heading, Display, Numeric };
 	inline FString Status(const FString& Value)
 	{
 		if (Value == TEXT("Create a room or find friends to begin."))
 		{
-			return TEXT("部屋をつくるか、友だちの部屋をさがそう。");
+			return TBText::Literal(TEXT("Root.Status.Begin"));
 		}
 		if (Value == TEXT("Creating room..."))
 		{
-			return TEXT("部屋をつくっています…");
+			return TBText::Literal(TEXT("Root.Status.Creating"));
 		}
 		if (Value == TEXT("Searching rooms..."))
 		{
-			return TEXT("みんなの部屋をさがしています…");
+			return TBText::Literal(TEXT("Root.Status.Searching"));
 		}
 		if (Value == TEXT("Joining room..."))
 		{
-			return TEXT("部屋に入っています…");
+			return TBText::Literal(TEXT("Root.Status.Joining"));
 		}
 		if (Value == TEXT("Connecting to host..."))
 		{
-			return TEXT("ホストにつないでいます…");
+			return TBText::Literal(TEXT("Root.Status.Connecting"));
 		}
 		if (Value == TEXT("Leaving room..."))
 		{
-			return TEXT("部屋から退出しています…");
+			return TBText::Literal(TEXT("Root.Status.Leaving"));
 		}
 		if (Value == TEXT("Room creation failed."))
 		{
-			return TEXT("部屋をつくれませんでした。もう一度試してください。");
+			return TBText::Literal(TEXT("Root.Status.CreateFailed"));
 		}
 		if (Value == TEXT("Search failed."))
 		{
-			return TEXT("部屋をさがせませんでした。もう一度試してください。");
+			return TBText::Literal(TEXT("Root.Status.SearchFailed"));
 		}
 		if (Value == TEXT("Join failed."))
 		{
-			return TEXT("部屋に入れませんでした。もう一度試してください。");
+			return TBText::Literal(TEXT("Root.Status.JoinFailed"));
 		}
 		if (Value == TEXT("Could not resolve connection."))
 		{
-			return TEXT("部屋につなげませんでした。もう一度試してください。");
+			return TBText::Literal(TEXT("Root.Status.ConnectFailed"));
 		}
 		if (Value == TEXT("Offline. Last match ended; TBHost / TBFind for a new lobby."))
 		{
-			return TEXT("おかえりなさい。次はどの部屋であそぶ？");
+			return TBText::Literal(TEXT("Root.Status.Welcome"));
 		}
-		return Value;
+		return TBText::TranslateNotice(Value);
 	}
 
-	inline UFont* Font(UObject* Outer, bool Title = false)
+	inline UFont* Font(UObject* Outer, EFontRole Role)
 	{
 		auto* Result = NewObject<UFont>(Outer);
 		Result->FontCacheType = EFontCacheType::Runtime;
 		Result->LegacyFontSize = 14;
-		Result->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Emplace(
+		const TCHAR* File = Role == EFontRole::Heading ? TEXT("mochiy.ttf") :
+		    Role == EFontRole::Display ? TEXT("mochiy.ttf") :
+		    Role == EFontRole::Numeric ? TEXT("toy-ui-numerals.ttf") : TEXT("zen-medium.ttf");
+		auto& Composite = Result->GetMutableInternalCompositeFont();
+		Composite.DefaultTypeface.Fonts.Emplace(
 		    TEXT("Regular"),
-		    FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Fonts") / (Title ? TEXT("mochiy.ttf") : TEXT("zen.ttf")),
+		    FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Fonts") / File,
 		    EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+		// Numeric faces contain Latin only; keep Japanese labels and missing headline glyphs readable.
+		Composite.FallbackTypeface.Typeface.Fonts.Emplace(TEXT("Regular"),
+		    FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Fonts/zen.ttf"),
+		    EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+		return Result;
+	}
+	inline UFont* Font(UObject* Outer, bool Title = false)
+	{
+		return Font(Outer, Title ? EFontRole::Display : EFontRole::Body);
+	}
+	inline UTexture2D* Art(const TCHAR* Name)
+	{
+		return LoadObject<UTexture2D>(nullptr,
+		    *FString::Printf(TEXT("/Game/UI/Designer/Imported/T_UI_%s.T_UI_%s"), Name, Name));
+	}
+	inline FSlateBrush ImageBrush(UTexture2D* Texture)
+	{
+		FSlateBrush Result;
+		Result.SetResourceObject(Texture);
+		Result.DrawAs = ESlateBrushDrawType::Image;
+		if (Texture) Result.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 		return Result;
 	}
 	inline FSlateBrush Brush(UTexture2D* Texture, FLinearColor Tint = FLinearColor::White)
@@ -86,10 +124,24 @@ namespace TBPaper
 	inline FButtonStyle ButtonStyle(UTexture2D* Texture, bool Secondary = false)
 	{
 		FButtonStyle Style;
-		Style.SetNormal(Brush(Texture, Secondary ? FLinearColor(.78f, .78f, .75f) : FLinearColor::White));
-		Style.SetHovered(Brush(Texture, Cream));
-		Style.SetPressed(Brush(Texture, FLinearColor(.9f, .66f, .47f)));
-		Style.SetDisabled(Brush(Texture, FLinearColor(.46f, .46f, .43f)));
+		Style.SetNormal(Brush(Texture, Secondary ? Cream : Paper));
+		Style.SetHovered(Brush(Texture, Gold));
+		Style.SetPressed(Brush(Texture, Lavender));
+		Style.SetDisabled(Brush(Texture, FLinearColor(.55f, .49f, .40f, .65f)));
+		Style.SetNormalPadding(FMargin(12, 6));
+		Style.SetPressedPadding(FMargin(12, 9, 12, 3));
+		return Style;
+	}
+	// Small interactive controls need solid corners; the paper texture is for large cards.
+	inline FButtonStyle CompactButtonStyle(bool Secondary = false)
+	{
+		FButtonStyle Style;
+		Style.SetNormal(FSlateRoundedBoxBrush(Secondary ? Cream : Paper, 9.f, Outline, 2.5f));
+		Style.SetHovered(FSlateRoundedBoxBrush(Gold, 9.f, Outline, 3.f));
+		Style.SetPressed(FSlateRoundedBoxBrush(Teal, 9.f, Outline, 3.f));
+		Style.SetDisabled(FSlateRoundedBoxBrush(Cream, 9.f, Muted, 2.f));
+		Style.SetNormalPadding(FMargin(6, 2));
+		Style.SetPressedPadding(FMargin(6, 4, 6, 0));
 		return Style;
 	}
 } // namespace TBPaper

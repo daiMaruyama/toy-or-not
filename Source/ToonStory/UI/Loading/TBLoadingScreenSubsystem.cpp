@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
 
 #include "TBLoadingScreenSubsystem.h"
+#include "UI/TBUIText.h"
 #include "STBLoadingScreen.h"
 #include "TBLoadingScreenSettings.h"
 #include "Character/TBCharacter.h"
@@ -105,8 +106,8 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FString& MapName)
 	const auto* Session = GetGameInstance()->GetSubsystem<UTBSession>();
 	const bool bToTitle = FPackageName::GetShortName(MapName) == FPackageName::GetShortName(UGameMapsSettings::GetGameDefaultMap());
 	MovieScreen->SetStatus(FText::FromString(Session && Session->IsBusy() ? TBPaper::Status(Session->Status)
-	                                         : bToTitle                   ? FString(TEXT("タイトルにもどっています…"))
-	                                                                      : FString(TEXT("部屋に入っています…"))));
+	                                         : bToTitle                   ? FString(TBText::Literal(TEXT("Root.Loading.Title")))
+	                                                                      : FString(TBText::Literal(TEXT("Root.Status.Joining")))));
 	MovieScreen->Restart();
 	FLoadingScreenAttributes Attributes;
 	Attributes.WidgetLoadingScreen = MovieScreen;
@@ -263,7 +264,7 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		const bool bBack = IsReturningLabel(TravelDestMap, bReturning);
 		if (ShouldRewriteLabel(bNew, bHardLoad, LabelReturning, bBack))
 		{
-			Screen->SetStatus(FText::FromString(bBack ? TEXT("ロビーにもどっています…") : TEXT("あそぶ準備をしています…")));
+			Screen->SetStatus(FText::FromString(bBack ? TBText::Literal(TEXT("Root.Loading.Lobby")) : TBText::Literal(TEXT("Root.Loading.Prepare"))));
 			LabelReturning = bBack ? 1 : 0;
 			if (bNew) Screen->Restart();
 		}

@@ -12,11 +12,11 @@ void TBOptionsPages::BuildAudio(UTBOptionsMenu& Menu, UTBGameUserSettings& Setti
 {
 	auto* S = &Settings;
 	auto* M = &Menu;
-	const TCHAR* VolumeNames[] = {TEXT("全体"), TEXT("BGM"), TEXT("効果音"), TEXT("ボイスチャット")};
+	const TCHAR* VolumeNames[] = {TEXT("Options.MasterVolume"), TEXT("Options.MusicVolume"), TEXT("Options.EffectsVolume"), TEXT("Options.VoiceVolume")};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(VolumeNames); ++Index)
 	{
 		const auto Kind = ETBVolume(Index);
-		auto* Row = Menu.AddRow(TBOptionsPage::Audio, VolumeNames[Index], true);
+		auto* Row = Menu.AddRow(TBOptionsPage::Audio, TBText::Get(VolumeNames[Index]), true);
 		Row->Step = [M, S, Kind](int32 Steps)
 		{
 			S->StepVolume(Kind, Steps);

@@ -6,6 +6,7 @@
 #include "Engine/GameInstance.h"
 #include "HAL/IConsoleManager.h"
 #include "RenderUtils.h"
+#include "UI/TBUIText.h"
 
 UTBGameUserSettings* UTBGameUserSettings::Get()
 {
@@ -19,12 +20,14 @@ void UTBGameUserSettings::SetToDefaults()
 	ResetVolumes();
 	QualityPreset = MotionBlur = RayTracing = InvertMouseY = -1;
 	Brightness = MouseSensitivity = -1.f;
+	Language.Reset();
 }
 
 void UTBGameUserSettings::ApplyNonResolutionSettings()
 {
 	EnforceLimits();
 	Super::ApplyNonResolutionSettings();
+	TBText::SetLanguage(GetLanguage());
 	PreviewBrightness();
 	// -1 は各ステージのポストプロセスの設定どおり、0 は切る。
 	if (auto* BlurAmount = IConsoleManager::Get().FindConsoleVariable(TEXT("r.MotionBlur.Amount")))
@@ -35,6 +38,28 @@ void UTBGameUserSettings::ApplyNonResolutionSettings()
 	if (auto* LumenHardware = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Lumen.HardwareRayTracing")))
 	{
 		LumenHardware->Set(IsRayTracingOn() ? 1 : 0, ECVF_SetByGameSetting);
+	}
+}
+
+FString UTBGameUserSettings::GetLanguage() const
+{
+	return Language == TEXT("en") ? FString(TEXT("en")) : FString(TEXT("ja"));
+}
+
+void UTBGameUserSettings::SetLanguage(const FString& Code)
+{
+	Language = Code == TEXT("en") ? TEXT("en") : TEXT("ja");
+}
+
+void UTBGameUserSettings::CommitLanguage()
+{
+	if (TBText::SetLanguage(GetLanguage()))
+	{
+		SaveSettings();
+	}
+	else
+	{
+		Language = TBText::GetLanguage();
 	}
 }
 

@@ -23,7 +23,7 @@ class UTextBlock;
 class UTexture2D;
 class UVerticalBox;
 
-/** オプション画面（音・画面・操作）。タイトル・ロビー・試合中のメニューから、同じ画面を開く。
+/** オプション画面（音・画面・操作・言語）。タイトル・ロビー・試合中のメニューから、同じ画面を開く。
     値の範囲と初期値は UTBConfigData、プレイヤーが選んだ値は UTBGameUserSettings にある */
 UCLASS()
 class TOONSTORY_API UTBOptionsMenu : public UUserWidget
@@ -39,11 +39,11 @@ public:
 	void Dismiss();
 
 	// ページを作る側（TBOptionsPages）が使う。PageIndex は TBOptionsPage の値。
-	UTBOptionRow* AddRow(int32 PageIndex, const FString& Label, bool bBar);
-	void AddNote(int32 PageIndex, const FString& Text);
+	UTBOptionRow* AddRow(int32 PageIndex, const FText& Label, bool bBar);
+	void AddNote(int32 PageIndex, const FText& Text);
 	// キー設定の見出しと行。行は割り当てを毎回引き直す。
-	void AddHeading(int32 PageIndex, const FString& Text);
-	UTBKeyRow* AddKeyRow(int32 PageIndex, const FString& Label, FName MappingName);
+	void AddHeading(int32 PageIndex, const FText& Text);
+	UTBKeyRow* AddKeyRow(int32 PageIndex, const FText& Label, FName MappingName);
 	const TArray<TObjectPtr<UTBKeyRow>>& GetKeyRows() const
 	{
 		return KeyRows;
@@ -104,7 +104,8 @@ private:
 		Notice,   // 事情をお知らせしている
 	};
 	void Build(UTBGameUserSettings& Settings);
-	UTextBlock* MakeLabel(const FString& Text, int32 FontSize, FLinearColor Color);
+	UTextBlock* MakeLabel(const FText& Text, int32 FontSize, FLinearColor Color);
+	void RefreshLocalizedText();
 	void RefreshRows();
 	void ApplyKeyPrompt(const TB::FKeyPrompt& Prompt, const FKey& Key);
 	void CancelKeyCapture(bool bBack = true);
@@ -128,12 +129,15 @@ private:
 	UFUNCTION()
 	void ShowControls();
 	UFUNCTION()
+	void ShowLanguage();
+	UFUNCTION()
 	void ResetPage();
 	UFUNCTION()
 	void KeepVideoMode();
 	UFUNCTION()
 	void RevertVideoMode();
 	TFunction<void()> Closed;
+	FDelegateHandle LanguageChangedHandle;
 	int32 Page = 0;
 	double ConfirmUntil = 0;
 	EKeyCapture KeyCapture = EKeyCapture::None;
@@ -184,6 +188,8 @@ private:
 	TObjectPtr<UButton> CloseButton;
 	UPROPERTY(Transient)
 	TObjectPtr<UFont> PaperFont;
+	UPROPERTY(Transient)
+	TObjectPtr<UFont> HeadingFont;
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> PaperTexture;
 };

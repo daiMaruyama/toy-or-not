@@ -44,6 +44,9 @@ public:
 	FString Status = TEXT("Create a room or find friends to begin.");
 	UPROPERTY(BlueprintReadOnly)
 	TArray<FString> Rooms;
+	// Rebuild display copy from the same filtered result index used by Join, in the current language.
+	UFUNCTION(BlueprintPure)
+	FText GetRoomLabel(int32 Index) const;
 	UPROPERTY(BlueprintAssignable)
 	FTBSessionChanged Changed;
 
@@ -52,6 +55,7 @@ private:
 	friend class FTBOfflineReturnTest;
 	friend class FTBSessionBuildCompatibilityTest;
 	friend class FTBSessionJoinCleanupTest;
+	friend class FTBUILocalizationRoomsTest;
 #endif
 	enum class ESessionOperation : uint8
 	{

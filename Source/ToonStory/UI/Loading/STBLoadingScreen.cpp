@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
 
 #include "STBLoadingScreen.h"
+#include "UI/TBUIText.h"
 #include "TBLoadingScreenSettings.h"
 #include "UI/TBPaperStyle.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -12,6 +13,9 @@
 
 void STBLoadingScreen::Construct(const FArguments&)
 {
+	// Resolve localized text before MoviePlayer starts painting on the loading thread.
+	LeadText = TBText::Get(TEXT("Root.Loading.Lead"));
+	BoxText = TBText::Get(TEXT("Root.Loading.Box"));
 	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	// ロード中に消されないよう、絵とフォントはここで読み込んで持っておく。
 	for (const auto& Path : Settings->Toys)
@@ -26,6 +30,9 @@ void STBLoadingScreen::Construct(const FArguments&)
 		}
 	}
 	Font.Reset(TBPaper::Font(GetTransientPackage()));
+	HeadingFont.Reset(TBPaper::Font(GetTransientPackage(), TBPaper::EFontRole::Heading));
+	Logo.Reset(TBPaper::Art(TEXT("TitleLogo")));
+	LogoBrush = TBPaper::ImageBrush(Logo.Get());
 	Random.Initialize(int32(FPlatformTime::Cycles()));
 	// 始まった瞬間から、おもちゃがもう顔を出している。途中で切れても不自然にならないように。
 	Started = FPlatformTime::Seconds() - Settings->PeekSeconds * .4;
@@ -108,6 +115,18 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	Box(White, 0, FloorY, W, FMath::Max(2.f, H * .006f), Shade(Settings->FloorColor, 1.5f));
 	++Layer;
 
+	// A quiet title card leaves the existing peek-and-run animation unobstructed.
+	if (Logo.IsValid())
+		Box(&LogoBrush, W * .5f - H * .17f, H * .025f, H * .34f, H * .34f, FLinearColor::White);
+	if (HeadingFont.IsValid())
+	{
+		FSlateDrawElement::MakeText(Out, Layer,
+		    Geometry.ToPaintGeometry(FVector2f(W * .8f, H * .06f), FSlateLayoutTransform(FVector2f(W * .06f, H * .07f))),
+		    LeadText, FSlateFontInfo(HeadingFont.Get(), FMath::Max(14.f, H * .028f)),
+		    ESlateDrawEffect::None, TBPaper::Cream);
+	}
+	++Layer;
+
 	// おもちゃ。積み木の陰から顔を出し、様子を見てから、箱の陰へ跳ねながら走る。
 	const float BlockRight = W * .22f, BoxLeft = W * .70f;
 	const float Peek = Settings->PeekSeconds, Run = Settings->RunSeconds;
@@ -174,16 +193,34 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	Block(2, BlockRight - Cube * 1.55f, FloorY - Cube * 2.f);
 	const float BoxW = W * .25f, BoxH = H * .34f;
 	Box(&Rounded, BoxLeft, FloorY - BoxH, BoxW, BoxH, Settings->BoxColor);
+	++Layer;
 	Box(White, BoxLeft, FloorY - BoxH, BoxW, BoxH * .12f, Shade(Settings->BoxColor, .7f));
 	Box(White, BoxLeft + BoxW * .5f - 1.f, FloorY - BoxH * .88f, 2.f, BoxH * .88f, Shade(Settings->BoxColor, .75f));
+	Box(White, BoxLeft + BoxW * .43f, FloorY - BoxH, BoxW * .14f, BoxH, TBPaper::Gold);
+	++Layer;
+	Box(&Rounded, BoxLeft + BoxW * .15f, FloorY - BoxH * .58f, BoxW * .7f, BoxH * .28f, TBPaper::Paper);
+	++Layer;
+	if (HeadingFont.IsValid())
+		FSlateDrawElement::MakeText(Out, Layer,
+		    Geometry.ToPaintGeometry(FVector2f(BoxW * .6f, BoxH * .2f),
+		        FSlateLayoutTransform(FVector2f(BoxLeft + BoxW * .24f, FloorY - BoxH * .54f))),
+		    BoxText, FSlateFontInfo(HeadingFont.Get(), FMath::Max(12.f, H * .024f)),
+		    ESlateDrawEffect::None, TBPaper::Ink);
 	++Layer;
 
 	if (!Status.IsEmpty() && Font.IsValid())
 	{
+		Box(&Rounded, W * .045f, H * .825f, W * .91f, H * .105f, TBPaper::Paper);
+		// Indeterminate dots, not a fabricated loading percentage.
+		const int32 ActiveDot = int32(FPlatformTime::Seconds() * 3.0) % 3;
+		for (int32 Index = 0; Index < 3; ++Index)
+			Box(&Rounded, W * .88f + Index * H * .022f, H * .865f, H * .012f, H * .012f,
+			    Index == ActiveDot ? TBPaper::Accent : TBPaper::Gold);
+		++Layer;
 		const FSlateFontInfo Info(Font.Get(), FMath::Max(12.f, H * .03f));
 		FSlateDrawElement::MakeText(Out, Layer,
 		                            Geometry.ToPaintGeometry(FVector2f(W * .8f, H * .08f), FSlateLayoutTransform(FVector2f(W * .06f, H * .85f))),
-		                            Status, Info, ESlateDrawEffect::None, TBPaper::Cream);
+		                            Status, Info, ESlateDrawEffect::None, TBPaper::Ink);
 	}
 	Curtain(++Layer);
 	return Layer;

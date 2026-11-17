@@ -18,7 +18,7 @@ class TOONSTORY_API UTBOptionRow : public UUserWidget
 {
 	GENERATED_BODY()
 public:
-	void Build(const FString& Label, UFont* Font, UTexture2D* Paper, bool bBar);
+	void Build(const FText& Label, UFont* Font, UTexture2D* Paper, bool bBar);
 	void Refresh();
 	TFunction<void(int32 Steps)> Step;
 	TFunction<FString()> Value;

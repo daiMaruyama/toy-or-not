@@ -48,6 +48,11 @@ private:
 	TArray<TStrongObjectPtr<UTexture2D>> Textures;
 	TArray<FSlateBrush> Brushes;
 	TStrongObjectPtr<UFont> Font;
+	TStrongObjectPtr<UFont> HeadingFont;
+	TStrongObjectPtr<UTexture2D> Logo;
+	FSlateBrush LogoBrush;
+	FText LeadText;
+	FText BoxText;
 	FText Status;
 	float Exit = 0.f;
 	double ShownAt = 0;

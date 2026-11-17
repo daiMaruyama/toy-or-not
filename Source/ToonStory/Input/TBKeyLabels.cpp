@@ -2,6 +2,7 @@
 
 #include "Input/TBKeyLabels.h"
 #include "Input/TBInputSettings.h"
+#include "UI/TBUIText.h"
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/PlayerController.h"
@@ -41,30 +42,34 @@ const TArray<FName>& TB::Keys::All()
 
 const TArray<TB::FKeySection>& TB::KeySections()
 {
-	static const TArray<FKeySection> Sections = {
-	    {TEXT("共通"),
-	     {{Keys::MoveForward, TEXT("前へ")},
-	      {Keys::MoveBack, TEXT("後ろへ")},
-	      {Keys::MoveLeft, TEXT("左へ")},
-	      {Keys::MoveRight, TEXT("右へ")},
-	      {Keys::Jump, TEXT("ジャンプ")},
-	      {Keys::EmoteWave, TEXT("手ふり")},
-	      {Keys::EmoteCheer, TEXT("よろこび")},
-	      {Keys::EmoteDance, TEXT("ダンス")},
-	      {Keys::EmoteSurprise, TEXT("びっくり")}, {Keys::EmoteHairDisappear, TEXT("髪かくし")}}},
-	    {TEXT("にんげん"),
-	     {{Keys::HumanCrouch, TEXT("しゃがむ")},
-	      {Keys::HumanInteract, TEXT("つかむ・収納")},
-	      {Keys::HumanDrop, TEXT("おろす")},
-	      {Keys::HumanGaze, TEXT("凝視")}}},
-	    {TEXT("おもちゃ"),
-	     {{Keys::ToySprint, TEXT("ダッシュ")},
-	      {Keys::ToyInteract, TEXT("救助")},
-	      {Keys::ToyPush, TEXT("押す")},
-	      {Keys::ToyTaunt, TEXT("音を鳴らす")}}},
-	    {TEXT("ロビー"), {{Keys::LobbyReady, TEXT("準備")}, {Keys::LobbyStart, TEXT("開始")}}},
-	    {TEXT("リザルト"), {{Keys::ResultsNext, TEXT("次のプレイヤー")}}},
+	static TArray<FKeySection> Sections;
+	static uint32 Revision = MAX_uint32;
+	if (Revision == TBText::GetRevision() && !Sections.IsEmpty()) return Sections;
+	Sections = {
+	    {TBText::String(TEXT("Keys.Common")),
+	     {{Keys::MoveForward, TBText::String(TEXT("Keys.Action.Common_Move_Forward"))},
+	      {Keys::MoveBack, TBText::String(TEXT("Keys.Action.Common_Move_Back"))},
+	      {Keys::MoveLeft, TBText::String(TEXT("Keys.Action.Common_Move_Left"))},
+	      {Keys::MoveRight, TBText::String(TEXT("Keys.Action.Common_Move_Right"))},
+	      {Keys::Jump, TBText::String(TEXT("Keys.Action.Common_Jump"))},
+	      {Keys::EmoteWave, TBText::String(TEXT("Keys.Action.Common_EmoteWave"))},
+	      {Keys::EmoteCheer, TBText::String(TEXT("Keys.Action.Common_EmoteCheer"))},
+	      {Keys::EmoteDance, TBText::String(TEXT("Keys.Action.Common_EmoteDance"))},
+	      {Keys::EmoteSurprise, TBText::String(TEXT("Keys.Action.Common_EmoteSurprise"))}, {Keys::EmoteHairDisappear, TBText::String(TEXT("Keys.Action.Common_EmoteHairDisappear"))}}},
+	    {TBText::String(TEXT("Keys.Human")),
+	     {{Keys::HumanCrouch, TBText::String(TEXT("Keys.Action.Human_Crouch"))},
+	      {Keys::HumanInteract, TBText::String(TEXT("Keys.Action.Human_Interact"))},
+	      {Keys::HumanDrop, TBText::String(TEXT("Keys.Action.Human_Drop"))},
+	      {Keys::HumanGaze, TBText::String(TEXT("Keys.Action.Human_Gaze"))}}},
+	    {TBText::String(TEXT("Keys.Toy")),
+	     {{Keys::ToySprint, TBText::String(TEXT("Keys.Action.Toy_Sprint"))},
+	      {Keys::ToyInteract, TBText::String(TEXT("Keys.Action.Toy_Interact"))},
+	      {Keys::ToyPush, TBText::String(TEXT("Keys.Action.Toy_Push"))},
+	      {Keys::ToyTaunt, TBText::String(TEXT("Keys.Action.Toy_Taunt"))}}},
+	    {TBText::String(TEXT("Keys.Lobby")), {{Keys::LobbyReady, TBText::String(TEXT("Keys.Action.Lobby_Ready"))}, {Keys::LobbyStart, TBText::String(TEXT("Keys.Action.Lobby_Start"))}}},
+	    {TBText::String(TEXT("Keys.Results")), {{Keys::ResultsNext, TBText::String(TEXT("Keys.Action.Results_Next"))}}},
 	};
+	Revision = TBText::GetRevision();
 	return Sections;
 }
 
@@ -72,10 +77,10 @@ FString TB::FormatKey(const FKey& Key)
 {
 	if (!Key.IsValid())
 	{
-		return TEXT("未割り当て");
+		return TBText::String(TEXT("Keys.Unbound"));
 	}
-	if (Key == EKeys::LeftMouseButton) return TEXT("左クリック");
-	if (Key == EKeys::RightMouseButton) return TEXT("右クリック");
+	if (Key == EKeys::LeftMouseButton) return TBText::String(TEXT("Keys.MouseLeft"));
+	if (Key == EKeys::RightMouseButton) return TBText::String(TEXT("Keys.MouseRight"));
 	if (Key == EKeys::SpaceBar)
 	{
 		return TEXT("Space");
@@ -86,7 +91,7 @@ FString TB::FormatKey(const FKey& Key)
 	}
 	if (Key == EKeys::RightShift)
 	{
-		return TEXT("右Shift");
+		return TBText::String(TEXT("Keys.RightShift"));
 	}
 	if (Key == EKeys::LeftControl)
 	{
@@ -94,7 +99,7 @@ FString TB::FormatKey(const FKey& Key)
 	}
 	if (Key == EKeys::RightControl)
 	{
-		return TEXT("右Ctrl");
+		return TBText::String(TEXT("Keys.RightCtrl"));
 	}
 	if (Key == EKeys::LeftAlt)
 	{
@@ -102,7 +107,7 @@ FString TB::FormatKey(const FKey& Key)
 	}
 	if (Key == EKeys::RightAlt)
 	{
-		return TEXT("右Alt");
+		return TBText::String(TEXT("Keys.RightAlt"));
 	}
 	return Key.GetDisplayName(false).ToString();
 }
@@ -225,11 +230,12 @@ FString TB::MatchHintText(const APlayerController* PC, bool bHuman)
 	const FString Move = MoveKeysLabel(PC), Jump = KeyLabel(PC, Keys::Jump);
 	if (bHuman)
 	{
-		return FString::Printf(TEXT("%s 移動 ／ %s しゃがむ ／ %s ジャンプ ／ %s つかむ・収納 ／ %s おろす"), *Move,
-		                       *KeyLabel(PC, Keys::HumanCrouch), *Jump, *KeyLabel(PC, Keys::HumanInteract),
-		                       *KeyLabel(PC, Keys::HumanDrop));
+		return FText::Format(TBText::Get(TEXT("Keys.HumanHint")), FText::FromString(Move),
+		    FText::FromString(KeyLabel(PC, Keys::HumanCrouch)), FText::FromString(Jump),
+		    FText::FromString(KeyLabel(PC, Keys::HumanInteract)), FText::FromString(KeyLabel(PC, Keys::HumanDrop))).ToString();
 	}
-	return FString::Printf(TEXT("%s 移動 ／ %s ダッシュ ／ %s ジャンプ ／ %s 救助 ／ %s 押す ／ %s 音を鳴らす"), *Move,
-	                       *KeyLabel(PC, Keys::ToySprint), *Jump, *KeyLabel(PC, Keys::ToyInteract),
-	                       *KeyLabel(PC, Keys::ToyPush), *KeyLabel(PC, Keys::ToyTaunt));
+	return FText::Format(TBText::Get(TEXT("Keys.ToyHint")), FText::FromString(Move),
+	    FText::FromString(KeyLabel(PC, Keys::ToySprint)), FText::FromString(Jump),
+	    FText::FromString(KeyLabel(PC, Keys::ToyInteract)), FText::FromString(KeyLabel(PC, Keys::ToyPush)),
+	    FText::FromString(KeyLabel(PC, Keys::ToyTaunt))).ToString();
 }

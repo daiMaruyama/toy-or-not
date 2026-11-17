@@ -1,15 +1,18 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
 
 #include "TBChatBox.h"
+#include "UI/TBUIText.h"
 #include "TBPaperStyle.h"
 #include "Audio/TBAudioSubsystem.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/EditableText.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/ScaleBox.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
@@ -24,11 +27,9 @@
 
 namespace
 {
-	// 仮の配置（本番のUIが決まるまで）。1280x800の板の上で左下。ロビーは下の板のすぐ上、結果画面は角。
-	constexpr float PanelX = 68, PanelW = 520, PanelH = 220;
+	// HUDと同じ1280x800の座標系。ロビーの操作カードと結果のボードを避ける。
+	constexpr float PanelX = 68, PanelW = 520, PanelH = 280;
 	constexpr float LobbyBottom = 636, ResultsBottom = 776;
-	// 仮の色。名前は自分とほかの人で分け、出入りのお知らせは山吹色。
-	const FLinearColor SelfName(1.f, .74f, .42f), OtherName(.58f, .86f, 1.f), Body(.97f, .95f, .9f), Notice(1.f, .84f, .25f);
 }
 
 void UTBChatBox::NativeOnInitialized()
@@ -59,7 +60,7 @@ void UTBChatBox::NativeOnInitialized()
 	PanelSlot = Board->AddChildToCanvas(Panel);
 	PanelSlot->SetSize(FVector2D(PanelW, PanelH));
 	LogBack = WidgetTree->ConstructWidget<UBorder>();
-	LogBack->SetPadding(FMargin(10, 6));
+	LogBack->SetPadding(FMargin(16, 12));
 	LogBack->SetVerticalAlignment(VAlign_Bottom);
 	Panel->AddChildToVerticalBox(LogBack)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	Scroll = WidgetTree->ConstructWidget<UScrollBox>();
@@ -73,28 +74,87 @@ void UTBChatBox::NativeOnInitialized()
 	Scroll->AddChild(LineBox);
 
 	InputBack = WidgetTree->ConstructWidget<UBorder>();
-	InputBack->SetBrushColor(TBPaper::Cream);
-	InputBack->SetPadding(FMargin(10, 6));
-	Panel->AddChildToVerticalBox(InputBack)->SetPadding(FMargin(0, 4, 0, 0));
+	InputBack->SetBrush(FSlateRoundedBoxBrush(TBPaper::Muted, FVector4(0, 0, 16, 16), TBPaper::Cream, 2.f));
+	InputBack->SetPadding(FMargin(12, 8));
+	Panel->AddChildToVerticalBox(InputBack);
+	auto* InputSize = WidgetTree->ConstructWidget<USizeBox>();
+	InputSize->SetHeightOverride(52);
+	InputBack->SetContent(InputSize);
+	auto* InputCanvas = WidgetTree->ConstructWidget<UCanvasPanel>();
+	InputSize->SetContent(InputCanvas);
+	auto* InputPlate = WidgetTree->ConstructWidget<UBorder>();
+	InputPlate->SetBrush(FSlateRoundedBoxBrush(TBPaper::Lavender, 9.f));
+	InputPlate->SetPadding(FMargin(42, 4, 10, 4));
+	InputPlate->SetVerticalAlignment(VAlign_Center);
+	auto* InputPlateSlot = InputCanvas->AddChildToCanvas(InputPlate);
+	InputPlateSlot->SetAnchors(FAnchors(0, 0, 1, 1));
+	InputPlateSlot->SetOffsets(FMargin(0, 4, 108, 4));
 	Input = WidgetTree->ConstructWidget<UEditableText>();
 	Input->SetFont(FSlateFontInfo(PaperFont, 15));
 	FEditableTextStyle Style = Input->WidgetStyle;
 	Style.SetColorAndOpacity(TBPaper::Ink);
 	Input->SetWidgetStyle(Style);
-	Input->SetHintText(FText::FromString(FString::Printf(TEXT("Enterで送る ／ Escでやめる（%d文字まで）"), TB::Rules().Chat.MaxLength)));
+	Input->SetHintText(TBText::Get(TEXT("Root.Chat.Placeholder")));
 	// 早すぎて送れなかったときも、打ち直さずに続けられるようにフォーカスを残す。
 	Input->SetClearKeyboardFocusOnCommit(false);
 	Input->OnTextChanged.AddDynamic(this, &UTBChatBox::TextChanged);
 	Input->OnTextCommitted.AddDynamic(this, &UTBChatBox::TextCommitted);
-	InputBack->SetContent(Input);
-	// 閉じている間は、入力欄の出る所に開き方を出す。
+	InputPlate->SetContent(Input);
+	auto* TalkIcon = WidgetTree->ConstructWidget<UImage>();
+	TalkIcon->SetBrushFromTexture(TBPaper::Art(TEXT("Icon_TalkT")));
+	TalkIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+	auto* TalkSlot = InputCanvas->AddChildToCanvas(TalkIcon);
+	TalkSlot->SetPosition(FVector2D(8, 12));
+	TalkSlot->SetSize(FVector2D(28, 28));
+	SendButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SendChatButton"));
+	FButtonStyle SendStyle = TBPaper::CompactButtonStyle();
+	SendStyle.SetNormal(FSlateRoundedBoxBrush(TBPaper::Teal, 10.f, TBPaper::Cream, 2.f));
+	SendStyle.SetHovered(FSlateRoundedBoxBrush(TBPaper::Teal, 10.f, TBPaper::Gold, 3.f));
+	SendStyle.SetPressed(FSlateRoundedBoxBrush((TBPaper::Teal * .8f).CopyWithNewOpacity(1.f), 10.f, TBPaper::Cream, 2.f));
+	SendButton->SetStyle(SendStyle);
+	// クリックで入力欄からフォーカスを奪わない。キーボードでは従来どおりEnterで送れる。
+	// UButton has no public setter in UE 5.8; this is set before its Slate widget is built.
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	SendButton->IsFocusable = false;
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	SendButton->SetToolTipText(TBText::Get(TEXT("Root.Chat.SendHint")));
+	auto* SendText = WidgetTree->ConstructWidget<UTextBlock>();
+	SendText->SetText(TBText::Get(TEXT("Root.Chat.Send")));
+	SendText->SetFont(FSlateFontInfo(PaperFont, 18));
+	SendText->SetColorAndOpacity(TBPaper::Paper);
+	SendButton->SetContent(SendText);
+	SendButton->OnClicked.AddDynamic(this, &UTBChatBox::SendClicked);
+	auto* SendSlot = InputCanvas->AddChildToCanvas(SendButton);
+	SendSlot->SetAnchors(FAnchors(1, 0, 1, 1));
+	SendSlot->SetAlignment(FVector2D(1, 0));
+	SendSlot->SetOffsets(FMargin(0, 4, 96, 4));
+	// 入力中は送信方法と文字数を出す。
 	OpenHint = WidgetTree->ConstructWidget<UTextBlock>();
-	OpenHint->SetText(FText::FromString(TEXT("Enter チャットを開く")));
+	OpenHint->SetText(TBText::Get(TEXT("Root.Chat.Open")));
 	OpenHint->SetFont(FSlateFontInfo(PaperFont, 13));
 	OpenHint->SetColorAndOpacity(FLinearColor(1, 1, 1, .75f));
 	OpenHint->SetShadowOffset(FVector2D(1, 1));
 	OpenHint->SetShadowColorAndOpacity(FLinearColor(0, 0, 0, .8f));
 	Panel->AddChildToVerticalBox(OpenHint)->SetPadding(FMargin(10, 4, 0, 0));
+	// 履歴が薄れても入口は残す。キーボードと同じController経路で開く。
+	OpenButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("OpenChatButton"));
+	FButtonStyle OpenStyle = TBPaper::CompactButtonStyle(true);
+	OpenStyle.SetNormalPadding(FMargin(16, 10));
+	OpenStyle.SetPressedPadding(FMargin(16, 12, 16, 8));
+	OpenButton->SetStyle(OpenStyle);
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	OpenButton->IsFocusable = false;
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	OpenButton->SetToolTipText(TBText::Get(TEXT("Root.Chat.Open")));
+	auto* OpenText = WidgetTree->ConstructWidget<UTextBlock>();
+	OpenText->SetText(TBText::Get(TEXT("Root.Chat.Open")));
+	OpenText->SetFont(FSlateFontInfo(PaperFont, 15));
+	OpenText->SetColorAndOpacity(TBPaper::Ink);
+	OpenButton->SetContent(OpenText);
+	OpenButton->OnClicked.AddDynamic(this, &UTBChatBox::OpenClicked);
+	auto* OpenSlot = Panel->AddChildToVerticalBox(OpenButton);
+	OpenSlot->SetHorizontalAlignment(HAlign_Left);
+	OpenSlot->SetPadding(FMargin(0, 6, 0, 0));
 	SetResultsLayout(false);
 	SetOpen(false);
 }
@@ -113,10 +173,16 @@ void UTBChatBox::SetResultsLayout(bool bInResults)
 void UTBChatBox::SetOpen(bool bInOpen)
 {
 	bOpen = bInOpen;
-	Panel->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::HitTestInvisible);
-	LogBack->SetBrushColor(FLinearColor(0, 0, 0, bOpen ? .5f : 0.f));
+	Panel->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::SelfHitTestInvisible);
+	LogBack->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::HitTestInvisible);
+	LogBack->SetBrush(FSlateRoundedBoxBrush(TBPaper::Ink.CopyWithNewOpacity(bOpen ? .58f : 0.f),
+	    FVector4(16, 16, 0, 0), TBPaper::Cream.CopyWithNewOpacity(bOpen ? 1.f : 0.f), 2.f));
 	InputBack->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	OpenHint->SetVisibility(bOpen ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	OpenHint->SetText(bOpen
+	    ? FText::Format(TBText::Get(TEXT("Root.Chat.Controls")), Input->GetText().ToString().Len(), TB::Rules().Chat.MaxLength)
+	    : TBText::Get(TEXT("Root.Chat.Open")));
+	OpenHint->SetVisibility(bOpen ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	OpenButton->SetVisibility(bOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	if (bOpen)
 	{
 		Input->SetKeyboardFocus();
@@ -164,19 +230,36 @@ void UTBChatBox::AddLine(const FTBChatLine& Line)
 		Block->SetText(FText::FromString(Value));
 		Block->SetFont(FSlateFontInfo(PaperFont, 15));
 		Block->SetColorAndOpacity(Color);
-		Block->SetShadowOffset(FVector2D(1, 1));
-		Block->SetShadowColorAndOpacity(FLinearColor(0, 0, 0, .8f));
+		Block->SetShadowColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.7f));
+		Block->SetShadowOffset(FVector2D(0, 1));
+		Block->SetAutoWrapText(true);
+		Block->SetWrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping);
 		return Block;
 	};
 	auto* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 	if (!Line.bNotice)
 	{
-		Row->AddChildToHorizontalBox(MakeText(Line.Name + TEXT(": "), Line.bSelf ? SelfName : OtherName));
+		// 履歴に陣営情報は無い。青いラベルは送信者の表示で、陣営色ではない。
+		auto* NameSize = WidgetTree->ConstructWidget<USizeBox>();
+		NameSize->SetWidthOverride(110);
+		auto* NamePlate = WidgetTree->ConstructWidget<UBorder>();
+		NamePlate->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(45, 142, 170)), 7.f));
+		NamePlate->SetPadding(FMargin(8, 3));
+		NameSize->SetContent(NamePlate);
+		auto* Name = MakeText(Line.Name, TBPaper::Paper);
+		Name->SetFont(FSlateFontInfo(PaperFont, 13));
+		Name->SetWrapTextAt(94);
+		Name->SetJustification(ETextJustify::Center);
+		NamePlate->SetContent(Name);
+		Row->AddChildToHorizontalBox(NameSize)->SetVerticalAlignment(VAlign_Top);
 	}
-	auto* Text = MakeText(Line.Text, Line.bNotice ? Notice : Body);
-	Text->SetAutoWrapText(true);
-	Row->AddChildToHorizontalBox(Text)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-	LineBox->AddChildToVerticalBox(Row)->SetPadding(FMargin(0, 1));
+	auto* Text = MakeText(Line.bNotice ? TBText::TranslateNotice(Line.Text) : Line.Text,
+	    Line.bNotice ? TBPaper::Gold : TBPaper::Paper);
+	Text->SetWrapTextAt(Line.bNotice ? PanelW - 32 : PanelW - 154);
+	auto* TextSlot = Row->AddChildToHorizontalBox(Text);
+	TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	TextSlot->SetPadding(FMargin(Line.bNotice ? 0 : 12, 2, 0, 0));
+	LineBox->AddChildToVerticalBox(Row)->SetPadding(FMargin(0, 4));
 	LineWidgets.Add(Row);
 	LineIds.Add(Line.Id);
 	LineOpacity.Add(-1.f); // まだ何も入れていない
@@ -186,9 +269,17 @@ void UTBChatBox::AddLine(const FTBChatLine& Line)
 // 消えた行はCollapsedにせず、透明のまま場所を残す。高さが減ると、ScrollToEndが古い高さで処理される数フレームに、残りの行がずれるため。
 void UTBChatBox::RefreshLines(const UTBChatLog& Log, double Now)
 {
-	if (Log.GetRevision() != BuiltRevision)
+	if (BuiltLanguageRevision != TBText::GetRevision())
+	{
+		LineBox->ClearChildren();
+		LineWidgets.Reset();
+		LineIds.Reset();
+		LineOpacity.Reset();
+	}
+	if (Log.GetRevision() != BuiltRevision || BuiltLanguageRevision != TBText::GetRevision())
 	{
 		Sync(Log);
+		BuiltLanguageRevision = TBText::GetRevision();
 	}
 	const double ShowSeconds = TB::Rules().Chat.ShowSeconds;
 	const auto& Lines = Log.GetLines();
@@ -232,6 +323,11 @@ void UTBChatBox::TextChanged(const FText& Text)
 	{
 		Input->SetText(FText::FromString(TB::Chat::Limit(Value, MaxLength)));
 	}
+	if (bOpen && OpenHint)
+	{
+		OpenHint->SetText(FText::Format(TBText::Get(TEXT("Root.Chat.Controls")),
+		    FMath::Min(Value.Len(), MaxLength), MaxLength));
+	}
 }
 
 void UTBChatBox::TextCommitted(const FText& Text, ETextCommit::Type Method)
@@ -258,6 +354,19 @@ void UTBChatBox::TextCommitted(const FText& Text, ETextCommit::Type Method)
 	}
 	Input->SetText(FText::GetEmpty());
 	PC->CloseChat();
+}
+
+void UTBChatBox::SendClicked()
+{
+	if (!bOpen || !Input) return;
+	TextCommitted(Input->GetText(), ETextCommit::OnEnter);
+	// 連続送信制限などで送れなかった場合は、入力を残してすぐ修正できるようにする。
+	if (bOpen) Input->SetKeyboardFocus();
+}
+
+void UTBChatBox::OpenClicked()
+{
+	if (auto* PC = Cast<ATBController>(GetOwningPlayer())) PC->OpenChat();
 }
 
 FReply UTBChatBox::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)

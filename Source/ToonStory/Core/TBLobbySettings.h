@@ -33,6 +33,7 @@ namespace TBLobbySettings
 	inline constexpr int32 HouseStageId = 3;
 	const TCHAR* StagePath(int32 Index);
 	int32 StageIndex(const UWorld* World);
+	int32 StageItemCount(int32 Index);
 	int32 AvailableItems(UWorld* World);
 	void SelectStage(ATBController* Host, int32 Index);
 	void Restore(ATBGameMode* Mode);

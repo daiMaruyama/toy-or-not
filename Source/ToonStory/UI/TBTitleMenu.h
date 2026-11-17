@@ -11,7 +11,7 @@ class UButton;
 class UTextBlock;
 class UTexture2D;
 
-/** Temporary UMG menu; observes the existing session subsystem. */
+/** Title menu; observes the existing session subsystem. */
 UCLASS()
 class TOONSTORY_API UTBTitleMenu : public UUserWidget
 {
@@ -66,7 +66,7 @@ protected:
 	virtual void NativeTick(const FGeometry& Geometry, float DeltaTime) override;
 
 	// 以下は WBP_TitleMenu に置けば、置いたものを使う。名前を合わせる。無ければ C++ が従来どおり作る。
-	// ScaleBox（TitleScale）の中の 1280×800 の Canvas（TitleCanvas）に、ボタンなどを置く。
+	// ScaleBox（TitleScale）の中の 1600×900 の Canvas（TitleCanvas）に、ボタンなどを置く。
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UScaleBox> TitleScale;
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UCanvasPanel> TitleCanvas;
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<UButton> HostButton;
@@ -74,7 +74,7 @@ protected:
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<UButton> HelpButton;
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<UButton> OptionsButton;
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<UButton> QuitButton;
-	// ロゴの画像。ブラシに画像を設定すると、仮の TOON / STORY の文字は出さない。画像が無ければ隠す。
+	// ロゴの画像。ブラシに画像を設定すると、仮の TOY / or NOT? の文字は出さない。画像が無ければ隠す。
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UImage> LogoImage;
 	// カーソルを乗せたボタンの左に出す集中線。普段は隠れている。
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UImage> HostBurst;
@@ -83,6 +83,15 @@ protected:
 
 private:
 	void BuildPaperLayout();
+	void UpdateTitleCaptions();
+	struct FTitleCaption
+	{
+		TWeakObjectPtr<UButton> Button;
+		TWeakObjectPtr<class UImage> Patch;
+		TWeakObjectPtr<UWidget> Layer;
+		FString Key, Original;
+	};
+	TArray<FTitleCaption> TitleCaptions;
 	// 乗せているボタンの集中線だけを出す。
 	void UpdateBursts();
 	void EnterMenu();
@@ -103,6 +112,7 @@ private:
 	float IdleSeconds = 0.f;
 	FVector2D LastCursor = FVector2D::ZeroVector;
 	bool bRoomCardsShown = false;
+	uint32 LanguageRevision = 0;
 	TWeakObjectPtr<class ALevelSequenceActor> StoryActor;
 	UPROPERTY(Transient) TObjectPtr<UWidget> Blackout;
 	UPROPERTY(Transient) TObjectPtr<UWidget> MenuLayer;
@@ -111,6 +121,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UButton> JoinButton;
 	UPROPERTY(Transient) TObjectPtr<UComboBoxString> RoomList;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> StatusText;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> RoomHintText;
 	UFUNCTION() void Refresh();
 	UFUNCTION() void Hover();
 	UFUNCTION() void Host();

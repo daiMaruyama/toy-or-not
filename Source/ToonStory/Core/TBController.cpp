@@ -688,6 +688,8 @@ void ATBController::TBQuit()
 
 void ATBController::TBReady()
 {
+	const auto* HUD = Cast<ATBHUD>(GetHUD());
+	if (HUD && HUD->IsStagePickerOpen()) return;
 	ServerReady();
 }
 
@@ -706,6 +708,8 @@ void ATBController::ServerReturnToLobby_Implementation()
 
 void ATBController::TBStart()
 {
+	const auto* HUD = Cast<ATBHUD>(GetHUD());
+	if (HUD && HUD->IsStagePickerOpen()) return;
 	ServerStart();
 }
 

@@ -1,6 +1,7 @@
-// Copyright (c) 2026 Mamodou. All Rights Reserved.
+﻿// Copyright (c) 2026 Mamodou. All Rights Reserved.
 
 #include "UI/TBTitleMenu.h"
+#include "UI/TBUIText.h"
 #include "Audio/TBAudioSubsystem.h"
 #include "Core/TBSession.h"
 #include "Core/TBTitleStory.h"
@@ -253,6 +254,12 @@ void UTBTitleMenu::NativeDestruct()
 void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 {
 	Super::NativeTick(Geometry, DeltaTime);
+	if (LanguageRevision != TBText::GetRevision())
+	{
+		LanguageRevision = TBText::GetRevision();
+		RefreshHelpText();
+		Refresh();
+	}
 	if (State == EState::Menu && MenuFade < 1.f)
 	{
 		MenuFade = FMath::Min(1.f, MenuFade + DeltaTime / MenuFadeSeconds);
@@ -272,6 +279,7 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 	}
 	UpdateIdle(DeltaTime);
 	UpdateBursts();
+	UpdateTitleCaptions();
 	WidgetTree->ForEachWidget([DeltaTime](UWidget* Widget)
 	{
 		if (auto* Button = Cast<UButton>(Widget))
@@ -296,9 +304,12 @@ void UTBTitleMenu::Refresh()
 	const int32 Previous = RoomList->GetSelectedIndex();
 	RoomList->ClearOptions();
 	for (int32 Index = 0; Index < Session->Rooms.Num(); ++Index)
-		RoomList->AddOption(FString::Printf(TEXT("%d  %s"), Index + 1, *Session->Rooms[Index]));
+		RoomList->AddOption(FString::Printf(TEXT("%d  %s"), Index + 1, *Session->GetRoomLabel(Index).ToString()));
 	if (!Session->Rooms.IsEmpty()) RoomList->SetSelectedIndex(FMath::Clamp(Previous, 0, Session->Rooms.Num() - 1));
 	JoinButton->SetIsEnabled(Ready && Session->Rooms.IsValidIndex(RoomList->GetSelectedIndex()));
+	RoomHintText->SetText(FText::FromString(!Ready ? TBText::Literal(TEXT("Root.Title.Searching")) :
+	    Session->Rooms.IsEmpty() ? TBText::Literal(TEXT("Root.Title.Empty")) :
+	    TBText::Literal(TEXT("Root.Title.JoinHint"))));
 	// 普段の案内は出さない。通信中やエラーなど、知らせることがあるときだけ出す。
 	const bool bIdle = Session->Status == TEXT("Create a room or find friends to begin.");
 	StatusText->SetText(bIdle ? FText::GetEmpty() : FText::FromString(TBPaper::Status(Session->Status)));

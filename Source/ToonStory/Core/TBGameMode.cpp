@@ -464,9 +464,6 @@ void ATBGameMode::SyncLobbyCounts()
 	const int32 ParticipantLimit = GameSession ? GameSession->MaxPlayers : 0;
 	State->Settings.NPCHumans = FMath::Clamp(State->Settings.NPCHumans, 0, FMath::Max(0, ParticipantLimit - Count));
 	State->Settings.NPCToys = FMath::Clamp(State->Settings.NPCToys, 0, FMath::Max(0, ParticipantLimit - Count - State->Settings.NPCHumans));
-	// Reserve a real player for each team that has no NPC, when both teams can be filled.
-	const int32 MinimumHumans = Count > 0 && State->Settings.NPCHumans == 0 ? 1 : 0;
-	const int32 MaximumHumans = Count > 0 && State->Settings.NPCToys == 0 && (Count > 1 || State->Settings.NPCHumans > 0) ? Count - 1 : Count;
 	int32 HumanPreferences = 0, ToyPreferences = 0;
 	for (const APlayerState* Player : State->PlayerArray)
 	{
@@ -475,9 +472,10 @@ void ATBGameMode::SyncLobbyCounts()
 		HumanPreferences += Info->Preference == ETBTeam::Human ? 1 : 0;
 		ToyPreferences += Info->Preference == ETBTeam::Toy ? 1 : 0;
 	}
-	// Only "either" players may fill missing teams. Explicit choices are never overridden.
-	const int32 BalancedHumans = FMath::Clamp(State->Settings.Humans, MinimumHumans, MaximumHumans);
-	const int32 Humans = FMath::Clamp(BalancedHumans, HumanPreferences, Count - ToyPreferences);
+	// Counts are derived from choices, not a previous host-selected quota. Only random players fill remaining slots.
+	const FTBSettings Defaults;
+	const int32 Humans = TBRuleMath::AutoHumanPlayers(Count, HumanPreferences, ToyPreferences,
+	    State->Settings.NPCHumans, State->Settings.NPCToys, Defaults.Humans, Defaults.Toys);
 	if (State->Settings.Humans == Humans && State->Settings.Toys == Count - Humans) return;
 	State->Settings.Humans = Humans;
 	State->Settings.Toys = Count - Humans;
@@ -494,24 +492,15 @@ void ATBGameMode::SetRules(APlayerController* PlayerController, const FTBSetting
 	}
 	const int32 Count = LobbyPlayerCount();
 	FTBSettings Adjusted = Rules;
-	// A single changed field determines the other; explicit pairs must already match the lobby.
-	if (Rules.Humans != MatchInfo->Settings.Humans && Rules.Toys == MatchInfo->Settings.Toys)
-	{
-		if (Rules.Humans < 0 || Rules.Humans > Count) return;
-		Adjusted.Toys = Count - Rules.Humans;
-	}
-	else if (Rules.Toys != MatchInfo->Settings.Toys && Rules.Humans == MatchInfo->Settings.Humans)
-	{
-		if (Rules.Toys < 0 || Rules.Toys > Count) return;
-		Adjusted.Humans = Count - Rules.Toys;
-	}
+	// The host changes match rules and NPCs; player teams come only from individual choices and automatic assignment.
+	Adjusted.Humans = MatchInfo->Settings.Humans;
+	Adjusted.Toys = MatchInfo->Settings.Toys;
 	const int32 ParticipantLimit = GameSession ? GameSession->MaxPlayers : 0;
 	const int32 NPCLimit = FMath::Max(0, ParticipantLimit - 1); // Reserve a slot for the host.
 	// 下限はロビーの最短より緩め、テスト用コマンドの短い試合も通す。
-	if (!GameSession || Adjusted.Humans < 0 || Adjusted.Toys < 0 ||
-	    Rules.NPCHumans < 0 || Rules.NPCHumans > NPCLimit || Rules.NPCToys < 0 || Rules.NPCToys > NPCLimit ||
+	if (!GameSession || Rules.NPCHumans < 0 || Rules.NPCHumans > NPCLimit || Rules.NPCToys < 0 || Rules.NPCToys > NPCLimit ||
 	    int64(Count) + Rules.NPCHumans + Rules.NPCToys > ParticipantLimit ||
-	    int64(Adjusted.Humans) + Adjusted.Toys != Count || Count > GameSession->MaxPlayers || !FMath::IsFinite(Rules.Duration) ||
+	    Count > GameSession->MaxPlayers || !FMath::IsFinite(Rules.Duration) ||
 	    Rules.Duration < 10 || Rules.Duration > TB::Rules().Match.MaxDuration || Rules.RequiredItems < 1)
 	{
 		return;

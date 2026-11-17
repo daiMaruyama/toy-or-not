@@ -7,6 +7,7 @@
 
 struct FTBChatLine;
 class UBorder;
+class UButton;
 class UTBChatLog;
 class UCanvasPanelSlot;
 class UEditableText;
@@ -44,6 +45,10 @@ private:
 	void TextChanged(const FText& Text);
 	UFUNCTION()
 	void TextCommitted(const FText& Text, ETextCommit::Type Method);
+	UFUNCTION()
+	void SendClicked();
+	UFUNCTION()
+	void OpenClicked();
 	void Sync(const UTBChatLog& Log);
 	void AddLine(const FTBChatLine& Line);
 	void RequestScrollToEnd();
@@ -53,6 +58,7 @@ private:
 	bool bResults = false;
 	bool bLayoutApplied = false;
 	uint32 BuiltRevision = MAX_uint32;
+	uint32 BuiltLanguageRevision = MAX_uint32;
 	// LineWidgetsと同じ並び。行の通し番号と、最後に入れた透明度（-1はまだ入れていない）。
 	TArray<uint64> LineIds;
 	TArray<float> LineOpacity;
@@ -72,6 +78,10 @@ private:
 	TObjectPtr<UBorder> InputBack;
 	UPROPERTY(Transient)
 	TObjectPtr<UEditableText> Input;
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> SendButton;
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> OpenButton;
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> OpenHint;
 	// 履歴と同じ並び。

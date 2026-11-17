@@ -2,6 +2,8 @@
 
 #include "UI/TBKeyRow.h"
 #include "Blueprint/WidgetTree.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
+#include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -10,8 +12,9 @@
 #include "GameFramework/PlayerController.h"
 #include "Input/TBKeyLabels.h"
 #include "TBPaperStyle.h"
+#include "TBUIText.h"
 
-void UTBKeyRow::Build(const FString& Label, FName InMappingName, UFont* Font, UTexture2D* Paper)
+void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTexture2D* Paper)
 {
 	MappingName = InMappingName;
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
@@ -26,26 +29,38 @@ void UTBKeyRow::Build(const FString& Label, FName InMappingName, UFont* Font, UT
 		Slot->SetPosition(FVector2D(X, Y));
 		Slot->SetSize(FVector2D(W, H));
 	};
-	auto Text = [&](const FString& String, int32 FontSize)
+	auto Text = [&](const FText& String, int32 FontSize)
 	{
 		auto* Block = WidgetTree->ConstructWidget<UTextBlock>();
-		Block->SetText(FText::FromString(String));
+		Block->SetText(String);
 		Block->SetFont(FSlateFontInfo(Font, FontSize));
 		Block->SetColorAndOpacity(TBPaper::Ink);
+		Block->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+		Block->SetToolTipText(String);
 		return Block;
 	};
-	Place(Text(Label, 20), 0, 10, 230, 36);
-	KeyText = Text(TEXT(""), 19);
+	auto* Divider = WidgetTree->ConstructWidget<UBorder>();
+	Divider->SetBrushColor(TBPaper::Outline.CopyWithNewOpacity(.28f));
+	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(Divider, 8, 49, 784, 1);
+	auto* KeyPlate = WidgetTree->ConstructWidget<UBorder>();
+	KeyPlate->SetBrush(FSlateRoundedBoxBrush(TBPaper::Paper, 8.f, TBPaper::Outline, 2.5f));
+	KeyPlate->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(KeyPlate, 240, 4, 360, 42);
+	Place(Text(Label, 19), 8, 10, 224, 36);
+	KeyText = Text(FText::GetEmpty(), 19);
 	KeyText->SetJustification(ETextJustify::Center);
 	Place(KeyText, 240, 10, 360, 36);
 	auto* ResetButton = WidgetTree->ConstructWidget<UButton>();
-	ResetButton->SetStyle(TBPaper::ButtonStyle(Paper));
-	ResetButton->SetContent(Text(TEXT("戻す"), 19));
+	ResetButton->SetStyle(TBPaper::CompactButtonStyle(true));
+	ResetButton->SetContent(Text(TBText::Get(TEXT("Keys.Reset")), 16));
+	ResetButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Keys.ResetTooltip")), Label));
 	Place(ResetButton, 612, 3, 84, 44);
 	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetClicked);
 	ChangeButton = WidgetTree->ConstructWidget<UButton>();
-	ChangeButton->SetStyle(TBPaper::ButtonStyle(Paper));
-	ChangeButton->SetContent(Text(TEXT("変える"), 19));
+	ChangeButton->SetStyle(TBPaper::CompactButtonStyle());
+	ChangeButton->SetContent(Text(TBText::Get(TEXT("Keys.Change")), 16));
+	ChangeButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Keys.ChangeTooltip")), Label));
 	Place(ChangeButton, 716, 3, 84, 44);
 	ChangeButton->OnClicked.AddDynamic(this, &ThisClass::Clicked);
 }
@@ -53,6 +68,7 @@ void UTBKeyRow::Build(const FString& Label, FName InMappingName, UFont* Font, UT
 void UTBKeyRow::Refresh()
 {
 	KeyText->SetText(FText::FromString(TB::KeyLabel(GetOwningPlayer(), MappingName)));
+	KeyText->SetToolTipText(KeyText->GetText());
 }
 
 void UTBKeyRow::FocusButton()

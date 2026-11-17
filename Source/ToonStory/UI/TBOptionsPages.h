@@ -3,6 +3,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "TBOptionRow.h"
+#include "TBUIText.h"
 
 class UTBGameUserSettings;
 class UTBOptionsMenu;
@@ -15,6 +16,7 @@ namespace TBOptionsPage
 		Audio,
 		Display,
 		Controls,
+		Language,
 		Count
 	};
 }
@@ -28,7 +30,7 @@ namespace TBOptionsPages
 
 	inline FString OnOff(bool bOn)
 	{
-		return bOn ? TEXT("オン") : TEXT("オフ");
+		return TBText::String(bOn ? TEXT("Options.On") : TEXT("Options.Off"));
 	}
 
 	// 範囲の中の位置（0〜1）。スライダーの位置に使う。

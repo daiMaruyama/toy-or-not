@@ -22,6 +22,7 @@
 #include "NavigationPath.h"
 #include "NavigationData.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Tests/AutomationCommon.h"
@@ -651,13 +652,28 @@ bool FTBNPCSettingsUITest::RunTest(const FString& Parameters)
 	auto* PC = Cast<ATBController>(World->GetFirstPlayerController());
 	auto* HUD = PC ? Cast<ATBHUD>(PC->GetHUD()) : nullptr;
 	auto* State = World->GetGameState<ATBGameState>();
-	if (!HUD || !State) return false;
+	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
+	if (!HUD || !State || !Pending) return false;
 	const auto Original = State->Settings;
+	const int32 OriginalStage = State->SelectedStage, OriginalPendingStage = Pending->SelectedStage;
+	const FString OriginalStageName = State->StageName;
+	const bool bOriginalStageSelected = Pending->bStageSelected;
 	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
-	HUD->NotifyHitBoxClick(TEXT("MoreNPCHumans"));
-	HUD->NotifyHitBoxClick(TEXT("MoreNPCToys"));
-	TestEqual(TEXT("NPC human button reaches authority settings"), State->Settings.NPCHumans, Original.NPCHumans + 1);
-	TestEqual(TEXT("NPC toy button reaches authority settings"), State->Settings.NPCToys, Original.NPCToys + 1);
+	TestTrue(TEXT("NPC settings opens the integrated stage editor"), HUD->IsStagePickerOpen());
+	const bool bInitiallyOff = Original.NPCHumans + Original.NPCToys == 0;
+	if (bInitiallyOff) HUD->NotifyHitBoxClick(TEXT("ToggleDraftNPCs"));
+	HUD->NotifyHitBoxClick(TEXT("DraftMoreNPCHumans"));
+	HUD->NotifyHitBoxClick(TEXT("DraftMoreNPCToys"));
+	TestEqual(TEXT("NPC human draft does not change saved settings"), State->Settings.NPCHumans, Original.NPCHumans);
+	TestEqual(TEXT("NPC toy draft does not change saved settings"), State->Settings.NPCToys, Original.NPCToys);
+	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
+	TestEqual(TEXT("Save applies the NPC human count"), State->Settings.NPCHumans, Original.NPCHumans + 1);
+	TestEqual(TEXT("Save applies the NPC toy count including the first-enable default"),
+	    State->Settings.NPCToys, Original.NPCToys + 1 + (bInitiallyOff ? 1 : 0));
+	TestFalse(TEXT("Save closes game settings"), HUD->IsLobbySettingsOpen());
+	TestFalse(TEXT("Save closes the stage draft"), HUD->IsStagePickerOpen());
+	// Capture the saved values in the same integrated editor.
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
 	ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(1.f));
 	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([]()
 	{
@@ -665,10 +681,16 @@ bool FTBNPCSettingsUITest::RunTest(const FString& Parameters)
 		return true;
 	}));
 	ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(1.f));
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([HUD, State, Original]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([HUD, State, Pending, Original, OriginalStage,
+	    OriginalPendingStage, OriginalStageName, bOriginalStageSelected]()
 	{
 		HUD->NotifyHitBoxClick(TEXT("CloseSettings"));
 		State->Settings = Original;
+		State->SelectedStage = OriginalStage;
+		State->StageName = OriginalStageName;
+		Pending->SelectedStage = OriginalPendingStage;
+		Pending->bStageSelected = bOriginalStageSelected;
+		State->ForceNetUpdate();
 		return true;
 	}));
 	return true;

@@ -16,7 +16,7 @@ class TOONSTORY_API UTBKeyRow : public UUserWidget
 {
 	GENERATED_BODY()
 public:
-	void Build(const FString& Label, FName InMappingName, UFont* Font, UTexture2D* Paper);
+	void Build(const FText& Label, FName InMappingName, UFont* Font, UTexture2D* Paper);
 	// 割り当ては変わるので、毎回キー名を引き直す。
 	void Refresh();
 	FName GetMappingName() const

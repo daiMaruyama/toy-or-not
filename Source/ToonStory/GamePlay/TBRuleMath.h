@@ -5,6 +5,20 @@
 // UEに依存しないルール計算。ゲーム本体と単体テストで同じ式を使う。
 namespace TBRuleMath
 {
+	// Explicit choices win. Random players fill missing teams and approach the default ratio, including fixed NPCs.
+	inline int AutoHumanPlayers(int Players, int HumanChoices, int ToyChoices, int NPCHumans, int NPCToys,
+	                           int DefaultHumans, int DefaultToys)
+	{
+		if (Players <= 0) return 0;
+		auto Clamp = [](int Value, int Low, int High) { return Value < Low ? Low : Value > High ? High : Value; };
+		const int Weight = DefaultHumans + DefaultToys;
+		const double HumanShare = Weight > 0 ? double(DefaultHumans) / Weight : .5;
+		const int Target = int(std::round((double(Players) + NPCHumans + NPCToys) * HumanShare)) - NPCHumans;
+		const int Minimum = NPCHumans == 0 ? 1 : 0;
+		const int Maximum = NPCToys == 0 && (Players > 1 || NPCHumans > 0) ? Players - 1 : Players;
+		return Clamp(Clamp(Target, Minimum, Maximum), HumanChoices, Players - ToyChoices);
+	}
+
 	// UE distances are centimeters. At exactly N meters the toy is protected.
 	inline bool DarknessProtects(bool LightsOn, double DistanceSquaredCm, float DistanceMeters)
 	{

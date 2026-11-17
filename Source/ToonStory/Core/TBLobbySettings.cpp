@@ -75,6 +75,10 @@ int32 TBLobbySettings::StageIndex(const UWorld* World)
 	}
 	return INDEX_NONE;
 }
+int32 TBLobbySettings::StageItemCount(int32 Index)
+{
+	return FindStage(Index)->ItemCount;
+}
 int32 TBLobbySettings::AvailableItems(UWorld* World)
 {
 	// Authored pickup counts for the retained Demo and Stylized House. Revalidated on arrival
