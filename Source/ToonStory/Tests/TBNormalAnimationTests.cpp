@@ -509,7 +509,13 @@ bool FTBEmoteTest::RunTest(const FString&)
 	TArray<AActor*> Fixtures;
 	ON_SCOPE_EXIT
 	{
-		for (auto* Actor : Fixtures) if (IsValid(Actor)) Actor->Destroy();
+		for (auto* Actor : Fixtures)
+			if (IsValid(Actor))
+			{
+				// Simulated proxies also belong to this standalone fixture; restore authority for destruction.
+				Actor->SetRole(ROLE_Authority);
+				TestTrue(TEXT("Emote fixture actor is removed"), Actor->Destroy());
+			}
 		State->Phase = OriginalPhase; State->HidePreparation = OriginalHide; State->EndTime = OriginalEnd;
 		State->Winner = OriginalWinner;
 		State->bTravelPending = bOriginalTravelPending;
@@ -626,6 +632,22 @@ bool FTBEmoteTest::RunTest(const FString&)
 		}
 		Hair->SetHiddenInGame(false);
 	}
+	// Lobby avatars use the human appearance before a match assigns a team.
+	State->Phase = ETBPhase::Lobby; Player->Team = ETBTeam::None;
+	Source->ApplyState(); Proxy->ApplyState(); Stand(Source); Stand(Proxy);
+	if (!Start(ETBEmoteKind::HairDisappear)) return false;
+	Deliver(); Proxy->UpdateHairEmote();
+	TestTrue(TEXT("Unassigned lobby avatar presents the hair emote"), Proxy->GetEmoteSample(Sample) && Sample.Kind == ETBEmoteKind::HairDisappear);
+	for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Proxy->HumanVisual->GetChildActor()))
+		if (Part->GetFName() == TEXT("Hair")) TestTrue(TEXT("Lobby scalp hair is hidden"), Part->bHiddenInGame);
+	State->bTravelPending = true;
+	TestFalse(TEXT("Lobby travel still blocks hair emotes"), Source->EmoteGameplayEligible());
+	Proxy->UpdateHairEmote();
+	for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Proxy->HumanVisual->GetChildActor()))
+		if (Part->GetFName() == TEXT("Hair")) TestFalse(TEXT("Lobby travel restores hair"), Part->bHiddenInGame);
+	State->bTravelPending = false; State->Phase = ETBPhase::Playing;
+	TestFalse(TEXT("Unassigned player cannot use the hair emote during a match"), Source->SupportsEmoteKind(ETBEmoteKind::HairDisappear));
+	Player->Team = ETBTeam::Human;
 	Player->HumanAppearance.Reset(); Proxy->ApplyState();
 	State->Phase = ETBPhase::Results; State->Winner = ETBWinner::Humans;
 	if (!Start(ETBEmoteKind::Cheer)) return false;

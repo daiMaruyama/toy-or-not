@@ -6,6 +6,7 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
@@ -29,8 +30,42 @@ ATBEscapeExit::ATBEscapeExit()
 	if (Gate.Succeeded())
 	{
 		Marker->SetStaticMesh(Gate.Object);
+	}
+	// 既定は門を抜けて少し先の脇、車の高さ。マップごとにレベルで動かせる。
+	ResultOrigin = CreateDefaultSubobject<USceneComponent>(TEXT("ResultOrigin"));
+	ResultOrigin->SetupAttachment(ExitArea);
+	ResultCamera = CreateDefaultSubobject<USceneComponent>(TEXT("ResultCamera"));
+	ResultCamera->SetupAttachment(ResultOrigin);
+	const FVector CameraAt(250, 70, 35);
+	ResultCamera->SetRelativeLocation(CameraAt);
+	ResultCamera->SetRelativeRotation((FVector(-150, 0, 20) - CameraAt).Rotation());
+	Lineup = CreateDefaultSubobject<USceneComponent>(TEXT("Lineup"));
+	Lineup->SetupAttachment(ResultOrigin);
+	Lineup->SetRelativeLocation(FVector(-250, 0, 0));
+	Lineup->SetRelativeRotation(FRotator(0, 180, 0));
+	RefreshAppearance();
+}
+
+void ATBEscapeExit::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	RefreshAppearance();
+}
+
+void ATBEscapeExit::BeginPlay()
+{
+	Super::BeginPlay();
+	RefreshAppearance();
+}
+
+void ATBEscapeExit::RefreshAppearance()
+{
+	// 子の手動調整を保ち、保存済みインスタンスの判定高さに演出全体を合わせる。
+	ResultOrigin->SetRelativeLocation(FVector(0, 0, -ExitArea->GetUnscaledBoxExtent().Z));
+	if (const UStaticMesh* Gate = Marker->GetStaticMesh())
+	{
 		// 門の通過方向を +X に向け、出口範囲の幅と底面に揃える。
-		const FBox Bounds = Gate.Object->GetBoundingBox();
+		const FBox Bounds = Gate->GetBoundingBox();
 		const FVector Extent = ExitArea->GetUnscaledBoxExtent();
 		const float Scale = Extent.Y * 2.f / FMath::Max(1.f, float(Bounds.GetSize().X));
 		const FRotator Rotation(0, 90, 0);
@@ -39,17 +74,6 @@ ATBEscapeExit::ATBEscapeExit()
 		Marker->SetRelativeScale3D(FVector(Scale));
 		Marker->SetRelativeLocation(FVector(-Center.X, -Center.Y, -Extent.Z - Bounds.Min.Z * Scale));
 	}
-	// 既定は門を抜けて少し先の脇、車の高さ。マップごとにレベルで動かせる。
-	const float Floor = -ExitArea->GetUnscaledBoxExtent().Z;
-	ResultCamera = CreateDefaultSubobject<USceneComponent>(TEXT("ResultCamera"));
-	ResultCamera->SetupAttachment(ExitArea);
-	const FVector CameraAt(250, 70, Floor + 35);
-	ResultCamera->SetRelativeLocation(CameraAt);
-	ResultCamera->SetRelativeRotation((FVector(-150, 0, Floor + 20) - CameraAt).Rotation());
-	Lineup = CreateDefaultSubobject<USceneComponent>(TEXT("Lineup"));
-	Lineup->SetupAttachment(ExitArea);
-	Lineup->SetRelativeLocation(FVector(-250, 0, Floor));
-	Lineup->SetRelativeRotation(FRotator(0, 180, 0));
 }
 
 FVector ATBEscapeExit::ResultPassPoint() const

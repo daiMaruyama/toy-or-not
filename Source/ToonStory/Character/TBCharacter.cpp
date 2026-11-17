@@ -356,8 +356,12 @@ bool ATBCharacter::RequestEmote(ETBEmoteKind Kind)
 
 bool ATBCharacter::SupportsEmoteKind(ETBEmoteKind Kind) const
 {
+	const auto* Player = TBPS();
+	const auto* State = TB::GS(GetWorld());
+	const bool HumanAppearance = Player && (Player->Team == ETBTeam::Human ||
+	    (Player->Team == ETBTeam::None && State && State->Phase == ETBPhase::Lobby));
 	return EmoteDuration(Kind) > 0 &&
-	    (Kind != ETBEmoteKind::HairDisappear || (TBPS() && TBPS()->Team == ETBTeam::Human));
+	    (Kind != ETBEmoteKind::HairDisappear || HumanAppearance);
 }
 
 void ATBCharacter::ServerEmote_Implementation(ETBEmoteKind Kind, uint32 ExpectedRound, uint32 ExpectedPossession)

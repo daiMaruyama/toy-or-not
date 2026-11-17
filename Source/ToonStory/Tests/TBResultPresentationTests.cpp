@@ -11,6 +11,8 @@
 #include "GamePlay/Items/TBEscapeVehicle.h"
 #include "GamePlay/TBBoxLid.h"
 #include "Camera/CameraActor.h"
+#include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/ScopeExit.h"
@@ -63,6 +65,38 @@ bool FTBResultPresentationTest::RunTest(const FString&)
 		Toy->ApplyState();
 		Toy->SetActorTransform(OldTransform);
 	};
+	// 保存済みの門と同じ縮小を行い、外観だけでなく演出の高さも底面へ揃うことを確認する。
+	Exit->ExitArea->SetBoxExtent(FVector(20, 60, 75));
+	Exit->OnConstruction(Exit->GetActorTransform());
+	const double GateFloor = Exit->GetActorLocation().Z - 75.;
+	TestTrue(TEXT("Resized gate lineup stands on its floor"),
+	         FMath::IsNearlyEqual(Exit->LineupSpot(0, 1).GetLocation().Z, GateFloor, .01));
+	TestTrue(TEXT("Resized gate parking stays on its floor"),
+	         FMath::IsNearlyEqual(Exit->ParkSpot().GetLocation().Z, GateFloor, .01));
+	TestTrue(TEXT("Resized gate camera keeps its height above the floor"),
+	         FMath::IsNearlyEqual(Exit->ResultCamera->GetComponentLocation().Z, GateFloor + 35., .01));
+	const FTransform DefaultCamera = Exit->ResultCamera->GetRelativeTransform();
+	const FTransform DefaultLineup = Exit->Lineup->GetRelativeTransform();
+	Exit->ResultCamera->AddLocalOffset(FVector(10, -20, 12));
+	Exit->ResultCamera->AddLocalRotation(FRotator(5, 10, 0));
+	Exit->Lineup->AddLocalOffset(FVector(15, 25, 7));
+	Exit->Lineup->AddLocalRotation(FRotator(0, 20, 0));
+	const FTransform CustomCamera = Exit->ResultCamera->GetRelativeTransform();
+	const FTransform CustomLineup = Exit->Lineup->GetRelativeTransform();
+	const FVector CameraBeforeResize = Exit->ResultCamera->GetComponentLocation();
+	const FVector LineupBeforeResize = Exit->LineupSpot(0, 1).GetLocation();
+	Exit->ExitArea->SetBoxExtent(FVector(20, 60, 60));
+	Exit->OnConstruction(Exit->GetActorTransform());
+	Exit->OnConstruction(Exit->GetActorTransform());
+	TestTrue(TEXT("Repeated construction preserves customized camera and lineup transforms"),
+	         Exit->ResultCamera->GetRelativeTransform().Equals(CustomCamera) && Exit->Lineup->GetRelativeTransform().Equals(CustomLineup));
+	TestTrue(TEXT("Changing gate height moves the customized camera and lineup with its floor"),
+	         Exit->ResultCamera->GetComponentLocation().Equals(CameraBeforeResize + FVector(0, 0, 15), .01) &&
+	         Exit->LineupSpot(0, 1).GetLocation().Equals(LineupBeforeResize + FVector(0, 0, 15), .01));
+	Exit->ResultCamera->SetRelativeTransform(DefaultCamera);
+	Exit->Lineup->SetRelativeTransform(DefaultLineup);
+	Exit->ExitArea->SetBoxExtent(FVector(20, 60, 75));
+	Exit->OnConstruction(Exit->GetActorTransform());
 	Info->Team = ETBTeam::Toy;
 	Info->ToyState = ETBToyState::Free;
 	Toy->ApplyState();

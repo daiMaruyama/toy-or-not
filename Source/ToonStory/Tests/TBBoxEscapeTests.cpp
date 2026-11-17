@@ -18,6 +18,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/GameInstance.h"
 #include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
@@ -241,6 +242,7 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	const double LandingZ = 120 + Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() +
 	    (UCharacterMovementComponent::MIN_FLOOR_DIST + UCharacterMovementComponent::MAX_FLOOR_DIST) * .5;
 	const FVector Landing(400, 100, LandingZ);
+	const FVector Finish(400, 100, 120 + Course->EscapeHeightAboveFinalSupport + Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	if (!Store(TEXT("Real capture stores the toy"), Toy)) return false;
 	TestEqual(TEXT("One toy outside keeps the round playing"), State->Phase, ETBPhase::Playing);
 	const uint32 FirstCapture = Box->CaptureGeneration(Toy);
@@ -263,10 +265,20 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	Place(Landing + FVector(0, 0, -10), MOVE_Falling);
 	TestEqual(TEXT("Feet below the finish height cannot escape"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Place(FVector(200, 0, 160), MOVE_Falling);
-	TestEqual(TEXT("Reaching finish height anywhere in the course escapes while airborne"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	TestEqual(TEXT("Jumping above goal height before the final platform cannot escape"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(Landing, MOVE_Falling);
+	TestEqual(TEXT("Reaching the final step height is not enough"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(Landing + FVector(20, 0, 0));
+	TestEqual(TEXT("Standing outside the final goal cannot escape"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(Landing);
+	TestEqual(TEXT("Standing on the final step does not escape before jumping"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(Finish + FVector(0, 0, -.1), MOVE_Falling);
+	TestEqual(TEXT("Feet just below the raised finish line stay boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(Finish + FVector(-150, -100, 0), MOVE_Falling);
+	TestEqual(TEXT("Jump height releases anywhere in the course without a goal XY landing"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	TestTrue(TEXT("Escape reaches the safe exit"), Toy->GetActorLocation().Equals(ExitLocation, 1.f));
 	if (!Store(TEXT("Recapture succeeds"), Toy)) return false;
-	Place(Landing);
+	Place(Finish, MOVE_Falling);
 	TestEqual(TEXT("Recapture must descend again; previous arming is not reused"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	TestFalse(TEXT("Old capture token cannot release a new capture"), Box->ReleasePrisoner(Toy, FirstCapture, {Exit->GetActorTransform()}));
 	Place(FVector(200, 0, 20));
@@ -278,22 +290,22 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	Blocker->SetActorLocation(ExitLocation);
 	Place(Landing, MOVE_Walking, false);
 	TestTrue(TEXT("Second actual walking floor resolves the other allowed support"), Toy->GetCharacterMovement()->CurrentFloor.HitResult.GetComponent() == SupportB);
-	Course->Tick(0);
+	Place(Finish, MOVE_Falling);
 	TestEqual(TEXT("A blocked exit keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Course->Tick(0);
-	TestEqual(TEXT("An unblocked exit releases on the next supported landing check"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	TestEqual(TEXT("An unblocked exit releases while still above the jump finish line"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	if (!Store(TEXT("Another capture succeeds"), Toy)) return false;
 	Place(FVector(200, 0, 20));
 	State->EndTime = State->GetServerWorldTimeSeconds() - .01;
 	Mode->CheckWin(); // The game mode ticks before the course in the real world.
-	Place(Landing);
-	TestEqual(TEXT("Deadline takes precedence over final landing escape"), State->Winner, ETBWinner::Humans);
+	Place(Finish, MOVE_Falling);
+	TestEqual(TEXT("Deadline takes precedence over jump escape"), State->Winner, ETBWinner::Humans);
 	TestEqual(TEXT("Expired round cannot release the toy"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Toy = Begin(TEXT("Tokenless boxed rejection"));
 	if (!Toy) return false;
 	Toy->SetToyState(ETBToyState::Boxed);
-	Place(FVector(200, 0, 20)); Place(Landing);
+	Place(FVector(200, 0, 20)); Place(Finish, MOVE_Falling);
 	TestEqual(TEXT("Boxed state without a real capture cannot authorize escape"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Toy = Begin(TEXT("All boxed regression"));
 	if (!Toy) return false;
@@ -304,8 +316,89 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	if (!Store(TEXT("Last toy is stored"), OtherToy)) return false;
 	TestEqual(TEXT("All boxed ends immediately, without an escape grace period"), State->Phase, ETBPhase::Results);
 	TestEqual(TEXT("All boxed awards the human victory"), State->Winner, ETBWinner::Humans);
-	Place(Landing);
+	Place(Finish, MOVE_Falling);
 	TestEqual(TEXT("Previously armed toy cannot escape after the last capture"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBBoxEscapeAuthoredTest, "ToonStory.Playroom.BoxEscapeAuthored",
+    EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBBoxEscapeAuthoredTest::RunTest(const FString&)
+{
+	UWorld* World = nullptr;
+	for (const auto& Context : GEngine->GetWorldContexts())
+		if (Context.WorldType == EWorldType::Game) World = Context.World();
+	if (!World || (TBLobbySettings::StageIndex(World) != 1 && TBLobbySettings::StageIndex(World) != 3)) return false;
+	ATBBoxEscapeCourse* Course = nullptr;
+	for (TActorIterator<ATBBoxEscapeCourse> It(World); It; ++It) Course = *It;
+	if (!TestNotNull(TEXT("Authored course"), Course)) return false;
+	FString Error;
+	if (!TestTrue(TEXT("Saved final platform and exit contract"), Course->Validate(Error)))
+	{ AddError(Error); return false; }
+	FActorSpawnParameters Spawn; Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto* Toy = World->SpawnActor<ATBCharacter>(FVector(0, 0, -10000), FRotator::ZeroRotator, Spawn);
+	auto* Player = World->SpawnActor<ATBPlayerState>();
+	ON_SCOPE_EXIT { if (Toy) Toy->Destroy(); if (Player) Player->Destroy(); };
+	if (!Toy || !Player) return false;
+	Player->Team = ETBTeam::Toy; Toy->SetPlayerState(Player); Toy->ApplyState();
+	const auto* Goal = CastChecked<UBoxComponent>(Course->Goal->GetCollisionComponent());
+	const FBox Bounds = Goal->Bounds.GetBox();
+	FHitResult Hit;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(TBAuthoredLanding), false, Toy);
+	const FVector Center = Bounds.GetCenter();
+	if (!TestTrue(TEXT("Real final support trace"), World->LineTraceSingleByChannel(Hit,
+	    FVector(Center.X, Center.Y, Bounds.Max.Z), FVector(Center.X, Center.Y, Bounds.Min.Z - 4), ECC_GameTraceChannel1, Query))) return false;
+	const FVector Standing = Hit.ImpactPoint + FVector(0, 0, Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 2.15);
+	Toy->SetActorLocation(Standing, false, nullptr, ETeleportType::TeleportPhysics);
+	Toy->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+	TestFalse(TEXT("Arriving at final step height does not finish an airborne toy"), Course->ReachedGoal(Toy));
+	Toy->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	TestFalse(TEXT("Final step requires a jump, not merely a landing"), Course->ReachedGoal(Toy));
+	auto* Movement = Toy->GetCharacterMovement();
+	Movement->bRunPhysicsWithNoController = true;
+	Movement->FindFloor(Standing, Movement->CurrentFloor, false);
+	if (!TestTrue(TEXT("Jump starts on the authored final support"), Movement->CurrentFloor.IsWalkableFloor() &&
+	    Movement->CurrentFloor.HitResult.GetComponent() == Hit.GetComponent())) return false;
+	TestTrue(TEXT("The real final step permits jumping"), Movement->DoJump(false, 1.f / 60.f));
+	bool FinishedInAir = false;
+	for (int32 Frame = 0; Frame < 75; ++Frame)
+	{
+		Movement->TickComponent(1.f / 60.f, LEVELTICK_All, nullptr);
+		FinishedInAir |= Movement->IsFalling() && Course->ReachedGoal(Toy);
+	}
+	TestTrue(TEXT("A physical jump from the final step crosses the finish line"), FinishedInAir);
+	Toy->SetActorLocation(Standing + FVector(-70, 0, -60), false, nullptr, ETeleportType::TeleportPhysics);
+	Movement->SetMovementMode(MOVE_Walking); Movement->Velocity = FVector::ZeroVector;
+	Movement->FindFloor(Toy->GetActorLocation(), Movement->CurrentFloor, false);
+	if (!TestTrue(TEXT("Early-jump check starts on the real preceding step"), Movement->CurrentFloor.IsWalkableFloor() &&
+	    FMath::IsNearlyEqual(Movement->CurrentFloor.HitResult.ImpactPoint.Z, Hit.ImpactPoint.Z - 60., .5))) return false;
+	TestTrue(TEXT("The preceding step permits jumping"), Movement->DoJump(false, 1.f / 60.f));
+	bool FinishedEarly = false;
+	for (int32 Frame = 0; Frame < 75; ++Frame)
+	{
+		Movement->TickComponent(1.f / 60.f, LEVELTICK_All, nullptr);
+		FinishedEarly |= Course->ReachedGoal(Toy);
+	}
+	TestFalse(TEXT("A physical jump from the preceding step cannot finish"), FinishedEarly);
+	Toy->SetActorLocation(Standing + FVector(-50, 0, Course->EscapeHeightAboveFinalSupport), false, nullptr, ETeleportType::TeleportPhysics);
+	TestTrue(TEXT("Crossing the height beside the goal is also a finish"), Course->ReachedGoal(Toy));
+	AStaticMeshActor* FirstStep = nullptr;
+	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+		if (It->GetName() == TEXT("StaticMeshActor_7") &&
+		    UWorld::RemovePIEPrefix(It->GetLevel()->GetOutermost()->GetName()) == TEXT("/Game/Maps/TB_ToyBoxRoom")) FirstStep = *It;
+	if (!TestNotNull(TEXT("Shared first-step collision"), FirstStep)) return false;
+	const FVector StepCenter = FirstStep->GetActorLocation();
+	auto* StepMesh = FirstStep->GetStaticMeshComponent();
+	const double LowSideZ = StepMesh->Bounds.GetBox().Max.Z - 24.;
+	// Nearby book meshes may intercept a world trace before it reaches the footing.
+	// Check the footing's low collision geometry and camera response independently.
+	const bool HitFirstStep = StepMesh->LineTraceComponent(Hit,
+	    FVector(StepCenter.X - 40, StepCenter.Y, LowSideZ),
+	    FVector(StepCenter.X + 40, StepCenter.Y, LowSideZ), Query);
+	TestTrue(TEXT("Camera is blocked by the lower first step itself"),
+	    HitFirstStep && StepMesh->IsQueryCollisionEnabled() && StepMesh->GetCollisionResponseToChannel(ECC_Camera) == ECR_Block);
+	TestTrue(TEXT("First step retains its original platform top"),
+	    FMath::IsNearlyEqual(FirstStep->GetStaticMeshComponent()->Bounds.GetBox().Max.Z, 30., .01));
+	return !HasAnyErrors();
 }
 #endif
