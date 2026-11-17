@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
 
 #include "STBLoadingScreen.h"
-#include "UI/TBUIText.h"
 #include "TBLoadingScreenSettings.h"
 #include "UI/TBPaperStyle.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -13,9 +12,6 @@
 
 void STBLoadingScreen::Construct(const FArguments&)
 {
-	// Resolve localized text before MoviePlayer starts painting on the loading thread.
-	LeadText = TBText::Get(TEXT("Root.Loading.Lead"));
-	BoxText = TBText::Get(TEXT("Root.Loading.Box"));
 	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	// ロード中に消されないよう、絵とフォントはここで読み込んで持っておく。
 	for (const auto& Path : Settings->Toys)
@@ -30,9 +26,6 @@ void STBLoadingScreen::Construct(const FArguments&)
 		}
 	}
 	Font.Reset(TBPaper::Font(GetTransientPackage()));
-	HeadingFont.Reset(TBPaper::Font(GetTransientPackage(), TBPaper::EFontRole::Heading));
-	Logo.Reset(TBPaper::Art(TEXT("TitleLogo")));
-	LogoBrush = TBPaper::ImageBrush(Logo.Get());
 	Random.Initialize(int32(FPlatformTime::Cycles()));
 	// 始まった瞬間から、おもちゃがもう顔を出している。途中で切れても不自然にならないように。
 	Started = FPlatformTime::Seconds() - Settings->PeekSeconds * .4;
@@ -93,7 +86,10 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 		Curtain(Layer);
 		return Layer;
 	}
-	static const FSlateRoundedBoxBrush Rounded(FLinearColor::White, 6.f);
+	static const FSlateRoundedBoxBrush Rounded(FLinearColor::White, 8.f);
+	// Let Slate derive the radius from each element's height, including tiny dots and shadows.
+	static const FSlateRoundedBoxBrush Pill(FLinearColor::White);
+	const float S = FMath::Min(W / 1280.f, H / 720.f);
 	auto Box = [&](const FSlateBrush* Brush, float X, float Y, float BW, float BH, FLinearColor Color)
 	{
 		FSlateDrawElement::MakeBox(Out, Layer, Geometry.ToPaintGeometry(FVector2f(BW, BH), FSlateLayoutTransform(FVector2f(X, Y))),
@@ -104,31 +100,24 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 		return FLinearColor(Color.R * Scale, Color.G * Scale, Color.B * Scale, Color.A);
 	};
 
-	// 部屋。上ほど暗い壁と、床。
-	const float FloorY = H * .74f;
+	// Quiet paper backdrop. Keep the animation as one small scene, without a title or logo.
+	const FLinearColor Wall = FMath::Lerp(TBPaper::Paper, Settings->WallColor, .035f);
+	const FLinearColor Floor = FMath::Lerp(TBPaper::Cream, Settings->FloorColor, .08f);
+	const float FloorY = H * .5f + 55 * S;
 	FSlateDrawElement::MakeGradient(
-	    Out, Layer, Geometry.ToPaintGeometry(FVector2f(W, FloorY), FSlateLayoutTransform()),
-	    {FSlateGradientStop(FVector2D(0, 0), Shade(Settings->WallColor, .55f)),
-	     FSlateGradientStop(FVector2D(0, FloorY), Settings->WallColor)},
+	    Out, Layer, Geometry.ToPaintGeometry(),
+	    {FSlateGradientStop(FVector2D(0, 0), Wall),
+	     FSlateGradientStop(FVector2D(0, H), TBPaper::Cream)},
 	    Orient_Horizontal);
-	Box(White, 0, FloorY, W, H - FloorY, Settings->FloorColor);
-	Box(White, 0, FloorY, W, FMath::Max(2.f, H * .006f), Shade(Settings->FloorColor, 1.5f));
 	++Layer;
-
-	// A quiet title card leaves the existing peek-and-run animation unobstructed.
-	if (Logo.IsValid())
-		Box(&LogoBrush, W * .5f - H * .17f, H * .025f, H * .34f, H * .34f, FLinearColor::White);
-	if (HeadingFont.IsValid())
-	{
-		FSlateDrawElement::MakeText(Out, Layer,
-		    Geometry.ToPaintGeometry(FVector2f(W * .8f, H * .06f), FSlateLayoutTransform(FVector2f(W * .06f, H * .07f))),
-		    LeadText, FSlateFontInfo(HeadingFont.Get(), FMath::Max(14.f, H * .028f)),
-		    ESlateDrawEffect::None, TBPaper::Cream);
-	}
+	// A pale rug and a fine base line give the cutout toys somewhere to stand.
+	Box(&Pill, W * .5f - 456 * S, FloorY - 10 * S, 912 * S, 57 * S, Floor.CopyWithNewOpacity(.6f));
+	Box(&Pill, W * .5f - 417 * S, FloorY + 3 * S, 834 * S, 2 * S,
+	    TBPaper::Muted.CopyWithNewOpacity(.18f));
 	++Layer;
 
 	// おもちゃ。積み木の陰から顔を出し、様子を見てから、箱の陰へ跳ねながら走る。
-	const float BlockRight = W * .22f, BoxLeft = W * .70f;
+	const float BlockRight = W * .5f - 250 * S, BoxLeft = W * .5f + 250 * S;
 	const float Peek = Settings->PeekSeconds, Run = Settings->RunSeconds;
 	const double Period = Peek + Run + Settings->HiddenSeconds;
 	double Elapsed = FPlatformTime::Seconds() - Started;
@@ -146,7 +135,7 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	if (Brushes.IsValidIndex(Toy) && T < Peek + Run)
 	{
 		const FSlateBrush& Brush = Brushes[Toy];
-		const float ToyH = H * Settings->ToyHeight;
+		const float ToyH = 720 * S * Settings->ToyHeight * .82f;
 		const float ToyW = ToyH * float(Brush.ImageSize.X / FMath::Max(Brush.ImageSize.Y, 1.0));
 		const float PeekX = BlockRight - ToyW * .45f;
 		float X, Lift = 0, Angle = 0;
@@ -156,7 +145,7 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 			// そっと出てきて、きょろきょろと後ろを振り返る。
 			const float Out01 = FMath::InterpEaseOut(0.f, 1.f, FMath::Min(T / .35f, 1.f), 2.f);
 			X = FMath::Lerp(BlockRight - ToyW, PeekX, Out01);
-			Lift = FMath::Abs(FMath::Sin(T * 7.f)) * H * .006f;
+			Lift = FMath::Abs(FMath::Sin(T * 7.f)) * 3 * S;
 			bLookBack = T > Peek * .45f && T < Peek * .75f;
 		}
 		else
@@ -164,11 +153,12 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 			const float U = (T - Peek) / Run;
 			X = FMath::Lerp(PeekX, BoxLeft + ToyW * .15f, FMath::InterpEaseInOut(0.f, 1.f, U, 1.6f));
 			const float Hop = FMath::Sin(U * Settings->Hops * PI);
-			Lift = FMath::Abs(Hop) * H * .045f;
+			Lift = FMath::Abs(Hop) * 20 * S;
 			Angle = FMath::DegreesToRadians(-5.f + 6.f * FMath::Sin(U * Settings->Hops * 2.f * PI));
 		}
 		// 影は床に残し、体だけ跳ねる。
-		Box(&Rounded, X + ToyW * .25f, FloorY - H * .008f, ToyW * .5f, H * .016f, FLinearColor(0, 0, 0, .35f));
+		Box(&Pill, X + ToyW * .2f, FloorY - 4 * S, ToyW * .6f, 10 * S,
+		    TBPaper::Muted.CopyWithNewOpacity(.19f));
 		FSlateBrush Drawn = Brush;
 		Drawn.Mirroring = bLookBack ? ESlateBrushMirrorType::Horizontal : ESlateBrushMirrorType::NoMirror;
 		FSlateDrawElement::MakeBox(
@@ -180,46 +170,66 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	++Layer;
 
 	// 手前の積み木と箱。おもちゃはこの陰に隠れる。
-	const float Cube = H * .14f;
+	const float Cube = 82 * S;
 	const TArray<FLinearColor>& Colors = Settings->BlockColors;
 	auto Block = [&](int32 Index, float X, float Y)
 	{
-		const FLinearColor Color = Colors.Num() ? Colors[Index % Colors.Num()] : FLinearColor::Gray;
-		Box(&Rounded, X, Y, Cube, Cube, Color);
-		Box(&Rounded, X + Cube * .18f, Y + Cube * .18f, Cube * .64f, Cube * .64f, Shade(Color, 1.25f));
+		const FLinearColor Original = Colors.Num() ? Colors[Index % Colors.Num()] : TBPaper::Teal;
+		const FLinearColor Color = FMath::Lerp(Original, TBPaper::Cream, .42f);
+		Box(&Rounded, X + 3 * S, Y + 5 * S, Cube, Cube, TBPaper::Shadow.CopyWithNewOpacity(.12f));
+		Box(&Rounded, X, Y, Cube, Cube, TBPaper::Muted);
+		Box(&Rounded, X + 2 * S, Y + 2 * S, Cube - 4 * S, Cube - 4 * S, Color);
+		Box(&Rounded, X + Cube * .13f, Y + Cube * .13f, Cube * .74f, Cube * .74f, TBPaper::Cream);
+		Box(&Rounded, X + Cube * .17f, Y + Cube * .17f, Cube * .66f, Cube * .66f, Color);
+		// Simple inset shapes instead of letters: the decoration needs no translation.
+		if (Index == 1)
+		{
+			Box(&Pill, X + Cube * .34f, Y + Cube * .34f, Cube * .32f, Cube * .32f, TBPaper::Cream);
+			Box(&Pill, X + Cube * .41f, Y + Cube * .41f, Cube * .18f, Cube * .18f, Color);
+		}
+		else
+		{
+			Box(&Rounded, X + Cube * .29f, Y + Cube * .45f, Cube * .42f, Cube * .1f, TBPaper::Cream);
+			Box(&Rounded, X + Cube * .45f, Y + Cube * .29f, Cube * .1f, Cube * .42f, TBPaper::Cream);
+		}
 	};
 	Block(0, BlockRight - Cube * 2.f, FloorY - Cube);
 	Block(1, BlockRight - Cube, FloorY - Cube);
 	Block(2, BlockRight - Cube * 1.55f, FloorY - Cube * 2.f);
-	const float BoxW = W * .25f, BoxH = H * .34f;
-	Box(&Rounded, BoxLeft, FloorY - BoxH, BoxW, BoxH, Settings->BoxColor);
+	const float BoxW = 182 * S;
+	const float BoxH = FMath::Max(196 * S, 720 * S * Settings->ToyHeight * .82f + 8 * S);
+	const FLinearColor Cardboard = FMath::Lerp(Settings->BoxColor, TBPaper::Cream, .56f);
+	Box(&Pill, BoxLeft - 5 * S, FloorY - 3 * S, BoxW + 20 * S, 14 * S,
+	    TBPaper::Muted.CopyWithNewOpacity(.2f));
+	Box(&Rounded, BoxLeft, FloorY - BoxH, BoxW, BoxH, TBPaper::Muted);
+	Box(&Rounded, BoxLeft + 2 * S, FloorY - BoxH + 2 * S, BoxW - 4 * S, BoxH - 4 * S, Cardboard);
 	++Layer;
-	Box(White, BoxLeft, FloorY - BoxH, BoxW, BoxH * .12f, Shade(Settings->BoxColor, .7f));
-	Box(White, BoxLeft + BoxW * .5f - 1.f, FloorY - BoxH * .88f, 2.f, BoxH * .88f, Shade(Settings->BoxColor, .75f));
-	Box(White, BoxLeft + BoxW * .43f, FloorY - BoxH, BoxW * .14f, BoxH, TBPaper::Gold);
+	// Folded cardboard rim, paper tape and a small pull slot, with no printed label.
+	Box(&Rounded, BoxLeft - 5 * S, FloorY - BoxH - 4 * S, BoxW + 10 * S, 21 * S, TBPaper::Muted);
+	Box(&Rounded, BoxLeft - 3 * S, FloorY - BoxH - 2 * S, BoxW + 6 * S, 17 * S, Shade(Cardboard, 1.1f));
+	Box(White, BoxLeft + BoxW * .44f, FloorY - BoxH, BoxW * .12f, BoxH - 2 * S, TBPaper::Gold);
 	++Layer;
-	Box(&Rounded, BoxLeft + BoxW * .15f, FloorY - BoxH * .58f, BoxW * .7f, BoxH * .28f, TBPaper::Paper);
-	++Layer;
-	if (HeadingFont.IsValid())
-		FSlateDrawElement::MakeText(Out, Layer,
-		    Geometry.ToPaintGeometry(FVector2f(BoxW * .6f, BoxH * .2f),
-		        FSlateLayoutTransform(FVector2f(BoxLeft + BoxW * .24f, FloorY - BoxH * .54f))),
-		    BoxText, FSlateFontInfo(HeadingFont.Get(), FMath::Max(12.f, H * .024f)),
-		    ESlateDrawEffect::None, TBPaper::Ink);
+	Box(&Pill, BoxLeft + BoxW * .35f, FloorY - BoxH * .72f, BoxW * .3f, 9 * S, TBPaper::Muted);
+	Box(&Pill, BoxLeft + BoxW * .35f + 2 * S, FloorY - BoxH * .72f + 2 * S,
+	    BoxW * .3f - 4 * S, 3 * S, Shade(Cardboard, .65f));
 	++Layer;
 
 	if (!Status.IsEmpty() && Font.IsValid())
 	{
-		Box(&Rounded, W * .045f, H * .825f, W * .91f, H * .105f, TBPaper::Paper);
+		const float StatusX = W * .5f - 250 * S, StatusY = FloorY + 88 * S;
+		Box(&Pill, StatusX, StatusY, 500 * S, 54 * S, TBPaper::Paper.CopyWithNewOpacity(.85f));
 		// Indeterminate dots, not a fabricated loading percentage.
-		const int32 ActiveDot = int32(FPlatformTime::Seconds() * 3.0) % 3;
 		for (int32 Index = 0; Index < 3; ++Index)
-			Box(&Rounded, W * .88f + Index * H * .022f, H * .865f, H * .012f, H * .012f,
-			    Index == ActiveDot ? TBPaper::Accent : TBPaper::Gold);
+		{
+			const float Pulse = .5f + .5f * FMath::Sin(float(FPlatformTime::Seconds()) * 3.f - Index * .7f);
+			Box(&Pill, StatusX + (426 + Index * 17) * S, StatusY + 23 * S, 7 * S, 7 * S,
+			    FMath::Lerp(TBPaper::Cream, TBPaper::Teal, Pulse));
+		}
 		++Layer;
-		const FSlateFontInfo Info(Font.Get(), FMath::Max(12.f, H * .03f));
+		const FSlateFontInfo Info(Font.Get(), FMath::Max(12.f, 22 * S));
 		FSlateDrawElement::MakeText(Out, Layer,
-		                            Geometry.ToPaintGeometry(FVector2f(W * .8f, H * .08f), FSlateLayoutTransform(FVector2f(W * .06f, H * .85f))),
+		                            Geometry.ToPaintGeometry(FVector2f(388 * S, 36 * S),
+		                                FSlateLayoutTransform(FVector2f(StatusX + 24 * S, StatusY + 10 * S))),
 		                            Status, Info, ESlateDrawEffect::None, TBPaper::Ink);
 	}
 	Curtain(++Layer);

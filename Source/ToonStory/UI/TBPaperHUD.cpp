@@ -675,15 +675,7 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 	const auto* Mine = PC->GetPawn<ATBCharacter>();
 	if (Mine && Mine->IsCelebrating())
 	{
-		// 勝った人は自分のキャラを映しているので、エモートを促す。
-		const FString HairKey = ResultPlayer && ResultPlayer->Team == ETBTeam::Human
-		    ? FString::Format(TBText::Literal(TEXT("Canvas.EmoteExtra")), {*TB::KeyLabel(PC, TB::Keys::EmoteHairDisappear)}) : FString();
-		PaperPanel(TBPaper::Cream, X, Y, 680 * S, 78 * S);
-		DrawText(MatchState.Winner == ETBWinner::Humans ? TBText::Literal(TEXT("Canvas.TidiedCelebrate")) : TBText::Literal(TEXT("Canvas.Celebrate")),
-		         TBPaper::Ink, X + 24 * S, Y + 10 * S, PaperFont, S);
-		DrawText(FString::Format(TBText::Literal(TEXT("Canvas.EmoteKeys")), {*TB::KeyLabel(PC, TB::Keys::EmoteWave), *TB::KeyLabel(PC, TB::Keys::EmoteCheer),
-		                         *TB::KeyLabel(PC, TB::Keys::EmoteDance), *TB::KeyLabel(PC, TB::Keys::EmoteSurprise), *HairKey}),
-		         TBPaper::Muted, X + 24 * S, Y + 42 * S, PaperFont, .8f * S);
+		// Winners keep their own character in view without an extra instruction panel.
 		return;
 	}
 	// 観戦中は、映している勝者の名前と、切り替えられるときだけ切り替えのキーを出す。
@@ -740,6 +732,115 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	if (MatchState.IsPreparing())
 		Banner(FString::Format(TBText::Literal(TEXT("Canvas.HideSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}), TBPaper::Accent);
 	const bool Child = Player && Player->Team == ETBTeam::Human;
+	const auto* LocalCharacter = Controller.GetPawn<ATBCharacter>();
+	// Keep destination labels in the constrained camera Canvas, including letterboxed views.
+	// A projection alone is insufficient: a point behind the camera must still guide the turn.
+	FVector GuideViewLocation;
+	FRotator GuideViewRotation;
+	Controller.GetPlayerViewPoint(GuideViewLocation, GuideViewRotation);
+	const FVector GuideRight = FRotationMatrix(GuideViewRotation).GetUnitAxis(EAxis::Y);
+	TArray<FBox2D> GuidePanels;
+	GuidePanels.Emplace(FVector2D(W * .5f - 38 * S, H * .5f - 38 * S),
+	    FVector2D(W * .5f + 38 * S, H * .5f + 38 * S));
+	if (Child && LocalCharacter && LocalCharacter->HasCarriedToy() && LocalCharacter->StoreStarted >= 0 &&
+	    IsValid(MatchState.Box) && IsValid(MatchState.Box->InteractionPoint))
+		GuidePanels.Emplace(FVector2D(W * .5f - 172 * S, H * .76f - 8 * S),
+		    FVector2D(W * .5f + 172 * S, H * .76f + 84 * S));
+	auto DirectionCue = [&](const FVector& Destination, const TCHAR* LabelKey, FLinearColor Color,
+	    float EdgeLane, bool bReached, const FString& Detail = FString())
+	{
+		if (!Child || !LocalCharacter || MatchState.IsPreparing() || Destination.ContainsNaN()) return;
+		const FVector Delta = Destination - GuideViewLocation;
+		const FVector Projected = Canvas->Project(Destination, false);
+		const bool bInFront = FVector::DotProduct(Delta, GuideViewRotation.Vector()) > 0;
+		const float GuideTop = FMath::Max(190 * S, BannerY + 8 * S);
+		const bool bOnScreen = bInFront && !Projected.ContainsNaN() &&
+		    Projected.X > 28 * S && Projected.X < W - 28 * S &&
+		    Projected.Y > GuideTop && Projected.Y < H - 100 * S;
+		// A destination ahead but above/below the view should not ask for a sideways turn.
+		const bool bVerticalEdge = bInFront && !Projected.ContainsNaN() && !bOnScreen &&
+		    Projected.X > 28 * S && Projected.X < W - 28 * S;
+		const bool bAnchored = bOnScreen || bVerticalEdge;
+		if (bReached && !bAnchored && Detail.IsEmpty()) return;
+		const bool bLeft = FVector::DotProduct(Delta, GuideRight) < 0;
+		const float Width = (Detail.IsEmpty() ? 82.f : 156.f) * S;
+		const float Height = (Detail.IsEmpty() ? 26.f : 38.f) * S;
+		const FVector2D Pin(Projected.X, FMath::Clamp(Projected.Y, double(GuideTop), double(H - 100 * S)));
+		const float X = bAnchored ? FMath::Clamp(float(Pin.X) - Width * .5f, 18 * S, W - Width - 18 * S) :
+		    bLeft ? 18 * S : W - Width - 18 * S;
+		const float MinY = GuideTop, MaxY = H - Height - 100 * S;
+		float Y = FMath::Clamp(bAnchored ? float(Pin.Y) + 12 * S : H * EdgeLane, MinY, MaxY);
+		// Labels may move aside, but their pin and connector still identify the real world point.
+		const float CandidateY[] = {Y, Y - Height - 28 * S, Y + Height + 28 * S,
+		    H * EdgeLane, MinY, MaxY};
+		for (float Candidate : CandidateY)
+		{
+			Candidate = FMath::Clamp(Candidate, MinY, MaxY);
+			const FBox2D Bounds(FVector2D(X - 6 * S, Candidate - 6 * S),
+			    FVector2D(X + Width + 6 * S, Candidate + Height + 6 * S));
+			if (!GuidePanels.ContainsByPredicate([&](const FBox2D& Other) { return Bounds.Intersect(Other); }))
+			{
+				Y = Candidate;
+				break;
+			}
+		}
+		GuidePanels.Emplace(FVector2D(X, Y), FVector2D(X + Width, Y + Height));
+		auto Stroke = [&](FVector2D A, FVector2D B, float Thickness, FLinearColor Tint)
+		{
+			const FVector2D Along = (B - A).GetSafeNormal();
+			const FVector2D Across(-Along.Y * Thickness * .5f, Along.X * Thickness * .5f);
+			DrawSmoothPolygon({A - Across, A + Across, B + Across, B - Across}, Tint);
+		};
+		auto Dot = [&](FVector2D Center, float Radius, FLinearColor Tint)
+		{
+			TArray<FVector2D> Points;
+			Points.Reserve(24);
+			for (int32 I = 0; I < 24; ++I)
+			{
+				const float Angle = I * UE_TWO_PI / 24;
+				Points.Add(Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+			}
+			DrawSmoothPolygon(Points, Tint);
+		};
+		if (bAnchored)
+		{
+			const FVector2D Join(FMath::Clamp(Pin.X, double(X + 12 * S), double(X + Width - 12 * S)),
+			    Pin.Y < Y ? Y : Y + Height);
+			Stroke(Pin, Join, 1.4f * S, Color.CopyWithNewOpacity(.65f));
+			if (bVerticalEdge)
+			{
+				const float Sign = Projected.Y < Pin.Y ? -1.f : 1.f;
+				const FVector2D Tip = Pin + FVector2D(0, 4 * Sign) * S;
+				Stroke(Pin + FVector2D(-6, -2 * Sign) * S, Tip, 3.5f * S, Color);
+				Stroke(Tip, Pin + FVector2D(6, -2 * Sign) * S, 3.5f * S, Color);
+				Dot(Tip, 1.75f * S, Color);
+			}
+			else
+			{
+				Dot(Pin, 4 * S, TBPaper::Outline);
+				Dot(Pin, 2.3f * S, Color);
+			}
+		}
+		RoundedPanel(TBPaper::Cream.CopyWithNewOpacity(.92f), X, Y, Width, Height, 5, 1.2f);
+		float TextX = X + 7 * S, TextWidth = Width - 14 * S;
+		if (!bAnchored && !bReached)
+		{
+			const FVector2D Center(X + (bLeft ? 12 * S : Width - 12 * S), Y + Height * .5f);
+			const float Sign = bLeft ? -1.f : 1.f;
+			const FVector2D Tip = Center + FVector2D(5 * Sign, 0) * S;
+			const FVector2D Top = Center + FVector2D(-3 * Sign, -6) * S;
+			const FVector2D Bottom = Center + FVector2D(-3 * Sign, 6) * S;
+			Stroke(Top, Tip, 3 * S, Color);
+			Stroke(Tip, Bottom, 3 * S, Color);
+			Dot(Tip, 1.5f * S, Color);
+			if (bLeft) TextX += 16 * S;
+			TextWidth -= 16 * S;
+		}
+		DrawFittedText(TBText::String(LabelKey), Color, TextX, Y + (Detail.IsEmpty() ? 10 : 8) * S,
+		    TextWidth, .62f * S, true, true);
+		if (!Detail.IsEmpty())
+			DrawFittedText(Detail, Ink, X + 7 * S, Y + 25 * S, Width - 14 * S, .60f * S, false, true);
+	};
 	if (const auto* Mom = ATBMomArrivalZone::FindActive(GetWorld()); Mom && !MatchState.IsPreparing())
 	{
 		const auto& Event = Mom->State;
@@ -747,10 +848,10 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		Banner(FString::Format(TBText::Literal(TEXT("Canvas.MomSeconds")), {FMath::CeilToInt(Event.Remaining)}), Warning);
 		if (Child)
 		{
-			Banner(TBText::Literal(TEXT("Canvas.PersuadeMom")), Warning);
 			if (Event.bOccupied)
 			{
-				// 箱にしまう際と同じパネル・ゲージ寸法を使う。
+				GuidePanels.Emplace(FVector2D(W * .5f - 235 * S, H * .60f),
+				    FVector2D(W * .5f + 235 * S, H * .60f + 100 * S));
 				FramePanel(W*.5f-235*S,H*.60f,470*S,100*S);
 				DrawText(FString::Format(TBText::Literal(TEXT("Canvas.Persuading")), {FString::Printf(TEXT("%.1f"), Event.Held), FString::Printf(TEXT("%.1f"), Event.RequiredHold)}),
 				         Ink,W*.5f-220*S,H*.60f+19*S,PaperFont,S);
@@ -758,23 +859,58 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 				DrawText(TBText::Literal(TEXT("Canvas.PersuadePause")),
 				         Ink,W*.5f-220*S,H*.60f+86*S,PaperFont,.7f*S);
 			}
+			if (LocalCharacter)
+				DirectionCue(Mom->GetActorLocation() + FVector(0, 0, 60), TEXT("Canvas.MomDestination"),
+				    Warning, .36f, Mom->ContainsHuman(*LocalCharacter));
 		}
 	}
-	if (Player && Player->Team == ETBTeam::Toy && Player->ToyState == ETBToyState::Boxed)
-	{
-		if (const auto* Course = ATBBoxEscapeCourse::Find(GetWorld(), MatchState.Box))
-		{
-			DrawText(TBText::Literal(TEXT("Canvas.ClimbEscape")),
-			         Accent, 330 * S, H * .65f, PaperFont, 1.1f * S);
-		}
-	}
+	// Box escape guidance belongs in the existing corner goal, leaving the climb view clear.
+	const bool Boxed = Player && Player->Team == ETBTeam::Toy && Player->ToyState == ETBToyState::Boxed;
 	const FLinearColor TeamColor = Child ? TBPaper::HumanBlue : Accent;
 	PaperSign(TBPaper::Cream, 24 * HUDScale, 44 * HUDScale, 394 * HUDScale, 80 * HUDScale);
 	PaperSign(TBPaper::Gold, 78 * HUDScale, 25 * HUDScale, 126 * HUDScale, 41 * HUDScale);
-	DrawFittedText(TBText::String(TEXT("Canvas.Goal")), Ink, 87 * HUDScale, 39 * HUDScale, 108 * HUDScale, 1.08f * HUDScale, true, true);
-	// The flag illustration has no text; crop away the baked goal label.
-	if (const auto* Flag = ArtTextures.Find(Child ? TEXT("Goal_Human") : TEXT("Goal_Toy")); Flag && *Flag)
-		DrawTexture(Flag->Get(), 15 * HUDScale, 22 * HUDScale, 68 * HUDScale, 108 * HUDScale, 0, 0, .19f, 1);
+	DrawFittedText(TBText::String(Boxed ? TEXT("Canvas.EscapeGoal") : TEXT("Canvas.Goal")), Ink,
+	    87 * HUDScale, 39 * HUDScale, 108 * HUDScale, 1.08f * HUDScale, true, true);
+	// The reference goal artwork includes its label and long background. Draw only
+	// the flag here, with the same smooth paper edges and a live, separate heading.
+	{
+		auto Ellipse = [&](float X, float Y, float RX, float RY, FLinearColor Color)
+		{
+			TArray<FVector2D> Points;
+			Points.Reserve(32);
+			for (int32 Step = 0; Step < 32; ++Step)
+			{
+				const float Angle = Step * 2.f * PI / 32.f;
+				Points.Emplace((X + FMath::Cos(Angle) * RX) * HUDScale,
+				    (Y + FMath::Sin(Angle) * RY) * HUDScale);
+			}
+			DrawSmoothPolygon(Points, Color);
+		};
+		auto Cloth = [&](float X, float Y, float Width, float Height, FLinearColor Color)
+		{
+			TArray<FVector2D> Points;
+			Points.Reserve(34);
+			for (int32 Side = 0; Side < 2; ++Side)
+			{
+				for (int32 Step = 0; Step <= 16; ++Step)
+				{
+					const float T = (Side == 0 ? Step : 16 - Step) / 16.f;
+					const float Wave = .07f * FMath::Sin(T * 2.f * PI);
+					Points.Emplace((X + Width * T) * HUDScale,
+					    (Y + Height * ((Side == 0 ? .1f : .9f) + Wave)) * HUDScale);
+				}
+			}
+			DrawSmoothPolygon(Points, Color);
+		};
+		Ellipse(44.f, 110.f, 8.f, 4.f, TBPaper::Outline);
+		Ellipse(44.f, 109.5f, 5.5f, 2.f, TBPaper::Gold);
+		RoundedPanel(TBPaper::Gold, 41.5f * HUDScale, 63 * HUDScale, 5 * HUDScale, 46 * HUDScale,
+		    2.f, 1.12f, TBPaper::Outline);
+		Cloth(44.f, 63.f, 33.f, 31.f, TBPaper::Outline);
+		Cloth(46.5f, 66.f, 28.f, 25.f, TeamColor);
+		Ellipse(44.f, 63.f, 4.5f, 4.5f, TBPaper::Outline);
+		Ellipse(44.f, 63.f, 2.5f, 2.5f, TBPaper::Gold);
+	}
 	DrawFittedText(Child ? TBText::Literal(TEXT("Canvas.Human")) : TBText::Literal(TEXT("Canvas.Toy")), TeamColor,
 	    256 * HUDScale, 65 * HUDScale, 141 * HUDScale, .75f * HUDScale, true, true);
 	const TCHAR* Objective = Child ? TBText::Literal(TEXT("Canvas.HumanObjective")) : TBText::Literal(TEXT("Canvas.ToyObjective"));
@@ -843,17 +979,11 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		DrawProgress(MatchState.Box->RescueProgress, W * .5f - 130 * S, BannerY + 38 * S, 260 * S, 7 * S, TBPaper::Teal);
 	}
 	if (auto* Character = Cast<ATBCharacter>(Controller.GetPawn());
-	    Child && Character && Character->HasCarriedToy() && MatchState.Box)
+	    Child && Character && !MatchState.IsPreparing() && Character->HasCarriedToy() &&
+	    IsValid(MatchState.Box) && IsValid(MatchState.Box->InteractionPoint))
 	{
 		const bool NearBox = MatchState.Box->CanStoreFrom(Character);
-		FVector2D BoxScreen;
 		const FVector BoxLocation = MatchState.Box->InteractionPoint->GetComponentLocation();
-		if (Controller.ProjectWorldLocationToScreen(BoxLocation + FVector(0, 0, 90), BoxScreen) &&
-		    BoxScreen.X > 70 * S && BoxScreen.X < W - 70 * S && BoxScreen.Y > 150 * S && BoxScreen.Y < H * .7f)
-		{
-			DrawText(FString::Format(TBText::Literal(TEXT("Canvas.BoxDistance")), {FString::Printf(TEXT("%.1f"), FVector::Distance(Character->GetActorLocation(), BoxLocation) / 100.f)}),
-			         Accent, BoxScreen.X - 60 * S, BoxScreen.Y, PaperFont, 1.f * S);
-		}
 		const bool Storing = Character->StoreStarted >= 0;
 		const float Duration = FMath::Max(TB::Rules().Box.StoreSeconds, .01f);
 		const float Elapsed =
@@ -861,14 +991,18 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		        ? FMath::Clamp(float(MatchState.GetServerWorldTimeSeconds() - Character->StoreStarted), 0.f, Duration)
 		        : 0.f;
 		const FString InteractKey = TB::KeyLabel(PC, TB::Keys::HumanInteract);
-		const FString Prompt = Storing
-		                           ? FString::Format(TBText::Literal(TEXT("Canvas.StoreHeld")), {*InteractKey, FString::Printf(TEXT("%.1f"), Elapsed), FMath::RoundToInt(Duration)})
-		                           : (NearBox ? FString::Format(TBText::Literal(TEXT("Canvas.StorePrompt")), {*InteractKey, FMath::RoundToInt(Duration)})
-		                                      : TBText::Literal(TEXT("Canvas.CarryPrompt")));
-		FramePanel(W * .5f - 235 * S, H * .73f, 470 * S, 100 * S);
-		DrawFittedText(Prompt, Ink, W * .5f - 214 * S, H * .73f + 19 * S, 428 * S, S, true, true);
-		DrawProgress(Elapsed / Duration, W * .5f - 220 * S, H * .73f + 40 * S, 440 * S, 40 * S, TBPaper::Gold);
-		DrawText(FString::Format(TBText::Literal(TEXT("Canvas.StoreCancel")), {*InteractKey, *TB::KeyLabel(PC, TB::Keys::HumanDrop)}), Ink, W * .5f - 220 * S, H * .73f + 86 * S, PaperFont, .75f * S);
+		const FString Prompt = !Storing && NearBox
+		    ? FString::Format(TBText::Literal(TEXT("Canvas.StorePrompt")), {*InteractKey, FMath::RoundToInt(Duration)})
+		    : FString();
+		DirectionCue(BoxLocation + FVector(0, 0, 60), TEXT("Canvas.BoxDestination"), TBPaper::HumanBlue,
+		    .52f, NearBox, Prompt);
+		if (Storing)
+		{
+			FramePanel(W * .5f - 164 * S, H * .76f, 328 * S, 76 * S);
+			DrawProgress(Elapsed / Duration, W * .5f - 146 * S, H * .76f + 40 * S, 292 * S, 27 * S, TBPaper::Gold);
+			DrawFittedText(TBText::String(TEXT("Canvas.StoreProgress")), Ink, W * .5f - 146 * S,
+			    H * .76f + 18 * S, 292 * S, .95f * S);
+		}
 	}
 	if (Controller.bStuckHint)
 	{
@@ -900,7 +1034,7 @@ void ATBHUD::BeginPlay()
 	    TEXT("Tape_Cream"), TEXT("Tag_Toy"), TEXT("Tag_Human"),
 	    TEXT("Tag_Any"), TEXT("Burst_Yellow"), TEXT("Burst_Teal"), TEXT("TitleLogo"),
 	    TEXT("PauseHeader"), TEXT("Underline_Coral"), TEXT("Card_Hanging"), TEXT("Tape_Brown"),
-	    TEXT("Card_HangingActive"), TEXT("Goal_Human"), TEXT("Goal_Toy"), TEXT("Progress_Yellow"), TEXT("Progress_Track"),
+	    TEXT("Card_HangingActive"), TEXT("Progress_Yellow"), TEXT("Progress_Track"),
 	    TEXT("Button_Gear"), TEXT("Button_Leave"), TEXT("Mark_TriangleBrown"), TEXT("Label_You"),
 	    TEXT("Frame_Settings"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")};
 	for (const TCHAR* Name : Names)

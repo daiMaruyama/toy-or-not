@@ -7,7 +7,7 @@
 
 class UTexture2D;
 
-/** ロード画面。暗い子ども部屋で、おもちゃが積み木の陰から箱の陰へこっそり走る。プロジェクト設定の「ロード画面」で変える */
+/** ロード画面。紙色の小さな遊び場で、おもちゃが積み木の陰から箱の陰へこっそり走る。プロジェクト設定の「ロード画面」で変える */
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "ロード画面"))
 class TOONSTORY_API UTBLoadingScreenSettings : public UDeveloperSettings
 {
@@ -20,11 +20,11 @@ public:
 	/** 背景が透明で、右を向いた絵。1周ごとにランダムに替える */
 	UPROPERTY(Config, EditAnywhere, Category = "おもちゃ", meta = (DisplayName = "おもちゃの絵"))
 	TArray<TSoftObjectPtr<UTexture2D>> Toys;
-	/** 画面の高さに対する、おもちゃの絵（正方形）の高さ */
+	/** 基準画面の高さに対する、おもちゃの絵の高さ。場面内に収まるよう縮小して描画する */
 	UPROPERTY(Config, EditAnywhere, Category = "おもちゃ",
 	          meta = (DisplayName = "おもちゃの大きさ", ClampMin = "0.05", ClampMax = "0.6"))
 	float ToyHeight = .32f;
-	/** おもちゃの絵にかける色。暗い部屋になじませる。白なら絵のまま */
+	/** おもちゃの絵にかける色。背景になじませる。白なら絵のまま */
 	UPROPERTY(Config, EditAnywhere, Category = "おもちゃ", meta = (DisplayName = "おもちゃの色味"))
 	FLinearColor ToyTint = FLinearColor(.9f, .88f, .86f);
 

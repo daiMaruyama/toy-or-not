@@ -12,12 +12,14 @@
 #include "Character/TBMovement.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
+#include "Components/SceneComponent.h"
 #include "Core/TBController.h"
 #include "Core/TBChat.h"
 #include "Core/TBGameMode.h"
 #include "Core/TBGameState.h"
 #include "Core/TBGameUserSettings.h"
 #include "Core/TBPlayerState.h"
+#include "Data/TBRuleData.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
@@ -25,6 +27,10 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
+#include "GamePlay/TBBox.h"
+#include "GamePlay/TBBoxEscapeCourse.h"
+#include "GamePlay/TBDummyToy.h"
+#include "GamePlay/Events/TBMomArrivalZone.h"
 #include "Input/TBKeyLabels.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -69,6 +75,7 @@ namespace
 		{
 			OldLanguage = TBText::GetLanguage();
 			bRosterOnly = !bTitle && FParse::Param(FCommandLine::Get(), TEXT("UIReviewRosterOnly"));
+			bCompactHintsOnly = !bTitle && FParse::Param(FCommandLine::Get(), TEXT("UIReviewCompactHintsOnly"));
 			if (auto* Settings = UTBGameUserSettings::Get()) OldSavedLanguage = Settings->GetLanguage();
 			FString RequestedLanguage;
 			if (FParse::Value(FCommandLine::Get(), TEXT("UIReviewLanguage="), RequestedLanguage))
@@ -97,6 +104,10 @@ namespace
 					}
 				}
 				OldTeam = Player->Team;
+				OldToyState = Player->ToyState;
+				OldGazeState = Player->GazeState;
+				OldGazedSeconds = Player->GazedSeconds;
+				bOldFrozen = Player->bFrozen;
 				bOldReady = Player->bReady;
 				OldSettings = State->Settings;
 				OldWinner = State->Winner;
@@ -104,6 +115,7 @@ namespace
 				OldReason = State->Reason;
 				OldCollected = State->Collected;
 				bOldEscape = State->bEscapePhase;
+				bOldVehicleResult = State->bVehicleEscapeResult;
 				OldResultStart = State->ResultStartTime;
 				bOldSettings = HUD->IsLobbySettingsOpen();
 				OldRound = State->HidePreparation.Round;
@@ -116,6 +128,8 @@ namespace
 		{
 			RestoreTitleButton();
 			RestoreChat();
+			RestoreNavigation();
+			RestoreStorage();
 			if (Options.IsValid()) Options->Dismiss();
 			if (PC.IsValid())
 			{
@@ -129,11 +143,19 @@ namespace
 				State->Reason = OldReason;
 				State->Collected = OldCollected;
 				State->bEscapePhase = bOldEscape;
+				State->bVehicleEscapeResult = bOldVehicleResult;
 				State->ResultStartTime = OldResultStart;
 				State->Settings = OldSettings;
 			}
 			Playing.Reset();
-			if (Player.IsValid()) { Player->Team = OldTeam; Player->bReady = bOldReady; }
+			if (Player.IsValid())
+			{
+				Player->Team = OldTeam;
+				Player->ToyState = OldToyState;
+				Player->bReady = bOldReady;
+				Player->SetGaze(OldGazeState, OldGazedSeconds);
+				Player->bFrozen = bOldFrozen;
+			}
 			if (Body.IsValid())
 			{
 				Body->SetGazeRequested(bOldGazeRequested);
@@ -175,7 +197,7 @@ namespace
 				Test->AddError(TEXT("UI fixture unexpectedly initiated travel; refusing misleading captures."));
 				return true;
 			}
-			if (Playing && ((Step >= 9 && Step <= 15) || (Step >= 19 && Step <= 22)))
+			if (Playing && ((Step >= 9 && Step <= 15) || (Step >= 19 && Step <= 22) || (Step >= 24 && Step <= 44)))
 			{
 				Playing->Hold(State->GetServerWorldTimeSeconds() + (Step == 19 ? 10 : 187));
 				if (Step == 12)
@@ -202,7 +224,11 @@ namespace
 			if (!bTitle && Step == 4 && PC.IsValid()) PC->OpenChat();
 			if (TitleSlateButton.IsValid() && !HoldTitleButton()) return true;
 			if (bOverviewActive) HoldOverview();
-			if (++Frames < 12 || FPlatformTime::Seconds() < ReadyAt) return false;
+			// Keep the real replicated start time at the selected progress while rendering;
+			// screenshot latency must not turn the half-full sample into a finished attempt.
+			if (!bTitle && Step >= 40 && Step <= 42 && Body.IsValid())
+				Body->StoreStarted = State->GetServerWorldTimeSeconds() - StorageFraction() * TB::Rules().Box.StoreSeconds;
+			if (++Frames < (bCompactHintsOnly ? 3 : 12) || FPlatformTime::Seconds() < ReadyAt) return false;
 			if (!bRequested)
 			{
 				if (bTitle && Step == 0)
@@ -225,7 +251,7 @@ namespace
 					    HUD->GetHitBoxWithName(TEXT("DraftMoreNPCToys")) != nullptr, bNPCEnabled)) return true;
 					if (!Test->TestNotNull(TEXT("Stage has the shared settings entry"), HUD->GetHitBoxWithName(TEXT("OpenOptions")))) return true;
 				}
-				if (!bTitle && ((Step >= 10 && Step <= 15 && Step != 12) || Step == 19 || Step == 21 || Step == 22) &&
+				if (!bTitle && ((Step >= 10 && Step <= 15 && Step != 12) || Step == 19 || Step == 21 || Step == 22 || Step >= 24) &&
 				    !Test->TestFalse(TEXT("HUD capture is not obscured by preparation masking"), PC->ShouldHidePreparationView()))
 					return true;
 				if (!bTitle && (Step == 21 || Step == 22))
@@ -246,8 +272,32 @@ namespace
 				}
 				if (!bTitle && Step == 4 &&
 				    !Test->TestTrue(TEXT("Chat remains open on the capture frame"), PC->IsChatOpen())) return true;
+				if (!bTitle && Step >= 24 && Step <= 28)
+				{
+					if (!Test->TestTrue(TEXT("Peripheral feedback capture uses the local pawn camera"),
+					    Body.IsValid() && PC->GetViewTarget() == Body.Get())) return true;
+					const bool bExpectedHuman = Step == 28;
+					if (!Test->TestEqual(TEXT("Peripheral feedback uses the expected team"), Body->IsHuman(), bExpectedHuman) ||
+					    !Test->TestEqual(TEXT("Seen feedback is driven by the local gaze state"), Body->IsSeen(), Step == 24) ||
+					    !Test->TestEqual(TEXT("Gazed feedback is driven by the local gaze state"), Body->IsGazed(), Step == 25) ||
+					    !Test->TestEqual(TEXT("Frozen feedback is driven by the local frozen state"), Body->IsGazeFrozen(), Step == 26)) return true;
+				}
+				if (!bTitle && Step >= 29 && Step <= 36 && !CheckNavigation()) return true;
+				if (!bTitle && Step == 37 && !Test->TestTrue(TEXT("Floor marker is a visible active transient event"),
+				    NavigationMom.IsValid() && !NavigationMom->IsHidden() &&
+				    ATBMomArrivalZone::FindActive(World.Get()) == NavigationMom.Get())) return true;
+				if (!bTitle && (Step == 38 || Step == 39) &&
+				    !Test->TestTrue(TEXT("Box guidance follows the real player state and course lookup"),
+				        Player->Team == ETBTeam::Toy && Player->ToyState == ETBToyState::Boxed &&
+				        (ATBBoxEscapeCourse::Find(World.Get(), State->Box) != nullptr) == (Step == 38))) return true;
+				if (!bTitle && Step >= 40 && Step <= 44 && !CheckStorage()) return true;
+				if (!bTitle && (Step == 45 || Step == 46) &&
+				    !Test->TestTrue(TEXT("Result capture shows the local winner after the reveal"),
+				        State->Phase == ETBPhase::Results && PC->IsResultShown() && Body.IsValid() &&
+				        Body->IsCelebrating() && Body->IsHuman() == (Step == 45))) return true;
 				const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
-				const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/ScreenshotsV2") / TBText::GetLanguage() /
+				const FString Folder = FPaths::ProjectSavedDir() /
+				    (bCompactHintsOnly ? TEXT("UIRefresh/CompactHints") : TEXT("UIRefresh/ScreenshotsV2")) / TBText::GetLanguage() /
 				    FString::Printf(TEXT("%dx%d"), Size.X, Size.Y);
 				IFileManager::Get().MakeDirectory(*Folder, true);
 				Path = Folder / (Name + TEXT(".png"));
@@ -259,13 +309,17 @@ namespace
 			if (FScreenshotRequest::IsScreenshotRequested()) return false;
 			Test->TestTrue(*FString::Printf(TEXT("Rendered screenshot: %s"), *Name),
 			              IFileManager::Get().FileSize(*Path) > 1024);
-			if ((!bTitle && Step == 22) || (bTitle && Step == 3)) return true;
+			if ((!bTitle && Step == 46) || (bTitle && Step == 3)) return true;
 			// Photograph the settings return before the existing match sequence;
 			// retain the earlier step indices used by transition/gaze assertions.
-			if (bTitle && Step == 0) Step = 4;
+			if (bCompactHintsOnly && Step == 0) Step = 9;
+			else if (bCompactHintsOnly && Step == 10) Step = 28;
+			else if (bCompactHintsOnly && Step == 36) Step = 40;
+			else if (bTitle && Step == 0) Step = 4;
 			else if (bTitle && Step == 9) { RestoreTitleButton(); Step = 1; }
 			else if (!bTitle && Step == 8) Step = 23;
 			else if (!bTitle && Step == 23) Step = 9;
+			else if (!bTitle && Step == 22) Step = 24;
 			else ++Step;
 			if (bRosterOnly && Step == 3) Step = 18;
 			else if (bRosterOnly && Step == 19) return true;
@@ -275,6 +329,169 @@ namespace
 		}
 
 	private:
+		float StorageFraction() const { return Step == 40 ? 0.f : Step == 41 ? .5f : .95f; }
+
+		void RestoreStorage()
+		{
+			if (!bStorageActive) return;
+			if (Body.IsValid())
+			{
+				Body->bHoldingInteract = bOldHoldingInteract;
+				Body->bRescuing = bOldStorageRescuing;
+				Body->VehicleExitStarted = OldVehicleExitStarted;
+				Body->SetActorTickEnabled(bOldStorageTick);
+			}
+			bStorageActive = false;
+		}
+
+		bool CheckStorage()
+		{
+			if (!Test->TestTrue(TEXT("Storage review uses a human pawn in the active round"),
+			        Body.IsValid() && Body->IsHuman() && State->Phase == ETBPhase::Playing &&
+			        !State->IsPreparing() && State->Box == NavigationBox.Get()) ||
+			    !Test->TestTrue(TEXT("Storage fixture suspends pawn simulation only for the capture"),
+			        bStorageActive && !Body->IsActorTickEnabled())) return false;
+			if (Step == 44)
+				return Test->TestTrue(TEXT("Completed storage state has no carried toy or active timer"),
+				    !Body->HasCarriedToy() && Body->StoreStarted < 0 && !Body->bHoldingInteract);
+			if (!Test->TestTrue(TEXT("Storage and cancelled attempts retain the carried toy"),
+			        Body->CarriedDummy == NavigationDummy.Get() && Body->HasCarriedToy())) return false;
+			if (!Test->TestTrue(TEXT("Storage and cancelled captures remain in reach of the box front"),
+			        NavigationBox->CanStoreFrom(Body.Get()))) return false;
+			if (Step == 43)
+				return Test->TestTrue(TEXT("Releasing storage clears the active timer without dropping the toy"),
+				    Body->StoreStarted < 0 && !Body->bHoldingInteract);
+			return Test->TestTrue(TEXT("Storage sample is driven by the server-clock start time"),
+			    Body->StoreStarted >= 0 && Body->bHoldingInteract && FMath::IsNearlyEqual(
+			        float((State->GetServerWorldTimeSeconds() - Body->StoreStarted) / TB::Rules().Box.StoreSeconds),
+			        StorageFraction(), .001f));
+		}
+
+		bool BeginNavigation()
+		{
+			if (!Test->TestTrue(TEXT("Direction fixture starts with a human local pawn"),
+			        Body.IsValid() && Body->IsHuman() && PC->GetViewTarget() == Body.Get()) ||
+			    !Test->TestNull(TEXT("Direction fixture does not replace an authored active mom event"),
+			        ATBMomArrivalZone::FindActive(World.Get()))) return false;
+			OldNavigationBox = State->Box;
+			OldCarriedToy = Body->CarriedToy;
+			OldCarriedDummy = Body->CarriedDummy;
+			OldStoreStarted = Body->StoreStarted;
+			bNavigationActive = true;
+			FActorSpawnParameters Spawn;
+			Spawn.ObjectFlags |= RF_Transient;
+			Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			const FVector Location = Body->GetActorLocation();
+			NavigationBox = World->SpawnActor<ATBBox>(Location, FRotator::ZeroRotator, Spawn);
+			NavigationDummy = World->SpawnActor<ATBDummyToy>(Body->CarryAnchor->GetComponentLocation(),
+			    FRotator::ZeroRotator, Spawn);
+			NavigationMom = World->SpawnActor<ATBMomArrivalZone>(Location, FRotator::ZeroRotator, Spawn);
+			if (!Test->TestNotNull(TEXT("Transient direction box"), NavigationBox.Get()) ||
+			    !Test->TestNotNull(TEXT("Transient carried dummy"), NavigationDummy.Get()) ||
+			    !Test->TestNotNull(TEXT("Transient mom zone"), NavigationMom.Get())) return false;
+			for (AActor* Actor : {static_cast<AActor*>(NavigationBox.Get()),
+			         static_cast<AActor*>(NavigationDummy.Get()), static_cast<AActor*>(NavigationMom.Get())})
+			{
+				Actor->SetActorTickEnabled(false);
+				Actor->SetActorEnableCollision(false);
+				Actor->SetActorHiddenInGame(true);
+			}
+			State->Box = NavigationBox.Get();
+			Body->CarriedToy = nullptr;
+			Body->CarriedDummy = NavigationDummy.Get();
+			Body->StoreStarted = -1;
+			return true;
+		}
+
+		void PositionNavigation(float BoxForward, float BoxRight, float MomForward = 900.f, float MomRight = 2800.f)
+		{
+			const FMinimalViewInfo& View = PC->PlayerCameraManager->GetCameraCacheView();
+			auto Point = [&](float Forward, float Right)
+			{
+				return View.Location + View.Rotation.RotateVector(FVector(Forward, Right, 0));
+			};
+			// The box marker points above its interaction anchor; keep that point at camera height.
+			NavigationBox->SetActorLocation(Point(BoxForward, BoxRight) -
+			    NavigationBox->InteractionPoint->GetRelativeLocation() - FVector(0, 0, 90), false, nullptr,
+			    ETeleportType::TeleportPhysics);
+			NavigationMom->SetActorLocation(Point(MomForward, MomRight), false, nullptr, ETeleportType::TeleportPhysics);
+		}
+
+		void RestoreNavigation()
+		{
+			if (!bNavigationActive) return;
+			if (NavigationCourse.IsValid()) NavigationCourse->Destroy();
+			NavigationCourse.Reset();
+			if (State.IsValid()) State->Box = OldNavigationBox.Get();
+			if (Body.IsValid())
+			{
+				Body->CarriedToy = OldCarriedToy.Get();
+				Body->CarriedDummy = OldCarriedDummy.Get();
+				Body->StoreStarted = OldStoreStarted;
+			}
+			if (NavigationMom.IsValid()) { NavigationMom->ResetEvent(); NavigationMom->Destroy(); }
+			if (NavigationBox.IsValid()) NavigationBox->Destroy();
+			if (NavigationDummy.IsValid()) NavigationDummy->Destroy();
+			NavigationMom.Reset(); NavigationBox.Reset(); NavigationDummy.Reset();
+			bNavigationActive = false;
+		}
+
+		bool CheckNavigation()
+		{
+			if (!Test->TestTrue(TEXT("Direction capture retains the human pawn camera"),
+			        Body.IsValid() && Body->IsHuman() && PC->GetViewTarget() == Body.Get()) ||
+			    !Test->TestTrue(TEXT("Direction capture stays in the active round without advancing gameplay"),
+			        State->Phase == ETBPhase::Playing && !State->IsPreparing() &&
+			        Mode.IsValid() && !Mode->IsActorTickEnabled())) return false;
+			if (Step == 36)
+			{
+				return Test->TestTrue(TEXT("Direction fixture restores original carried state and box"),
+				           Body->CarriedToy == OldCarriedToy.Get() && Body->CarriedDummy == OldCarriedDummy.Get() &&
+				           State->Box == OldNavigationBox.Get() && Body->StoreStarted == OldStoreStarted) &&
+				    Test->TestNull(TEXT("Temporary mom direction has cleared"), ATBMomArrivalZone::FindActive(World.Get()));
+			}
+			if (!Test->TestTrue(TEXT("Box direction is driven by the real carrying state"), Body->HasCarriedToy() &&
+			        Body->CarriedDummy == NavigationDummy.Get() && State->Box == NavigationBox.Get())) return false;
+			const bool MomActive = Step >= 32;
+			if (!Test->TestTrue(TEXT("Mom direction is driven by the actual active-zone lookup"),
+			        ATBMomArrivalZone::FindActive(World.Get()) == (MomActive ? NavigationMom.Get() : nullptr))) return false;
+			const FVector BoxPoint = NavigationBox->InteractionPoint->GetComponentLocation() + FVector(0, 0, 90);
+			FVector2D BoxScreen, MomScreen;
+			const bool BoxInFront = PC->ProjectWorldLocationToScreen(BoxPoint, BoxScreen);
+			const bool MomInFront = PC->ProjectWorldLocationToScreen(NavigationMom->GetActorLocation(), MomScreen);
+			const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+			if (Step == 31)
+			{
+				const FMinimalViewInfo& View = PC->PlayerCameraManager->GetCameraCacheView();
+				return Test->TestTrue(TEXT("Behind-box fixture is behind the actual rendered camera"),
+				    !BoxInFront && FVector::DotProduct(BoxPoint - View.Location, View.Rotation.Vector()) < -100.f);
+			}
+			if (!Test->TestTrue(TEXT("Direction targets are projectable ahead of the camera"),
+			        BoxInFront && (!MomActive || MomInFront))) return false;
+			if (Step == 34)
+			{
+				auto Inside = [Size](FVector2D Position)
+				{
+					return Position.X > Size.X * .2f && Position.X < Size.X * .8f &&
+					    Position.Y > Size.Y * .2f && Position.Y < Size.Y * .8f;
+				};
+				return Test->TestTrue(TEXT("Both direction targets are inside the visible camera area"),
+				    Inside(BoxScreen) && Inside(MomScreen));
+			}
+			const bool BoxLeft = Step == 29 || Step == 32;
+			if (!Test->TestTrue(TEXT("Box fixture lies beyond the requested camera edge"),
+			        BoxLeft ? BoxScreen.X < 0 : BoxScreen.X > Size.X)) return false;
+			if (MomActive && !Test->TestTrue(TEXT("Mom fixture lies beyond the right camera edge"), MomScreen.X > Size.X))
+				return false;
+			if (Step == 35)
+			{
+				const FMinimalViewInfo& View = PC->PlayerCameraManager->GetCameraCacheView();
+				return Test->TestTrue(TEXT("Direction capture uses constrained side bars"), View.bConstrainAspectRatio &&
+				    FMath::IsNearlyEqual(View.AspectRatio, 4.f / 3.f, .001f) && PC->ViewAspect > View.AspectRatio * 1.01f);
+			}
+			return true;
+		}
+
 		bool BeginOverview()
 		{
 			if (!Test->TestNotNull(TEXT("Overview character"), Body.Get()) ||
@@ -617,7 +834,7 @@ namespace
 				Name = TEXT("18-key-capture");
 				break;
 			case 9:
-				Options->Dismiss();
+				if (Options.IsValid()) Options->Dismiss();
 				HUD->NotifyHitBoxClick(TEXT("CancelStage"));
 				Test->TestFalse(TEXT("Visual review cancels the returned draft before the match"), HUD->IsStagePickerOpen());
 				Playing = MakeUnique<TBTest::FPlayingScope>(*State, State->GetServerWorldTimeSeconds() + 190);
@@ -759,6 +976,195 @@ namespace
 				Name = TEXT("37-stage-options-return");
 				break;
 			}
+			case 24:
+				Body->SetGazeRequested(false);
+				ReviewCamera->AspectRatio = OldCameraAspect;
+				ReviewCamera->bConstrainAspectRatio = bOldCameraConstrained;
+				Player->Team = ETBTeam::Toy;
+				Player->SetGaze(ETBGazeState::Seen);
+				Player->bFrozen = false;
+				PC->ClientPreparationRole(State->HidePreparation.Round, Player->Team);
+				Name = TEXT("44-toy-seen");
+				break;
+			case 25:
+				Player->SetGaze(ETBGazeState::Gazed);
+				Name = TEXT("45-toy-gazed");
+				break;
+			case 26:
+				Player->SetGaze(ETBGazeState::Frozen);
+				Player->bFrozen = true;
+				Name = TEXT("46-toy-frozen");
+				break;
+			case 27:
+				Player->SetGaze(ETBGazeState::None);
+				Player->bFrozen = false;
+				Name = TEXT("47-toy-gaze-cleared");
+				break;
+			case 28:
+				Player->Team = ETBTeam::Human;
+				if (bCompactHintsOnly)
+				{
+					Body->SetGazeRequested(false);
+					Player->SetGaze(ETBGazeState::None);
+					Player->bFrozen = false;
+					PC->SetViewTarget(Body.Get());
+					bChangedGazeView = true;
+				}
+				PC->ClientPreparationRole(State->HidePreparation.Round, Player->Team);
+				Name = TEXT("48-human-gaze-cleared");
+				break;
+			case 29:
+				if (!BeginNavigation()) return false;
+				PositionNavigation(900, -2800);
+				Name = TEXT("49-carry-box-left");
+				break;
+			case 30:
+				PositionNavigation(900, 2800);
+				Name = TEXT("50-carry-box-right");
+				break;
+			case 31:
+				PositionNavigation(-1500, 300);
+				Name = TEXT("51-carry-box-behind");
+				break;
+			case 32:
+				PositionNavigation(900, -2800);
+				if (!Test->TestTrue(TEXT("Transient mom event starts through the existing event API"),
+				        NavigationMom->StartEvent())) return false;
+				NavigationMom->State.Remaining = 12;
+				Name = TEXT("52-box-mom-opposite");
+				break;
+			case 33:
+				PositionNavigation(900, 2800);
+				Name = TEXT("53-box-mom-same-edge");
+				break;
+			case 34:
+				PositionNavigation(1500, -300, 1500, 300);
+				Name = TEXT("54-box-mom-visible");
+				break;
+			case 35:
+				ReviewCamera->AspectRatio = 4.f / 3.f;
+				ReviewCamera->bConstrainAspectRatio = true;
+				PositionNavigation(900, 2800);
+				Name = TEXT("55-box-mom-letterbox");
+				break;
+			case 36:
+				RestoreNavigation();
+				ReviewCamera->AspectRatio = OldCameraAspect;
+				ReviewCamera->bConstrainAspectRatio = bOldCameraConstrained;
+				Name = TEXT("56-directions-cleared");
+				break;
+			case 37:
+			{
+				if (!BeginNavigation()) return false;
+				Body->CarriedDummy = nullptr;
+				FVector Forward = OverviewRotation.Vector();
+				Forward.Z = 0;
+				Forward.Normalize();
+				// Start inside the authored room; raising above the camera can hit the roof first.
+				const FVector Start = OverviewLocation + Forward * 650;
+				FCollisionQueryParams Query(SCENE_QUERY_STAT(UIReviewFloor), false);
+				Query.AddIgnoredActor(Body.Get());
+				Query.AddIgnoredActor(NavigationBox.Get());
+				Query.AddIgnoredActor(NavigationMom.Get());
+				Query.AddIgnoredActor(NavigationDummy.Get());
+				FHitResult Floor;
+				if (!Test->TestTrue(TEXT("Marker review finds a real horizontal room surface"),
+				    World->LineTraceSingleByChannel(Floor, Start, Start - FVector(0, 0, 4000), ECC_Visibility, Query) &&
+				    Floor.ImpactNormal.Z > .8f && Floor.ImpactPoint.Z < OverviewLocation.Z - 20)) return false;
+				NavigationMom->SetActorLocation(Floor.ImpactPoint, false, nullptr, ETeleportType::TeleportPhysics);
+				NavigationMom->SetActorHiddenInGame(false);
+				if (!Test->TestTrue(TEXT("Visible floor marker starts through the event API"), NavigationMom->StartEvent())) return false;
+				NavigationMom->State.Remaining = 12;
+				const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
+				OverviewLocation = Floor.ImpactPoint - Forward * 180 + Right * 120 + FVector(0, 0, 140);
+				OverviewRotation = (Floor.ImpactPoint + FVector(0, 0, 15) - OverviewLocation).Rotation();
+				HoldOverview();
+				Name = TEXT("57-mom-floor-marker");
+				break;
+			}
+			case 38:
+			{
+				NavigationMom->ResetEvent();
+				FActorSpawnParameters Spawn;
+				Spawn.ObjectFlags |= RF_Transient;
+				Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+				NavigationCourse = World->SpawnActor<ATBBoxEscapeCourse>(FVector::ZeroVector, FRotator::ZeroRotator, Spawn);
+				if (!Test->TestNotNull(TEXT("Transient boxed guidance course"), NavigationCourse.Get())) return false;
+				NavigationCourse->SetActorTickEnabled(false);
+				NavigationCourse->SetActorEnableCollision(false);
+				NavigationCourse->SetActorHiddenInGame(true);
+				NavigationCourse->Box = NavigationBox.Get();
+				Player->Team = ETBTeam::Toy;
+				Player->ToyState = ETBToyState::Boxed;
+				PC->ClientPreparationRole(State->HidePreparation.Round, Player->Team);
+				Name = TEXT("58-box-escape-goal");
+				break;
+			}
+			case 39:
+				NavigationCourse->Destroy();
+				NavigationCourse.Reset();
+				Name = TEXT("59-box-rescue-goal");
+				break;
+			case 40:
+			{
+				RestoreNavigation();
+				Player->Team = ETBTeam::Human;
+				Player->ToyState = ETBToyState::Free;
+				PC->ClientPreparationRole(State->HidePreparation.Round, Player->Team);
+				PC->SetViewTarget(Body.Get());
+				Body->ApplyState();
+				if (!BeginNavigation()) return false;
+				HoldOverview();
+				const FRotator BoxHeading(0.f, OverviewRotation.Yaw, 0.f);
+				NavigationBox->SetActorRotation(BoxHeading, ETeleportType::TeleportPhysics);
+				NavigationBox->SetActorLocation(Body->GetActorLocation() - BoxHeading.RotateVector(FVector(-80, 0, 65)),
+				    false, nullptr, ETeleportType::TeleportPhysics);
+				const FVector StorageTarget = NavigationBox->GetActorTransform().TransformPosition(FVector(-10, 0, 60));
+				OverviewRotation = (StorageTarget - Body->GetPawnViewLocation()).Rotation();
+				HoldOverview();
+				bOldStorageTick = Body->IsActorTickEnabled();
+				bOldHoldingInteract = Body->bHoldingInteract;
+				bOldStorageRescuing = Body->bRescuing;
+				OldVehicleExitStarted = Body->VehicleExitStarted;
+				bStorageActive = true;
+				Body->SetActorTickEnabled(false);
+				Body->bHoldingInteract = true;
+				Body->StoreStarted = State->GetServerWorldTimeSeconds();
+				Name = TEXT("60-storage-start");
+				break;
+			}
+			case 41:
+				Name = TEXT("61-storage-half");
+				break;
+			case 42:
+				Name = TEXT("62-storage-nearly-complete");
+				break;
+			case 43:
+				Body->ServerReleaseInteract();
+				Name = TEXT("63-storage-cancelled");
+				break;
+			case 44:
+				// The state a client receives after successful storage; no authored box is mutated.
+				Body->CarriedDummy = nullptr;
+				Name = TEXT("64-storage-complete");
+				break;
+			case 45:
+				RestoreNavigation();
+				RestoreStorage();
+				State->Phase = ETBPhase::Results;
+				State->Winner = ETBWinner::Humans;
+				State->ResultStyle = ETBResultStyle::None;
+				State->bVehicleEscapeResult = false;
+				State->ResultStartTime = State->GetServerWorldTimeSeconds() - 30;
+				State->EndTime = State->GetServerWorldTimeSeconds() + 120;
+				Name = TEXT("65-results-local-human-winner");
+				break;
+			case 46:
+				Player->Team = ETBTeam::Toy;
+				State->Winner = ETBWinner::Toys;
+				Body->ApplyState();
+				Name = TEXT("66-results-local-toy-winner");
+				break;
 			default:
 				return false;
 			}
@@ -769,6 +1175,11 @@ namespace
 		TWeakObjectPtr<UWorld> World;
 		TWeakObjectPtr<ATBController> PC;
 		TWeakObjectPtr<ATBCharacter> Body;
+		TWeakObjectPtr<ATBBox> NavigationBox, OldNavigationBox;
+		TWeakObjectPtr<ATBBoxEscapeCourse> NavigationCourse;
+		TWeakObjectPtr<ATBDummyToy> NavigationDummy, OldCarriedDummy;
+		TWeakObjectPtr<ATBMomArrivalZone> NavigationMom;
+		TWeakObjectPtr<ATBCharacter> OldCarriedToy;
 		TWeakObjectPtr<UCameraComponent> ReviewCamera;
 		TWeakObjectPtr<UTBMovement> OverviewMovement;
 		TWeakObjectPtr<AActor> OldViewTarget;
@@ -792,6 +1203,8 @@ namespace
 		FTBSettings OldSettings;
 		TUniquePtr<TBTest::FPlayingScope> Playing;
 		ETBTeam OldTeam = ETBTeam::None;
+		ETBToyState OldToyState = ETBToyState::Free;
+		ETBGazeState OldGazeState = ETBGazeState::None;
 		ETBWinner OldWinner = ETBWinner::None;
 		ETBResultStyle OldStyle = ETBResultStyle::None;
 		FString OldReason, Name, Path, OldLanguage, OldSavedLanguage;
@@ -799,8 +1212,13 @@ namespace
 		uint32 OldRound = 0;
 		bool bTitle, bEntered = false, bRequested = false, bOldModeTick = false;
 		bool bRosterOnly = false;
-		bool bOldSettings = false, bOldEscape = false, bOldReady = false;
+		bool bCompactHintsOnly = false;
+		bool bOldSettings = false, bOldEscape = false, bOldReady = false, bOldVehicleResult = false;
 		bool bOldGazeRequested = false, bOldCameraConstrained = false, bChangedGazeView = false;
+		bool bOldFrozen = false;
+		bool bNavigationActive = false;
+		bool bStorageActive = false, bOldStorageTick = false, bOldHoldingInteract = false;
+		bool bOldStorageRescuing = false;
 		bool bOverviewActive = false, bOldMovementTick = false;
 		EMovementMode OldMovementMode = MOVE_None;
 		uint8 OldCustomMovementMode = 0;
@@ -808,7 +1226,10 @@ namespace
 		FVector OverviewLocation = FVector::ZeroVector, OldVelocity = FVector::ZeroVector;
 		FRotator OverviewRotation = FRotator::ZeroRotator, OldControlRotation = FRotator::ZeroRotator;
 		float OldCameraAspect = 0;
+		float OldGazedSeconds = 0;
 		double OldResultStart = 0, Deadline, ReadyAt = 0;
+		double OldStoreStarted = -1;
+		double OldVehicleExitStarted = -1;
 	};
 
 	bool CanReview(FAutomationTestBase& Test)

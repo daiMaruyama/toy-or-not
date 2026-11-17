@@ -72,11 +72,12 @@ private:
 	void DrawMatch(const class ATBGameState& MatchState, class ATBController& Controller);
 	void DrawLobby();
 	void DrawDebugHUD();
-	// 凝視の演出。おもちゃには迫る紙の影と「ドキッ」、人間には暗くなる端と集中線。本人の画面にだけ出す。
+	// 凝視の演出。おもちゃには脈打つ周辺の影、人間にはズームに連動する影。本人の画面にだけ出す。
 	void DrawGazeEffects(class ATBController& Controller);
 	void DrawEdgeShade(FLinearColor Color, float Thickness, float Alpha);
 	float GazeShadow = 0;
-	// 前の描画で凝視されているか止まっていたか。入った瞬間だけ「ドキッ」を出す。
+	float GazePulsePhase = 0;
+	TWeakObjectPtr<class ATBCharacter> GazeEffectPawn;
+	// 前の描画で凝視されているか止まっていたか。入った瞬間だけ既存の警告音を鳴らす。
 	bool bWasCaught = false;
-	double DokiStarted = -1;
 };

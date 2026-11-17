@@ -5,7 +5,7 @@
 #include "Engine/GameViewportClient.h"
 #include "TBGameViewportClient.generated.h"
 
-/** ゲーム画面の警告表示と、撮影用のUI切り替え。エディタの表示には触れない。 */
+/** ゲーム表示中の画面診断ポリシーと撮影用UI切替。最後のviewport終了時に診断表示を復元する。 */
 UCLASS()
 class TOONSTORY_API UTBGameViewportClient : public UGameViewportClient
 {
@@ -21,6 +21,8 @@ public:
 	static bool IsUIHidden(const UWorld* World);
 private:
 	void ReleaseShortcut();
+	void ReleaseScreenMessagePolicy();
+	bool bOwnsScreenMessagePolicy = false;
 	bool bUIHidden = false;
 	TSharedPtr<class IInputProcessor> UIShortcut;
 	TWeakPtr<class SWidget> FocusBeforeHiding;

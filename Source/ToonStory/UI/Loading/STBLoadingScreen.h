@@ -11,7 +11,7 @@ class UFont;
 class UTexture2D;
 
 /**
- * ロード画面の絵。暗い子ども部屋で、おもちゃが左の積み木の陰から顔を出し、右の箱の陰へ小走りで隠れる。
+ * ロード画面の絵。紙色の小さな遊び場で、おもちゃが積み木の陰から顔を出し、箱の陰へ小走りで隠れる。
  * ロード中はゲームの処理が止まるので、UObject の更新に頼らず、時間だけから毎回描く（ロード用のスレッドからも描かれる）。
  */
 class STBLoadingScreen : public SLeafWidget
@@ -48,11 +48,6 @@ private:
 	TArray<TStrongObjectPtr<UTexture2D>> Textures;
 	TArray<FSlateBrush> Brushes;
 	TStrongObjectPtr<UFont> Font;
-	TStrongObjectPtr<UFont> HeadingFont;
-	TStrongObjectPtr<UTexture2D> Logo;
-	FSlateBrush LogoBrush;
-	FText LeadText;
-	FText BoxText;
 	FText Status;
 	float Exit = 0.f;
 	double ShownAt = 0;
