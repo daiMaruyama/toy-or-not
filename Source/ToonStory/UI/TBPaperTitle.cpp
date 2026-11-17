@@ -247,7 +247,6 @@ void UTBTitleMenu::BuildPaperLayout()
 		Caption->SetAutoWrapText(false);
 		CaptionScale->SetContent(Caption);
 		Button->SetContent(ScaleCaption);
-		Button->SetToolTipText(TBText::Get(Key));
 		FTitleCaption Entry;
 		Entry.Button = Button; Entry.Patch = Patch; Entry.Layer = ScaleCaption;
 		Entry.Key = Key; Entry.Original = Original;
@@ -258,10 +257,8 @@ void UTBTitleMenu::BuildPaperLayout()
 	EditableArtCaption(FindButton, TEXT("Root.Title.Find"), TEXT("部屋をさがす"),
 	    FVector2D(433, 174), FVector4(139, 59, 385, 125), 392, 36);
 	EditableArtCaption(HelpButton, TEXT("Root.Title.Help"), TEXT("あそびかた"),
-	    FVector2D(260, 105), FVector4(82, 36, 231, 77), 235, 25);
+	    FVector2D(260, 105), FVector4(82, 36, 234, 77), 235, 25);
 	UpdateTitleCaptions();
-	OptionsButton->SetToolTipText(TBText::Get(TEXT("Root.Common.Options")));
-	QuitButton->SetToolTipText(TBText::Get(TEXT("Root.Title.Quit")));
 	auto* RoomCard = WidgetTree->ConstructWidget<UBorder>();
 	RoomCard->SetBrush(TBPaper::Brush(PaperTexture, TBPaper::Paper));
 	// 部屋をさがすの右側。ボタン（x 〜530）やアイコン（y 745〜）と重ならない。

@@ -11,6 +11,7 @@
 #include "Character/TBCharacter.h"
 #include "Character/TBMovement.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
 #include "Core/TBController.h"
 #include "Core/TBChat.h"
 #include "Core/TBGameMode.h"
@@ -20,6 +21,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
@@ -38,6 +40,9 @@
 #include "UI/TBUIText.h"
 #include "UI/Loading/TBLoadingScreenSettings.h"
 #include "UnrealClient.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/IToolTip.h"
 
 namespace
 {
@@ -109,6 +114,7 @@ namespace
 
 		~FUIReview() override
 		{
+			RestoreTitleButton();
 			RestoreChat();
 			if (Options.IsValid()) Options->Dismiss();
 			if (PC.IsValid())
@@ -194,10 +200,22 @@ namespace
 			// Automation runs with an unfocused window; Slate can close an edit box
 			// after the opening tick. Keep this fixture open through the capture frame.
 			if (!bTitle && Step == 4 && PC.IsValid()) PC->OpenChat();
+			if (TitleSlateButton.IsValid() && !HoldTitleButton()) return true;
 			if (bOverviewActive) HoldOverview();
 			if (++Frames < 12 || FPlatformTime::Seconds() < ReadyAt) return false;
 			if (!bRequested)
 			{
+				if (bTitle && Step == 0)
+				{
+#if WITH_EDITOR
+					for (const auto& Texture : ReviewTextures)
+						if (Texture->IsCompiling()) return false;
+#endif
+					for (const auto& Texture : ReviewTextures)
+						Test->TestTrue(*FString::Printf(TEXT("UI artwork has generated mips: %s (%d)"),
+						    *Texture->GetName(), Texture->GetNumMips()), Texture->GetNumMips() > 1);
+				}
+				if (TitleSlateButton.IsValid() && !CheckTitleButton()) return true;
 				if (!bTitle && (Step == 1 || Step == 2 || Step == 23))
 				{
 					const bool bNPCEnabled = Step != 1;
@@ -241,10 +259,12 @@ namespace
 			if (FScreenshotRequest::IsScreenshotRequested()) return false;
 			Test->TestTrue(*FString::Printf(TEXT("Rendered screenshot: %s"), *Name),
 			              IFileManager::Get().FileSize(*Path) > 1024);
-			if (!bTitle && Step == 22) return true;
+			if ((!bTitle && Step == 22) || (bTitle && Step == 3)) return true;
 			// Photograph the settings return before the existing match sequence;
 			// retain the earlier step indices used by transition/gaze assertions.
-			if (!bTitle && Step == 8) Step = 23;
+			if (bTitle && Step == 0) Step = 4;
+			else if (bTitle && Step == 9) { RestoreTitleButton(); Step = 1; }
+			else if (!bTitle && Step == 8) Step = 23;
 			else if (!bTitle && Step == 23) Step = 9;
 			else ++Step;
 			if (bRosterOnly && Step == 3) Step = 18;
@@ -341,6 +361,101 @@ namespace
 			return true;
 		}
 
+		bool PrepareTitleReview()
+		{
+			bool bValid = true;
+			for (const TCHAR* ButtonName : {TEXT("HostButton"), TEXT("FindButton"), TEXT("HelpButton"),
+			    TEXT("OptionsButton"), TEXT("QuitButton")})
+			{
+				auto* Button = Cast<UButton>(Title->WidgetTree->FindWidget(FName(ButtonName)));
+				if (!Test->TestNotNull(ButtonName, Button)) return false;
+				UWidgetTree::ForEachWidgetAndChildrenUntil(Button, [&](UWidget* Widget)
+				{
+					const auto Slate = Widget->GetCachedWidget();
+					const auto Tooltip = Slate.IsValid() ? Slate->GetToolTip() : nullptr;
+					bValid &= Test->TestTrue(*FString::Printf(TEXT("Title control has no default tooltip: %s/%s"),
+					    ButtonName, *Widget->GetName()), Widget->GetToolTipText().IsEmpty() && !Widget->GetToolTip() &&
+					    (!Tooltip.IsValid() || Tooltip->IsEmpty()));
+					return true;
+				});
+			}
+			for (const TCHAR* Art : {TEXT("TitleLogo"), TEXT("Button_HostRoom_Normal"),
+			    TEXT("Button_HostRoom_Hover"), TEXT("Button_HostRoom_Pressed"), TEXT("Button_FindRoom_Normal"),
+			    TEXT("Button_FindRoom_Hover"), TEXT("Button_FindRoom_Pressed"), TEXT("Button_HowToPlay_Normal"),
+			    TEXT("Button_HowToPlay_Hover"), TEXT("Button_HowToPlay_Pressed"), TEXT("Frame_Settings"),
+			    TEXT("Icon_Hourglass"), TEXT("Icon_BatteryPickup"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")})
+			{
+				auto* Texture = TBPaper::Art(Art);
+				if (!Test->TestNotNull(*FString::Printf(TEXT("UI review artwork loads: %s"), Art), Texture)) return false;
+				ReviewTextures.Emplace(Texture);
+			}
+			return bValid;
+		}
+
+		void RestoreTitleButton()
+		{
+			if (TitleSlateButton.IsValid())
+			{
+				// Release without a key-up/click while every action delegate is still detached.
+				TitleSlateButton->OnMouseCaptureLost(FCaptureLostEvent(0, 0));
+				TitleSlateButton->OnMouseLeave(FPointerEvent());
+				if (bOldTitleHovered)
+					TitleSlateButton->OnMouseEnter(TitleSlateButton->GetCachedGeometry(), FPointerEvent());
+			}
+			if (TitleVisualButton.IsValid())
+			{
+				TitleVisualButton->SetPressMethod(OldTitlePressMethod);
+				TitleVisualButton->OnClicked = OldTitleClicked;
+				TitleVisualButton->OnPressed = OldTitlePressed;
+				TitleVisualButton->OnReleased = OldTitleReleased;
+			}
+			TitleSlateButton.Reset();
+			TitleVisualButton.Reset();
+		}
+
+		bool HoldTitleButton()
+		{
+			if (!TitleSlateButton->IsHovered())
+				TitleSlateButton->OnMouseEnter(TitleSlateButton->GetCachedGeometry(), FPointerEvent());
+			if (bTitlePressed && !TitleSlateButton->IsPressed())
+			{
+				// UE 5.8 exposes AppearPressed only to subclasses. Use the real Slate
+				// pressed state, with UButton actions detached and no key-up dispatched.
+				const FKeyEvent Accept(EKeys::Enter, FModifierKeysState(), 0, false, 0, 0);
+				return Test->TestTrue(TEXT("Title visual press is handled"),
+				    TitleSlateButton->OnKeyDown(TitleSlateButton->GetCachedGeometry(), Accept).IsEventHandled());
+			}
+			return true;
+		}
+
+		bool CheckTitleButton()
+		{
+			if (!Test->TestTrue(TEXT("Title visual fixture has no bound click/press/release actions"),
+			    !TitleVisualButton->OnClicked.IsBound() && !TitleVisualButton->OnPressed.IsBound() &&
+			    !TitleVisualButton->OnReleased.IsBound()) ||
+			    !Test->TestTrue(TEXT("UMG title control is hovered"), TitleVisualButton->IsHovered()) ||
+			    !Test->TestEqual(TEXT("UMG title control reports the captured pressed state"),
+			        TitleVisualButton->IsPressed(), bTitlePressed)) return false;
+			if (TBText::GetLanguage() == TEXT("en"))
+			{
+				const auto& Style = TitleVisualButton->GetStyle();
+				UObject* Expected = (bTitlePressed ? Style.Pressed : Style.Hovered).GetResourceObject();
+				int32 Patches = 0;
+				bool bMatches = true;
+				UWidgetTree::ForEachWidgetAndChildrenUntil(TitleVisualButton.Get(), [&](UWidget* Widget)
+				{
+					if (const auto* Patch = Cast<UImage>(Widget))
+					{
+						++Patches;
+						bMatches &= Patch->GetBrush().GetResourceObject() == Expected;
+					}
+					return true;
+				});
+				return Test->TestTrue(TEXT("Translated caption patch follows the actual button state"), Patches > 0 && bMatches);
+			}
+			return true;
+		}
+
 		bool EnterTitle()
 		{
 			switch (Step)
@@ -352,6 +467,7 @@ namespace
 				if (!Test->TestEqual(TEXT("One actual title menu"), Found.Num(), 1)) return false;
 				Title = Cast<UTBTitleMenu>(Found[0]);
 				Title->SkipStory();
+				if (!PrepareTitleReview()) return false;
 				Name = TEXT("01-title");
 				break;
 			}
@@ -372,6 +488,33 @@ namespace
 				if (!Test->TestEqual(TEXT("Title opens shared options"), Found.Num(), 1)) return false;
 				Options = Cast<UTBOptionsMenu>(Found[0]);
 				Name = TEXT("04-title-options");
+				break;
+			}
+			case 4: case 5: case 6: case 7: case 8: case 9:
+			{
+				RestoreTitleButton();
+				const TCHAR* Buttons[] = {TEXT("HostButton"), TEXT("FindButton"), TEXT("HelpButton")};
+				const TCHAR* Captures[] = {TEXT("38-title-host-hover"), TEXT("39-title-host-pressed"),
+				    TEXT("40-title-find-hover"), TEXT("41-title-find-pressed"), TEXT("42-title-help-hover"),
+				    TEXT("43-title-help-pressed")};
+				auto* Button = Cast<UButton>(Title->WidgetTree->FindWidget(FName(Buttons[(Step - 4) / 2])));
+				if (!Test->TestNotNull(TEXT("Title visual control"), Button) ||
+				    !Test->TestTrue(TEXT("Title visual control has a Slate widget"), Button->GetCachedWidget().IsValid()) ||
+				    !Test->TestFalse(TEXT("Title control starts unpressed"), Button->IsPressed())) return false;
+				TitleVisualButton = Button;
+				TitleSlateButton = StaticCastSharedPtr<SButton>(Button->GetCachedWidget());
+				OldTitleClicked = Button->OnClicked;
+				OldTitlePressed = Button->OnPressed;
+				OldTitleReleased = Button->OnReleased;
+				OldTitlePressMethod = Button->GetPressMethod();
+				bOldTitleHovered = Button->IsHovered();
+				Button->OnClicked.Clear();
+				Button->OnPressed.Clear();
+				Button->OnReleased.Clear();
+				Button->SetPressMethod(EButtonPressMethod::DownAndUp);
+				bTitlePressed = Step % 2 == 1;
+				Name = Captures[Step - 4];
+				if (!HoldTitleButton()) return false;
 				break;
 			}
 			default:
@@ -634,6 +777,14 @@ namespace
 		TWeakObjectPtr<ATBPlayerState> Player;
 		TWeakObjectPtr<ATBHUD> HUD;
 		TWeakObjectPtr<UTBTitleMenu> Title;
+		TWeakObjectPtr<UButton> TitleVisualButton;
+		TSharedPtr<SButton> TitleSlateButton;
+		TArray<TStrongObjectPtr<UTexture2D>> ReviewTextures;
+		FOnButtonClickedEvent OldTitleClicked;
+		FOnButtonPressedEvent OldTitlePressed;
+		FOnButtonReleasedEvent OldTitleReleased;
+		EButtonPressMethod::Type OldTitlePressMethod = EButtonPressMethod::DownAndUp;
+		bool bTitlePressed = false, bOldTitleHovered = false;
 		TWeakObjectPtr<UTBOptionsMenu> Options;
 		TWeakObjectPtr<UTBChatLog> SampleChat;
 		TArray<FTBChatLine> OldChatLines;

@@ -168,30 +168,8 @@ void ATBHUD::DrawHUD()
 			DrawRect(TBPaper::Ink, X + 232 * S, Y + 83 * S, 8 * S, 30 * S);
 			DrawFittedText(TBText::String(TEXT("Canvas.PauseTitle")), TBPaper::Ink,
 			    X + 256 * S, Y + 83 * S, 234 * S, 1.65f * S, true, true);
-			// Sample only the bear, keeping the editable title out of the sprite.
-			if (const auto* Bear = ArtTextures.Find(TEXT("PauseHeader")); Bear && *Bear)
-			{
-				// Follow the bear silhouette so the left paw is whole without including the old caption.
-				const FVector2D Points[] = {{279, 70}, {304, 70}, {319, 77}, {343, 74}, {355, 87},
-				    {354, 106}, {365, 119}, {365, 147}, {315, 153}, {253, 148}, {253, 116}, {271, 111}, {271, 89}};
-				const FVector2D Center(315, 116);
-				auto Position = [&](FVector2D P) { return FVector2D(X + (P.X + 204) * S, Y + (P.Y + 18) * S); };
-				auto UV = [](FVector2D P) { return FVector2D(P.X / 370.f, P.Y / 162.f); };
-				TArray<FCanvasUVTri> Triangles;
-				for (int32 Index = 0; Index < UE_ARRAY_COUNT(Points); ++Index)
-				{
-					FCanvasUVTri Triangle;
-					Triangle.V0_Pos = Position(Center); Triangle.V0_UV = UV(Center);
-					Triangle.V1_Pos = Position(Points[Index]); Triangle.V1_UV = UV(Points[Index]);
-					Triangle.V2_Pos = Position(Points[(Index + 1) % UE_ARRAY_COUNT(Points)]);
-					Triangle.V2_UV = UV(Points[(Index + 1) % UE_ARRAY_COUNT(Points)]);
-					Triangle.V0_Color = Triangle.V1_Color = Triangle.V2_Color = FLinearColor::White;
-					Triangles.Add(Triangle);
-				}
-				FCanvasTriangleItem Item(Triangles, Bear->Get()->GetResource());
-				Item.BlendMode = SE_BLEND_Translucent;
-				Canvas->DrawItem(Item);
-			}
+			// The transparent bear is separate from the editable heading; no pixel-bound crop.
+			DrawArt(TEXT("PauseHeader"), X + 490 * S, Y + 78 * S, 124 * S, 96 * S);
 			DrawFittedText(TBText::Literal(TEXT("Canvas.OnlineContinues")), TBPaper::Muted,
 			    X + 145 * S, Y + 183 * S, 430 * S, 1.05f * S, true, true);
 			DrawArt(TEXT("Underline_Coral"), X + 150 * S, Y + 211 * S, 420 * S, 13 * S);
