@@ -382,7 +382,6 @@ UWidget* UTBTitleMenu::RoomLabel(FString Item)
 	Label->SetFont(FSlateFontInfo(PaperFont, 17));
 	Label->SetColorAndOpacity(TBPaper::Ink);
 	Label->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-	Label->SetToolTipText(FText::FromString(Item));
 	return Label;
 }
 

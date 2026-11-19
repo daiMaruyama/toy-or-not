@@ -34,7 +34,6 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 		Block->SetFont(FSlateFontInfo(Font, FontSize));
 		Block->SetColorAndOpacity(TBPaper::Ink);
 		Block->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-		Block->SetToolTipText(String);
 		return Block;
 	};
 	auto Arrow = [&](const TCHAR* Glyph, float X)
@@ -52,8 +51,6 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 	Place(Text(Label, 19), 8, 10, 224, 36);
 	DownButton = Arrow(bBar ? TEXT("−") : TEXT("‹"), 240);
 	UpButton = Arrow(bBar ? TEXT("+") : TEXT("›"), 716);
-	DownButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Options.PreviousValue")), Label));
-	UpButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Options.NextValue")), Label));
 	ValueText = Text(FText::GetEmpty(), 19);
 	if (bBar)
 	{
@@ -71,7 +68,6 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 		Slider->SetWidgetStyle(SliderStyle);
 		Slider->SetSliderBarColor(FLinearColor::White);
 		Slider->SetSliderHandleColor(FLinearColor::White);
-		Slider->SetToolTipText(Label);
 		Slider->OnValueChanged.AddDynamic(this, &ThisClass::SliderMoved);
 		Slider->OnMouseCaptureBegin.AddDynamic(this, &ThisClass::SliderGrabbed);
 		Slider->OnMouseCaptureEnd.AddDynamic(this, &ThisClass::SliderReleased);
@@ -104,7 +100,6 @@ void UTBOptionRow::RefreshText()
 	if (Value)
 	{
 		ValueText->SetText(FText::FromString(Value()));
-		ValueText->SetToolTipText(ValueText->GetText());
 	}
 	DownButton->SetIsEnabled(!CanStep || CanStep(-1));
 	UpButton->SetIsEnabled(!CanStep || CanStep(1));

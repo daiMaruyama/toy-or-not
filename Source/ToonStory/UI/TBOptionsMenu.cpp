@@ -96,7 +96,6 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		Caption->SetFont(FSlateFontInfo(HeadingFont, 20));
 		Caption->SetJustification(ETextJustify::Center);
 		Button->SetContent(Caption);
-		Button->SetToolTipText(Text);
 		Place(Panel, Button, X, Y, W, 56);
 		return Button;
 	};
@@ -296,7 +295,6 @@ void UTBOptionsMenu::ShowPage(int32 Index)
 		if (auto* Caption = Cast<UTextBlock>(Tabs[Other]->GetContent()))
 		{
 			Caption->SetText(Other == Page ? FText::Format(TBText::Get(TEXT("Options.SelectedTab")), TBText::Get(TabKeys[Other])) : TBText::Get(TabKeys[Other]));
-			Tabs[Other]->SetToolTipText(TBText::Get(TabKeys[Other]));
 			Caption->SetColorAndOpacity(TBPaper::Ink);
 		}
 	}

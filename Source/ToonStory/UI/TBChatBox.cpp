@@ -117,7 +117,6 @@ void UTBChatBox::NativeOnInitialized()
 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	SendButton->IsFocusable = false;
 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
-	SendButton->SetToolTipText(TBText::Get(TEXT("Root.Chat.SendHint")));
 	auto* SendText = WidgetTree->ConstructWidget<UTextBlock>();
 	SendText->SetText(TBText::Get(TEXT("Root.Chat.Send")));
 	SendText->SetFont(FSlateFontInfo(PaperFont, 18));
@@ -145,7 +144,6 @@ void UTBChatBox::NativeOnInitialized()
 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	OpenButton->IsFocusable = false;
 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
-	OpenButton->SetToolTipText(TBText::Get(TEXT("Root.Chat.Open")));
 	auto* OpenText = WidgetTree->ConstructWidget<UTextBlock>();
 	OpenText->SetText(TBText::Get(TEXT("Root.Chat.Open")));
 	OpenText->SetFont(FSlateFontInfo(PaperFont, 15));

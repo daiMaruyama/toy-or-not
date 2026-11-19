@@ -36,7 +36,6 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTex
 		Block->SetFont(FSlateFontInfo(Font, FontSize));
 		Block->SetColorAndOpacity(TBPaper::Ink);
 		Block->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-		Block->SetToolTipText(String);
 		return Block;
 	};
 	auto* Divider = WidgetTree->ConstructWidget<UBorder>();
@@ -54,13 +53,11 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTex
 	auto* ResetButton = WidgetTree->ConstructWidget<UButton>();
 	ResetButton->SetStyle(TBPaper::CompactButtonStyle(true));
 	ResetButton->SetContent(Text(TBText::Get(TEXT("Keys.Reset")), 16));
-	ResetButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Keys.ResetTooltip")), Label));
 	Place(ResetButton, 612, 3, 84, 44);
 	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetClicked);
 	ChangeButton = WidgetTree->ConstructWidget<UButton>();
 	ChangeButton->SetStyle(TBPaper::CompactButtonStyle());
 	ChangeButton->SetContent(Text(TBText::Get(TEXT("Keys.Change")), 16));
-	ChangeButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Keys.ChangeTooltip")), Label));
 	Place(ChangeButton, 716, 3, 84, 44);
 	ChangeButton->OnClicked.AddDynamic(this, &ThisClass::Clicked);
 }
@@ -68,7 +65,6 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTex
 void UTBKeyRow::Refresh()
 {
 	KeyText->SetText(FText::FromString(TB::KeyLabel(GetOwningPlayer(), MappingName)));
-	KeyText->SetToolTipText(KeyText->GetText());
 }
 
 void UTBKeyRow::FocusButton()
