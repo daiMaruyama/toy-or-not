@@ -28,7 +28,7 @@ public:
 	// 開いた瞬間だけ部屋全体を明るくする。
 	UPROPERTY(EditInstanceOnly, Category = "Lid")
 	TObjectPtr<APostProcessVolume> RoomVolume;
-	// 開く角度・光の強さ・時間はマスターデータ（TB::PresentationData().Lid）にある。
+	// 開く角度・光の強さ・時間は、救助・収納も脱出もマスターデータ（TB::PresentationData().Lid）にある。
 
 	/** リザルトの演出で開き具合を決める。負なら手放して閉じたふたに戻す */
 	void HoldForResult(float Alpha);
@@ -37,6 +37,22 @@ public:
 	static ATBBoxLid* Find(const UWorld* World);
 
 private:
+	// 一回の開閉の大きさと時間。救助・収納と脱出で値が違う。
+	struct FPlay
+	{
+		float Angle = 0.f;
+		float PeakIntensity = 0.f;
+		float OpenSeconds = .25f;
+		float HoldSeconds = 0.f;
+		float CloseSeconds = .8f;
+		float FlashExposure = 0.f;
+		float FlashSeconds = .35f;
+		bool bEscape = false;
+	};
+	static FPlay StandardPlay();
+	static FPlay EscapePlay();
+	void Start(const FPlay& Next);
+	FPlay Play;
 	bool bResultHeld = false;
 	bool bBoundToBox = false;
 	float Elapsed = -1.f;
@@ -51,6 +67,7 @@ private:
 	float RestExposure = 0.f;
 	bool bRestExposureOverride = false;
 	void Open();
+	void OpenForEscape();
 	void SetOpen(float Alpha);
 	void SetFlash(float Alpha);
 };

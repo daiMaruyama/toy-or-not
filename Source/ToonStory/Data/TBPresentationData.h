@@ -32,6 +32,24 @@ struct FTBLidFeel
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
 	          meta = (DisplayName = "部屋の明るさが戻るまで", Units = "s", ClampMin = "0.01"))
 	float FlashSeconds = .35f;
+	// 脱出のゴールの瞬間は、頭でふたを押し上げて、救助・収納より大きく・長く・勢いよく開く。閉じる時間と光が戻る時間は共通。
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で開く角度", Units = "Degrees", ClampMin = "0", ClampMax = "80"))
+	float EscapeOpenAngle = 75.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた", meta = (DisplayName = "脱出の光の強さ", ClampMin = "0"))
+	float EscapePeakIntensity = 80000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で開くのにかかる時間", Units = "s", ClampMin = "0.01"))
+	float EscapeOpenSeconds = .12f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で開いたままの時間", Units = "s", ClampMin = "0"))
+	float EscapeHoldSeconds = 1.6f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた", meta = (DisplayName = "脱出で部屋が明るくなる量", ClampMin = "0"))
+	float EscapeFlashExposure = 4.f;
+	/** ゴールしてから本人を出口へ移すまで。この間にふたが開いて、頭で押し上げたように見せる */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で出口へ移すまで", Units = "s", ClampMin = "0", ClampMax = "1.5"))
+	float EscapeReleaseDelay = .25f;
 };
 
 /** 決着からリザルトの画面までの演出。秒は決着の瞬間から数える */

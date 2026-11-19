@@ -15,6 +15,15 @@ EDataValidationResult UTBPresentationData::IsDataValid(FDataValidationContext& C
 		Context.AddError(Message);
 		Valid = EDataValidationResult::Invalid;
 	};
+	// 脱出の開き方は救助・収納より小さくしない。出口へ移す瞬間もふたが開いたままにする。
+	if (Lid.EscapeOpenAngle < Lid.OpenAngle || Lid.EscapeHoldSeconds < Lid.HoldSeconds)
+	{
+		Fail(LOCTEXT("LidEscapeSmaller", "箱のふたの「脱出で開く角度」と「脱出で開いたままの時間」は、救助・収納の値以上にしてください。"));
+	}
+	if (Lid.EscapeReleaseDelay > Lid.EscapeOpenSeconds + Lid.EscapeHoldSeconds)
+	{
+		Fail(LOCTEXT("LidEscapeDelayTooLong", "箱のふたの「脱出で出口へ移すまで」は、脱出で開く時間と開いたままの時間の合計以内にしてください。"));
+	}
 	// 決着を見せてから覆いはじめるので、覆いきる時刻より後に決着を見せ終えると、吹き出しが出ないまま結果の画面になる。
 	if (Result.DecisiveSeconds >= Result.CoverSeconds)
 	{
