@@ -96,7 +96,7 @@ struct FTBTelevisionFeel
 	/** チャンネルを変えたときに砂嵐を挟む時間 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "テレビ",
 	          meta = (DisplayName = "切り替えの砂嵐", Units = "s", ClampMin = "0", ClampMax = "2"))
-	float NoiseSeconds = .4f;
+	float NoiseSeconds = .12f;
 };
 
 USTRUCT(BlueprintType)
@@ -106,7 +106,7 @@ struct FTBRemoteFeel
 	/** 立ち位置の揺れや乗り直しで、同じ操作が続けて起きないようにする */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リモコン",
 	          meta = (DisplayName = "ボタンを続けて押せるまで", Units = "s", ClampMin = "0"))
-	float PressCooldown = .5f;
+	float PressCooldown = .22f;
 };
 
 /** 箱のふた・部屋の光、テレビ、リモコンの演出 */

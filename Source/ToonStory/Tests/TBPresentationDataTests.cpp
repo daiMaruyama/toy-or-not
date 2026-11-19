@@ -47,8 +47,8 @@ bool FTBPresentationDataTest::RunTest(const FString& Parameters)
 #endif
 	TestEqual(TEXT("TV resolution"), Defaults->Television.CaptureResolution, FIntPoint(512, 288));
 	TestEqual(TEXT("TV capture rate"), Defaults->Television.CaptureRate, 15.f);
-	TestEqual(TEXT("TV channel static"), Defaults->Television.NoiseSeconds, .4f);
-	TestEqual(TEXT("Remote cooldown"), Defaults->Remote.PressCooldown, .5f);
+	TestEqual(TEXT("TV channel static"), Defaults->Television.NoiseSeconds, .12f);
+	TestEqual(TEXT("Remote cooldown"), Defaults->Remote.PressCooldown, .22f);
 
 	// プロジェクト設定でアセットを選んでいれば、初期値ではなくそのアセットを使う。
 	const auto& Selected = GetDefault<UTBDataSettings>()->PresentationData;
