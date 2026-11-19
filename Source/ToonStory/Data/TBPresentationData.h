@@ -97,10 +97,6 @@ struct FTBTelevisionFeel
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "テレビ",
 	          meta = (DisplayName = "切り替えの砂嵐", Units = "s", ClampMin = "0", ClampMax = "2"))
 	float NoiseSeconds = .4f;
-	/** 箱に入れられた瞬間に見る位置の、画面中心からの高さ */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "テレビ",
-	          meta = (DisplayName = "入ったときに見上げる高さ", Units = "cm"))
-	float ArrivalLookAbove = 100.f;
 };
 
 USTRUCT(BlueprintType)

@@ -48,7 +48,6 @@ bool FTBPresentationDataTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("TV resolution"), Defaults->Television.CaptureResolution, FIntPoint(512, 288));
 	TestEqual(TEXT("TV capture rate"), Defaults->Television.CaptureRate, 15.f);
 	TestEqual(TEXT("TV channel static"), Defaults->Television.NoiseSeconds, .4f);
-	TestEqual(TEXT("Arrival look above"), Defaults->Television.ArrivalLookAbove, 100.f);
 	TestEqual(TEXT("Remote cooldown"), Defaults->Remote.PressCooldown, .5f);
 
 	// プロジェクト設定でアセットを選んでいれば、初期値ではなくそのアセットを使う。

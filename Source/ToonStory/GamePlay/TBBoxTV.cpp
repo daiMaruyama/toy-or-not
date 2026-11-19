@@ -24,6 +24,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -98,13 +99,39 @@ bool ATBBoxTV::HasLocalViewer() const
 	return false;
 }
 
-// 目の位置は落下エリアの床から求める。入った直後は、本人のPCに届いている自分の位置がまだ箱の外のことがある。
+FVector ATBBoxTV::ScreenCenter() const
+{
+	// 動かした直後でも今の位置・大きさで求めるよう、保存されている境界ではなく今の変換から計算する。
+	return Screen->CalcBounds(Screen->GetComponentTransform()).Origin;
+}
+
+FRotator ATBBoxTV::ArrivalRotation(const FVector& Eye, const FVector& Center)
+{
+	return (Center - Eye).Rotation();
+}
+
+bool ATBBoxTV::IsInBoxRoom(const FVector& Position) const
+{
+	const auto* State = TB::GS(GetWorld());
+	const ATBBox* Box = State ? State->Box.Get() : nullptr;
+	if (!Box || !Box->StorageRoom)
+	{
+		return false;
+	}
+	// 落下エリアでも、埋まっているときの壁際の予備位置でも、箱の部屋の中。
+	const FVector Local = Box->StorageRoom->GetComponentTransform().InverseTransformPosition(Position);
+	return Box->StorageRoomBounds().ExpandBy(2.0).IsInside(Local);
+}
+
+// 本人の目（カメラ）の位置から、画面の中心を向く。落ちている間は向き続け、着地したら止める。
+// 入った直後は、本人のPCに届いている自分の位置がまだ箱の外のことがあるので、箱の部屋に来るまでは向けずに待つ。
+// 待っている間は上限の時間を進めず、実際に初めて向けた時刻から数える。
 // 収納と運搬の解除は、クライアントに届く順もTickの順も決まっていない。運搬カメラの解除で視点が水平に戻されるので、
 // それが済むまでは向けずに false を返し、次のTickでやり直す。
-bool ATBBoxTV::FaceArrival() const
+bool ATBBoxTV::FaceArrival()
 {
-	const UBoxComponent* Area = ATBBox::FindDropArea(GetWorld());
-	if (!Area)
+	// 試合が終わるなど、待つ必要がなくなったら止める。
+	if (!TB::Playing(GetWorld()))
 	{
 		return true;
 	}
@@ -123,15 +150,30 @@ bool ATBBoxTV::FaceArrival() const
 			Arrivals.Add(PC);
 		}
 	}
-	const FVector Floor = Area->GetComponentLocation() - Area->GetUpVector() * Area->GetScaledBoxExtent().Z;
-	const FVector LookAt =
-	    Screen->Bounds.Origin + FVector(0.f, 0.f, TB::PresentationData().Television.ArrivalLookAbove);
+	if (Arrivals.IsEmpty())
+	{
+		return true;
+	}
+	const FVector Center = ScreenCenter();
+	bool bSettled = true;
 	for (APlayerController* PC : Arrivals)
 	{
-		const FVector Eye = Floor + FVector(0.f, 0.f, PC->GetPawn()->BaseEyeHeight);
-		PC->SetControlRotation((LookAt - Eye).Rotation());
+		const auto* Pawn = PC->GetPawn<ATBCharacter>();
+		if (!IsInBoxRoom(Pawn->GetActorLocation()))
+		{
+			bSettled = false;
+			continue;
+		}
+		if (ArrivalFaceStart < 0)
+		{
+			ArrivalFaceStart = GetWorld()->GetTimeSeconds();
+		}
+		PC->SetControlRotation(ArrivalRotation(Pawn->Camera->GetComponentLocation(), Center));
+		bSettled &= Pawn->GetCharacterMovement()->IsMovingOnGround();
 	}
-	return true;
+	// 着地できないまま（斜面で滑り続けるなど）でも、視点を奪い続けない。上限は、初めて向けた時刻から数える。
+	constexpr double MaxFollowSeconds = 2.0;
+	return bSettled || (ArrivalFaceStart >= 0 && GetWorld()->GetTimeSeconds() - ArrivalFaceStart >= MaxFollowSeconds);
 }
 
 // 人間はいつでも映せる。おもちゃは掴まれた時点で砂嵐にし、降ろされて自由になれば再び映す。
@@ -308,9 +350,13 @@ void ATBBoxTV::Tick(float DeltaSeconds)
 			ResetChannel();
 		}
 	}
-	// 箱に入れられたら一度だけ、本人の画面をテレビの少し上へ向ける。向きは本人のPCが持っているので、ここで決める。
+	// 箱に入れられたら、着地するまで本人の画面をテレビの画面の中心へ向ける。向きは本人のPCが持っているので、ここで決める。
 	const bool bLocalBoxed = GetNetMode() != NM_DedicatedServer && HasLocalViewer();
 	bFacedArrival = bLocalBoxed && (bFacedArrival || FaceArrival());
+	if (!bLocalBoxed)
+	{
+		ArrivalFaceStart = -1;
+	}
 	SetViewing(bPowerOn && bLocalBoxed);
 	// テクスチャは最初の描画で作られるので、できるまでTickで試す。
 	if (bViewing && !bOSDBound)
