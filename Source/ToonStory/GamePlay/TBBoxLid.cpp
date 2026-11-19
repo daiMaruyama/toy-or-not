@@ -40,7 +40,7 @@ void ATBBoxLid::BeginPlay()
 		CeilingRest = Ceiling->GetActorTransform();
 		Ceiling->GetActorBounds(false, ClosedOrigin, ClosedExtent);
 		// 側面をPivotにして、反対側を持ち上げる。
-		Hinge = ClosedOrigin + FVector(0.f, ClosedExtent.Y, ClosedExtent.Z);
+		Hinge = ClosedOrigin + FVector(0.f, HingeSign() * ClosedExtent.Y, ClosedExtent.Z);
 		const FVector Arm = CeilingRest.GetLocation() - Hinge;
 		OpenSign = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(1.f)).RotateVector(Arm).Z > Arm.Z ? 1.f : -1.f;
 	}
@@ -182,11 +182,17 @@ bool ATBBoxLid::ResultShot(FTransform& Out) const
 	// 床は落下エリアの底。無ければ天井から2.5m下とみなす。
 	const auto* Drop = ATBBox::FindDropArea(GetWorld());
 	const float FloorZ = Drop ? Drop->GetComponentLocation().Z - Drop->GetScaledBoxExtent().Z : Origin.Z - 250.f;
-	// 部屋の隅寄りの低い位置から、ふたの持ち上がる側を見上げる。
-	const FVector Eye(Origin.X - Extent.X * .5f, Origin.Y + Extent.Y * .5f, FloorZ + 40.f);
-	const FVector Look(Origin.X, Origin.Y - Extent.Y * .3f, Origin.Z);
+	// 部屋の隅寄りの低い位置（蝶番の側）から、ふたの持ち上がる側を見上げる。
+	const float Side = HingeSign();
+	const FVector Eye(Origin.X - Extent.X * .5f, Origin.Y + Side * Extent.Y * .5f, FloorZ + 40.f);
+	const FVector Look(Origin.X, Origin.Y - Side * Extent.Y * .3f, Origin.Z);
 	Out = FTransform((Look - Eye).Rotation(), Eye);
 	return true;
+}
+
+float ATBBoxLid::HingeSign() const
+{
+	return HingeSide == ETBLidHingeSide::NegativeY ? -1.f : 1.f;
 }
 
 ATBBoxLid* ATBBoxLid::Find(const UWorld* World)

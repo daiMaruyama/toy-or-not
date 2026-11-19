@@ -17,6 +17,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Engine/TriggerBox.h"
 #include "Engine/TargetPoint.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
@@ -128,8 +131,15 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	// 閉じたふたの向きからの傾き（度）。
 	const FQuat RestQuat = Lid->Ceiling->GetActorQuat();
 	auto LidAngle = [&] { return FMath::RadiansToDegrees(RestQuat.AngularDistance(Lid->Ceiling->GetActorQuat())); };
+	// 時間は、データアセットの値から決める（開く時間などを長くしても、全開・閉じきった状態で測れるように）。
+	const FTBLidFeel& L = Feel.Lid;
+	const float RescueFull = L.OpenSeconds + L.HoldSeconds * .5f;
+	const float EscapeFull = L.EscapeOpenSeconds + L.EscapeHoldSeconds * .5f;
+	const float CloseAll = FMath::Max(L.OpenSeconds + L.HoldSeconds, L.EscapeOpenSeconds + L.EscapeHoldSeconds) + L.CloseSeconds + 1.f;
+	const float Delay = L.EscapeReleaseDelay;
+	const float PastDelay = Delay * 2.f + .1f;
 	Lid->Tick(0.f);
-	Lid->Tick(10.f);
+	Lid->Tick(CloseAll);
 	TestTrue(TEXT("Lid starts closed"), LidAngle() < .5f);
 	const FVector ExitLocation = Course->ExitPoints[0]->GetActorLocation();
 
@@ -141,29 +151,29 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	Place(Toy, Finish, 0.f);
 	TestEqual(TEXT("The goal moment bumps the lid for everyone"), Bumps, BumpsBefore + 1);
 	TestEqual(TEXT("The toy is still boxed right at the goal"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
-	Course->Tick(.1f);
-	Course->Tick(.1f);
+	Course->Tick(Delay * .4f);
+	Course->Tick(Delay * .4f);
 	TestEqual(TEXT("The toy is held until the delay passes"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	TestEqual(TEXT("Only one bump per escape"), Bumps, BumpsBefore + 1);
-	Lid->Tick(.2f);
+	Lid->Tick(EscapeFull);
 	TestTrue(TEXT("The escape opens the lid wider than rescue"), FMath::IsNearlyEqual(LidAngle(), Feel.Lid.EscapeOpenAngle, 1.5f));
 	Box->OnOpened.Broadcast();
 	const int32 OpensAfterTestSignal = Opens;
-	Lid->Tick(.05f);
+	Lid->Tick(L.EscapeHoldSeconds * .1f);
 	TestTrue(TEXT("A rescue signal does not shrink the escape opening"), FMath::IsNearlyEqual(LidAngle(), Feel.Lid.EscapeOpenAngle, 1.5f));
-	Course->Tick(.1f);
+	Course->Tick(Delay * .4f);
 	TestEqual(TEXT("After the delay the toy leaves"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	TestTrue(TEXT("The toy reaches the safe exit"), Toy->GetActorLocation().Equals(ExitLocation, 1.f));
 	TestEqual(TEXT("Leaving sends no extra escape bump"), Bumps, BumpsBefore + 1);
 	TestEqual(TEXT("Leaving sends no ordinary lid signal"), Opens, OpensAfterTestSignal);
-	Lid->Tick(10.f);
+	Lid->Tick(CloseAll);
 	TestTrue(TEXT("The lid closes again"), LidAngle() < .5f);
 	Box->OnOpened.Broadcast();
-	Lid->Tick(.4f);
+	Lid->Tick(RescueFull);
 	TestTrue(TEXT("Rescue and storage still open the lid by the old angle"), FMath::IsNearlyEqual(LidAngle(), Feel.Lid.OpenAngle, 1.5f));
 	// 救助・収納の開きの途中で脱出に切り替わっても、切り替えた直後の実際の角度は跳ばない。
-	Lid->Tick(10.f);
-	for (const float OpenedFor : {.06f, .12f, .5f})
+	Lid->Tick(CloseAll);
+	for (const float OpenedFor : {L.OpenSeconds * .25f, L.OpenSeconds * .5f, RescueFull})
 	{
 		Box->OnOpened.Broadcast();
 		Lid->Tick(OpenedFor);
@@ -172,7 +182,7 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 		Lid->Tick(0.f);
 		TestTrue(*FString::Printf(TEXT("Switching to the escape keeps the angle (%.2f -> %.2f)"), Before, LidAngle()),
 		         FMath::IsNearlyEqual(LidAngle(), Before, .3f));
-		Lid->Tick(10.f);
+		Lid->Tick(CloseAll);
 	}
 
 	// 2) 遅らせている間に試合が終わったら、出口へ移さない。
@@ -183,7 +193,7 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	TestEqual(TEXT("Deadline toy is held"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	State->EndTime = State->GetServerWorldTimeSeconds() - .01;
 	Mode->CheckWin();
-	Course->Tick(.5f);
+	Course->Tick(PastDelay);
 	TestEqual(TEXT("A match that ends during the delay does not release the toy"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	TestTrue(TEXT("The toy stays where it was"), Toy->GetActorLocation().Equals(Finish, 1.f));
 
@@ -196,7 +206,7 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	Box->ReleasePrisoners();
 	TestEqual(TEXT("The team rescue frees the toy during the delay"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	const FVector RescuedAt = Toy->GetActorLocation();
-	Course->Tick(.5f);
+	Course->Tick(PastDelay);
 	TestTrue(TEXT("A toy that already left is not moved to the exit"), Toy->GetActorLocation().Equals(RescuedAt, 1.f));
 	TestEqual(TEXT("It stays free"), Toy->TBPS()->ToyState, ETBToyState::Free);
 
@@ -208,7 +218,7 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	const int32 BumpsBeforeRecapture = Bumps;
 	Box->ReleasePrisoners();
 	if (!Store(TEXT("Second capture is stored"), Toy)) return false;
-	Course->Tick(.5f);
+	Course->Tick(PastDelay);
 	TestEqual(TEXT("A recaptured toy stays boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	TestEqual(TEXT("The old escape sends no further bump"), Bumps, BumpsBeforeRecapture);
 
@@ -230,7 +240,7 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	Place(Toy, Low, 0.f);
 	Place(Toy, Finish, 0.f);
 	TestEqual(TEXT("The blocked goal still bumps once"), Bumps, BumpsBeforeBlocked + 1);
-	Course->Tick(.3f);
+	Course->Tick(PastDelay);
 	TestEqual(TEXT("Every exit blocked keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Place(Toy, Low, 0.f); // 箱の底へ着地した。
 	for (auto* Collision : Blockers) Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -242,6 +252,93 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	TestEqual(TEXT("Reaching the goal height again releases the toy"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	TestTrue(TEXT("It reaches the safe exit"), Toy->GetActorLocation().Equals(ExitLocation, 1.f));
 	TestEqual(TEXT("The retry does not bump again"), Bumps, BumpsBeforeBlocked + 1);
+	return !HasAnyErrors();
+}
+
+// 蝶番の側。既定の+Yは今までと同じ動き、-Yは反対側（ゴール側）が大きく持ち上がり、リザルトのカメラも持ち上がる側を向く。
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBBoxLidHingeTest, "ToonStory.Playroom.BoxLidHinge",
+                                 EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBBoxLidHingeTest::RunTest(const FString&)
+{
+	UWorld* World = nullptr;
+	for (const auto& Context : GEngine->GetWorldContexts())
+		if (Context.WorldType == EWorldType::Game) { World = Context.World(); break; }
+	auto* State = World ? World->GetGameState<ATBGameState>() : nullptr;
+	if (!State || !State->Box) return false;
+	auto* Box = State->Box.Get();
+	auto* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("Cube mesh"), Cube)) return false;
+	TArray<AActor*> Spawned;
+	ON_SCOPE_EXIT { for (auto* Actor : Spawned) if (IsValid(Actor)) Actor->Destroy(); };
+	// 本物と同じ大きさ（800x600、厚さ2）の天井を、離れた場所に置く。ゴールは本物と同じく、中心から(+245,+240)。
+	struct FTrial { ATBBoxLid* Lid = nullptr; AStaticMeshActor* Ceiling = nullptr; FVector Center; };
+	auto Make = [&](ETBLidHingeSide Side, FVector Center)
+	{
+		FTrial Trial; Trial.Center = Center;
+		Trial.Ceiling = World->SpawnActor<AStaticMeshActor>(Center, FRotator::ZeroRotator); Spawned.Add(Trial.Ceiling);
+		Trial.Ceiling->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+		Trial.Ceiling->GetStaticMeshComponent()->SetStaticMesh(Cube);
+		Trial.Ceiling->SetActorScale3D(FVector(8, 6, .02));
+		Trial.Lid = World->SpawnActorDeferred<ATBBoxLid>(ATBBoxLid::StaticClass(), FTransform(Center));
+		Spawned.Add(Trial.Lid);
+		Trial.Lid->Ceiling = Trial.Ceiling;
+		Trial.Lid->HingeSide = Side;
+		Trial.Lid->FinishSpawning(FTransform(Center));
+		return Trial;
+	};
+	// 高さは本物の部屋の天井と同じにする。ResultShot の床は本物の落下エリアから決まるので、高さが違うとカメラがほぼ真上を向いて、向きの検査が意味を持たない。
+	constexpr double RoomCeilingZ = 319.;
+	FTrial Positive = Make(ETBLidHingeSide::PositiveY, FVector(60000, 0, RoomCeilingZ));
+	FTrial Negative = Make(ETBLidHingeSide::NegativeY, FVector(60000, 3000, RoomCeilingZ));
+	for (auto* Lid : {Positive.Lid, Negative.Lid}) Lid->Tick(0.f); // 箱の合図へつなぐ。
+	const float Angle = TB::PresentationData().Lid.OpenAngle;
+	Box->OnOpened.Broadcast();
+	// 全開になってから測る。時間はデータアセットの値から決める。
+	const auto& RealLid = TB::PresentationData().Lid;
+	const float FullyOpen = RealLid.OpenSeconds + RealLid.HoldSeconds * .5f;
+	const float ClosedAll = RealLid.OpenSeconds + RealLid.HoldSeconds + RealLid.CloseSeconds + 1.f;
+	for (auto* Lid : {Positive.Lid, Negative.Lid}) Lid->Tick(FullyOpen);
+	// ゴールの真下にあたる天井の面が、閉じていたときからどれだけ上がったか。
+	auto Rise = [&](const FTrial& Trial)
+	{
+		const FVector Goal = Trial.Center + FVector(245, 240, -1);
+		const FTransform Rest(FRotator::ZeroRotator, Trial.Center, FVector(8, 6, .02));
+		return float(Trial.Ceiling->GetActorTransform().TransformPosition(Rest.InverseTransformPosition(Goal)).Z - Goal.Z);
+	};
+	const float Lever = FMath::Sin(FMath::DegreesToRadians(Angle));
+	// 今までと同じ（+Y）: 蝶番までゴールから約60cm なので、ほとんど上がらない。
+	TestTrue(*FString::Printf(TEXT("+Y hinge lifts the goal side only about 60cm*sin (%.1f)"), Rise(Positive)),
+	         FMath::IsNearlyEqual(Rise(Positive), 60.f * Lever, 6.f));
+	// -Y: 蝶番までゴールから約540cm なので、大きく上がる。
+	TestTrue(*FString::Printf(TEXT("-Y hinge lifts the goal side about 540cm*sin (%.1f)"), Rise(Negative)),
+	         FMath::IsNearlyEqual(Rise(Negative), 540.f * Lever, 6.f));
+	TestTrue(TEXT("-Y lifts the goal far more than +Y"), Rise(Negative) > Rise(Positive) * 5.f);
+	// 開く角度は蝶番の側によらず同じ。
+	for (const FTrial* Trial : {&Positive, &Negative})
+	{
+		const FQuat Closed = FQuat::Identity;
+		TestTrue(TEXT("Open angle is the same on both sides"),
+		         FMath::IsNearlyEqual(FMath::RadiansToDegrees(Closed.AngularDistance(Trial->Ceiling->GetActorQuat())), Angle, 1.f));
+	}
+	// 持ち上がる縁は、蝶番の反対側。
+	{
+		FVector Origin, Extent;
+		Positive.Ceiling->GetActorBounds(false, Origin, Extent);
+		TestTrue(TEXT("+Y hinge keeps the +Y edge low"), Origin.Z > Positive.Center.Z);
+	}
+	// リザルトのカメラは、蝶番の側から持ち上がる側を向く。
+	for (auto* Lid : {Positive.Lid, Negative.Lid}) Lid->Tick(ClosedAll);
+	FTransform ShotPositive, ShotNegative;
+	if (TestTrue(TEXT("Both lids give a result shot"), Positive.Lid->ResultShot(ShotPositive) && Negative.Lid->ResultShot(ShotNegative)))
+	{
+		// Eye と Look の Y の差は Extent.Y*0.8（240cm）、X の差は 200cm。高さの差が約300cm なので、向きの Y は約±0.5 になる。
+		const float ForwardPositive = ShotPositive.GetRotation().GetForwardVector().Y;
+		const float ForwardNegative = ShotNegative.GetRotation().GetForwardVector().Y;
+		TestTrue(*FString::Printf(TEXT("+Y hinge: the camera looks toward -Y, the lifted side (%.2f)"), ForwardPositive), ForwardPositive < -.3f);
+		TestTrue(*FString::Printf(TEXT("-Y hinge: the camera looks toward +Y, the lifted side (%.2f)"), ForwardNegative), ForwardNegative > .3f);
+		TestTrue(TEXT("+Y hinge: the camera stands on the +Y side"), ShotPositive.GetLocation().Y > Positive.Center.Y);
+		TestTrue(TEXT("-Y hinge: the camera stands on the -Y side"), ShotNegative.GetLocation().Y < Negative.Center.Y);
+	}
 	return !HasAnyErrors();
 }
 #endif

@@ -10,6 +10,14 @@ class APostProcessVolume;
 class UMaterialInstanceDynamic;
 class USpotLightComponent;
 
+/** ふたの蝶番がある縁。反対側の縁が持ち上がる */
+UENUM(BlueprintType)
+enum class ETBLidHingeSide : uint8
+{
+	PositiveY UMETA(DisplayName = "+Y側"),
+	NegativeY UMETA(DisplayName = "-Y側"),
+};
+
 /** 箱の蓋。誰かが入れられる・助け出されるたびに、天井が光って開いたように見せる。各PCで再生する。 */
 UCLASS()
 class TOONSTORY_API ATBBoxLid : public AActor
@@ -28,6 +36,9 @@ public:
 	// 開いた瞬間だけ部屋全体を明るくする。
 	UPROPERTY(EditInstanceOnly, Category = "Lid")
 	TObjectPtr<APostProcessVolume> RoomVolume;
+	// 蝶番を付ける縁（ワールドのY方向）。反対側が持ち上がる。脱出のゴールの真上を大きく持ち上げるなら、ゴールから遠い側にする。
+	UPROPERTY(EditInstanceOnly, Category = "Lid", meta = (DisplayName = "蝶番の側"))
+	ETBLidHingeSide HingeSide = ETBLidHingeSide::PositiveY;
 	// 開く角度・光の強さ・時間は、救助・収納も脱出もマスターデータ（TB::PresentationData().Lid）にある。
 
 	/** リザルトの演出で開き具合を決める。負なら手放して閉じたふたに戻す */
@@ -49,6 +60,8 @@ private:
 		float FlashSeconds = .35f;
 		bool bEscape = false;
 	};
+	// 蝶番のあるY方向の符号（+Yなら1、-Yなら-1）。
+	float HingeSign() const;
 	static FPlay StandardPlay();
 	static FPlay EscapePlay();
 	void Start(const FPlay& Next);
