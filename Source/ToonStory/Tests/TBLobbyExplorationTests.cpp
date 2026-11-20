@@ -51,6 +51,8 @@ bool FTBLobbyExplorationTest::RunTest(const FString&)
 	HUD->NotifyHitBoxClick(TEXT("CloseSettings")); PC->PlayerTick(0);
 	TestFalse(TEXT("Host can move in lobby without a panel"), PC->IsMoveInputIgnored());
 	TestFalse(TEXT("Host can look in lobby without a panel"), PC->IsLookInputIgnored());
+	TestTrue(TEXT("Visible lobby actions accept pointer clicks while the host can move"),
+	    PC->bShowMouseCursor && PC->bEnableClickEvents);
 	AActor* LobbyCamera = PC->GetViewTarget();
 	TestTrue(TEXT("Lobby exploration uses the fixed camera"), LobbyCamera && LobbyCamera->ActorHasTag(TEXT("TBLobbyCamera")));
 	const FVector Before = Pawn->GetActorLocation();
@@ -67,6 +69,8 @@ bool FTBLobbyExplorationTest::RunTest(const FString&)
 	TBToyPresentation::BuildEmotePose(Pawn->GetMesh(), Pawn, Pose);
 	TestFalse(TEXT("Unassigned lobby model has visible emote bone offsets"), Pose.Bones.IsEmpty());
 	State->Phase = ETBPhase::Playing;
+	PC->PlayerTick(0);
+	TestFalse(TEXT("Entering play releases the lobby pointer"), PC->bShowMouseCursor || PC->bEnableClickEvents);
 	TestFalse(TEXT("Lobby snapshot cannot replay after match start"), Pawn->GetEmoteSample(Sample));
 	State->Phase = ETBPhase::Lobby;
 	State->bTravelPending = true; Pawn->ApplyState(); PC->PlayerTick(0);

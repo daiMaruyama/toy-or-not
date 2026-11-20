@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
@@ -20,6 +21,7 @@
 #include "Misc/Paths.h"
 #include "UI/Loading/STBLoadingScreen.h"
 #include "UI/Loading/TBLoadingScreenSettings.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/TBUIText.h"
 #include "UnrealClient.h"
 
@@ -279,14 +281,25 @@ namespace
 					ActiveMovie = GetMoviePlayer()->GetMovieName();
 				});
 				Destination = World->GetMapName().EndsWith(TEXT("Title")) ? TEXT("TB_Lobby") : TEXT("Title");
-				Deadline = FPlatformTime::Seconds() + 120.;
+				RequestedAt = FPlatformTime::Seconds();
+				Deadline = RequestedAt + 120.;
 				UGameplayStatics::OpenLevel(World, FName(*(TEXT("/Game/Maps/") + Destination)));
 				return false;
 			}
 			if (World && World->GetMapName().EndsWith(Destination))
 			{
+				const auto* Loading = World->GetGameInstance()->GetSubsystem<UTBLoadingScreenSubsystem>();
+				if (!Test->TestNotNull(TEXT("Destination owns a loading subsystem"), Loading)) return true;
+				if (Loading->IsCoveringViewport())
+				{
+					if (FPlatformTime::Seconds() < Deadline) return false;
+					Test->AddError(TEXT("The film remained over the loaded destination"));
+					return true;
+				}
 				Test->TestEqual(TEXT("Real hard map travel opened the native movie streamer"), ActiveMovie,
 				                FString(STBLoadingScreen::MovieName()));
+				Test->TestTrue(TEXT("Fast map loads still show the film for the configured minimum"),
+				               FPlatformTime::Seconds() - RequestedAt >= GetDefault<UTBLoadingScreenSettings>()->MinimumTravelSeconds);
 				return true;
 			}
 			if (FPlatformTime::Seconds() < Deadline) return false;
@@ -297,7 +310,7 @@ namespace
 		FAutomationTestBase* Test;
 		FDelegateHandle StartHandle;
 		FString ActiveMovie, Destination;
-		double Deadline = 0.;
+		double RequestedAt = 0., Deadline = 0.;
 	};
 }
 

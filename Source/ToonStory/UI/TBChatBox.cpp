@@ -2,6 +2,7 @@
 
 #include "TBChatBox.h"
 #include "UI/TBUIText.h"
+#include "TBPaperButton.h"
 #include "TBPaperStyle.h"
 #include "Audio/TBAudioSubsystem.h"
 #include "Blueprint/WidgetTree.h"
@@ -14,6 +15,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/ScaleBox.h"
+#include "Components/ScaleBoxSlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -28,8 +30,8 @@
 namespace
 {
 	// HUDと同じ1280x800の座標系。ロビーの操作カードと結果のボードを避ける。
-	constexpr float PanelX = 68, PanelW = 520, PanelH = 280;
-	constexpr float LobbyBottom = 636, ResultsBottom = 776;
+	constexpr float PanelX = 24, PanelW = 520, PanelH = 280;
+	constexpr float LobbyBottom = 664, ResultsBottom = 776;
 }
 
 void UTBChatBox::NativeOnInitialized()
@@ -48,7 +50,9 @@ void UTBChatBox::NativeOnInitialized()
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
 	Size->SetWidthOverride(1280);
 	Size->SetHeightOverride(800);
-	Scale->SetContent(Size);
+	auto* BoardSlot = CastChecked<UScaleBoxSlot>(Scale->SetContent(Size));
+	BoardSlot->SetHorizontalAlignment(HAlign_Left);
+	BoardSlot->SetVerticalAlignment(VAlign_Bottom);
 	auto* Board = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Size->SetContent(Board);
 	for (UWidget* Layer : TArray<UWidget*>{Root, Scale, Size, Board})
@@ -108,11 +112,7 @@ void UTBChatBox::NativeOnInitialized()
 	TalkSlot->SetPosition(FVector2D(8, 12));
 	TalkSlot->SetSize(FVector2D(28, 28));
 	SendButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SendChatButton"));
-	// The supplied green face has the border and inset of the send artwork, without baked-in text.
-	FSlateBrush SendFace = TBPaper::ImageBrush(TBPaper::Art(TEXT("Gauge_Green")));
-	SendFace.DrawAs = ESlateBrushDrawType::RoundedBox;
-	SendFace.OutlineSettings = FSlateBrushOutlineSettings(8.f, TBPaper::Outline, 2.5f);
-	SendButton->SetStyle(TBPaper::ArtButtonStyle(SendFace));
+	SendButton->SetStyle(TBPaper::SignButtonStyle(TBPaper::Teal));
 	// クリックで入力欄からフォーカスを奪わない。キーボードでは従来どおりEnterで送れる。
 	// UButton has no public setter in UE 5.8; this is set before its Slate widget is built.
 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
@@ -123,7 +123,7 @@ void UTBChatBox::NativeOnInitialized()
 	auto* ChatHeading = TBPaper::Font(this, TBPaper::EFontRole::Heading);
 	SendText->SetFont(FSlateFontInfo(ChatHeading, 16));
 	SendText->SetColorAndOpacity(TBPaper::Ink);
-	SendButton->SetContent(SendText);
+	TBPaper::FitSignCaption(*WidgetTree, *SendButton, *SendText);
 	SendButton->OnClicked.AddDynamic(this, &UTBChatBox::SendClicked);
 	auto* SendSlot = InputCanvas->AddChildToCanvas(SendButton);
 	SendSlot->SetAnchors(FAnchors(1, 0, 1, 1));
@@ -139,12 +139,7 @@ void UTBChatBox::NativeOnInitialized()
 	Panel->AddChildToVerticalBox(OpenHint)->SetPadding(FMargin(10, 4, 0, 0));
 	// 履歴が薄れても入口は残す。キーボードと同じController経路で開く。
 	OpenButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("OpenChatButton"));
-	const FSlateBrush OpenFace = TBPaper::SlicedArtwork(TBPaper::Art(TEXT("Frame_Settings")),
-	    FVector2D(50, 50), FMargin(.28f));
-	FButtonStyle OpenStyle = TBPaper::ArtButtonStyle(OpenFace);
-	OpenStyle.SetNormalPadding(FMargin(16, 10));
-	OpenStyle.SetPressedPadding(FMargin(16, 12, 16, 8));
-	OpenButton->SetStyle(OpenStyle);
+	OpenButton->SetStyle(TBPaper::SignButtonStyle(TBPaper::Paper));
 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	OpenButton->IsFocusable = false;
 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
@@ -152,7 +147,10 @@ void UTBChatBox::NativeOnInitialized()
 	OpenText->SetText(TBText::Get(TEXT("Root.Chat.Open")));
 	OpenText->SetFont(FSlateFontInfo(ChatHeading, 14));
 	OpenText->SetColorAndOpacity(TBPaper::Ink);
-	OpenButton->SetContent(OpenText);
+	auto* OpenCaption = CastChecked<UButtonSlot>(OpenButton->SetContent(OpenText));
+	OpenCaption->SetPadding(FMargin(16, 7, 16, 9));
+	OpenCaption->SetHorizontalAlignment(HAlign_Center);
+	OpenCaption->SetVerticalAlignment(VAlign_Center);
 	OpenButton->OnClicked.AddDynamic(this, &UTBChatBox::OpenClicked);
 	auto* OpenSlot = Panel->AddChildToVerticalBox(OpenButton);
 	OpenSlot->SetHorizontalAlignment(HAlign_Left);

@@ -31,6 +31,7 @@ public:
 	static const TCHAR* MovieName() { return TEXT("ToyDance"); }
 	double GetShownAt() const { return ShownAt; }
 	void ShowNativePoster() { bShowNativePoster.Store(true); }
+	void SetViewportPoster(UTexture2D* Texture);
 	void SetMovieVisible(bool bVisible, double MovieStartedAt = 0.);
 	virtual void Tick(const FGeometry& Geometry, double CurrentTime, float DeltaTime) override;
 #if WITH_DEV_AUTOMATION_TESTS

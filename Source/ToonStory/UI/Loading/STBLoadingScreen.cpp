@@ -64,6 +64,13 @@ STBLoadingScreen::~STBLoadingScreen()
 	if (Player.IsValid()) Player->Close();
 }
 
+void STBLoadingScreen::SetViewportPoster(UTexture2D* Texture)
+{
+	check(IsInGameThread() && Backdrop == ETBLoadingBackdrop::ViewportMovie);
+	Poster.Reset(Texture);
+	PosterBrush.SetResourceObject(Texture);
+}
+
 void STBLoadingScreen::SetMovieVisible(bool bVisible, double MovieStartedAt)
 {
 	bStartMovieWhenReady = bVisible;

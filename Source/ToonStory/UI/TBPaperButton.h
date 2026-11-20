@@ -17,8 +17,10 @@ namespace TBPaper
 		Fit->SetStretch(EStretch::ScaleToFit);
 		Fit->SetStretchDirection(EStretchDirection::DownOnly);
 		Caption.SetAutoWrapText(false);
+		Caption.SetJustification(ETextJustify::Center);
 		Fit->SetContent(&Caption);
 		auto* Slot = CastChecked<UButtonSlot>(Button.SetContent(Fit));
+		Slot->SetPadding(FMargin(0));
 		Slot->SetHorizontalAlignment(HAlign_Fill);
 		Slot->SetVerticalAlignment(VAlign_Fill);
 	}

@@ -21,10 +21,10 @@ Yusei Magicは比較用のファイルとして保持するが、現在の見出
 
 - タイトル・検索・遊び方：`TBPaperTitle.cpp`。タイトルは1600×900、WBP_TitleMenuの名前一致バインド・元の画像・配置を保持する。遊び方は1280×800。
 - ロビー・ステージ選択・試合・結果：`TBPaperHUD.cpp`。1280×800に収める比率でCanvasを描画。装飾はBeginPlayでキャッシュし、縦横比を維持する。
-- ポーズと参加者：`TBHUD.cpp` / `TBPlayerSafetyHUD.cpp`。支給のクマ見出しと吊り札、陣営別の名札を使い、既存クリックIDを保持。
-- 設定：`TBOptionsMenu.cpp`、`TBOptionRow.cpp`、`TBKeyRow.cpp`。1280×800のScaleBox、800×50の行、各ページはスクロール可能。
+- ポーズと参加者：`TBHUD.cpp` / `TBPlayerSafetyHUD.cpp`。眠るクマの下に、位置のリセット・再開・参加者一覧の吊り札を左から並べる。右下に設定と退出のタイルを置く。
+- 設定：`TBOptionsMenu.cpp`、`TBOptionRow.cpp`、`TBKeyRow.cpp`。音・画面・操作・言語で同じパネル寸法を使い、操作一覧はスクロールできる。
 - チャット：`TBChatBox.cpp`。長文と長い名前は折り返す。送信者の青い札は陣営を表さない。フェード時も行領域を保持。送信ボタンは既存の入力確定・サーバー検証経路を使う。
-- ローディング：`UI/Loading/STBLoadingScreen.cpp`。紙色の背景に積み木・玩具・箱の小さな場面を置き、下部の短い状態札と3点で読み込み中を伝える。タイトルロゴ・上部コピー・箱の文字札は表示しない。玩具の顔出し・小走り・隠れる周期と暗転は既存の仕組みを使い、状態文はロード前にFTextで渡す。
+- ローディング：`UI/Loading/TBLoadingScreenSubsystem.cpp` と `STBLoadingScreen.cpp`。マップ移動中は `Movies/ToyDance.mp4` をループ再生する。通常のマップ切り替えは MoviePlayer、シームレス移動はゲーム側のビューポートで再生する。最短表示時間はプロジェクト設定の「ロード画面」で調整できる。すでに操作可能な試合では追加の待ち時間を省く。
 
 ロード用の玩具5種（アヒル・クマ・恐竜・ロボット・くるみ割り人形）は、茶色い輪郭線と柔らかい陰影の透過イラスト。既存の `UI/Loading/T_LoadToy_*` を再利用し、アセット名・切替順の仕組みを保つ。画像に文字や背景を含めず、UIテクスチャとしてmip／Trilinearを有効にする。`ToonStory.UI.VisualReview.LoadingIllustrations` を `-UIReviewScreenshots` 付きの描画ありStandaloneで実行すると、実際のロードWidgetで各玩具を1枚ずつ撮影する。撮影用の1種指定や周期変更は一時的で、設定ファイルへ保存しない。
 

@@ -60,6 +60,7 @@ private:
 	                   FVector2D UVEdge, FLinearColor Tint = FLinearColor::White);
 	void DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
 	                bool Enabled = true, bool Selected = false, bool Destructive = false);
+	void DrawCheck(float X, float Y, float Size, FLinearColor Color);
 	void DrawProgress(float Value, float X, float Y, float W, float H, FLinearColor Color);
 	void DrawFittedText(const FString& Text, FLinearColor Color, float X, float Y, float Width, float Scale,
 	                    bool Heading = false, bool Center = false, bool Outlined = false);

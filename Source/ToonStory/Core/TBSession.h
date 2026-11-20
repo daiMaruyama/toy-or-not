@@ -47,6 +47,7 @@ public:
 	// Rebuild display copy from the same filtered result index used by Join, in the current language.
 	UFUNCTION(BlueprintPure)
 	FText GetRoomLabel(int32 Index) const;
+	FString GetCurrentRoomOwner() const;
 	UPROPERTY(BlueprintAssignable)
 	FTBSessionChanged Changed;
 

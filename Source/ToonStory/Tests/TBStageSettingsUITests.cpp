@@ -13,10 +13,18 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Misc/ScopeExit.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/TBHUD.h"
 #include "UI/TBOptionsMenu.h"
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBStageSettingsUITest, "ToonStory.UI.StageSettingsDraft",
+class FStageSettingsDraftChecks : public FAutomationTestBase
+{
+protected:
+	using FAutomationTestBase::FAutomationTestBase;
+	void CheckDraft(UWorld* World);
+};
+
+IMPLEMENT_CUSTOM_SIMPLE_AUTOMATION_TEST(FTBStageSettingsUITest, FStageSettingsDraftChecks, "ToonStory.UI.StageSettingsDraft",
 	EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
 
 bool FTBStageSettingsUITest::RunTest(const FString& Parameters)
@@ -27,18 +35,40 @@ bool FTBStageSettingsUITest::RunTest(const FString& Parameters)
 			World = Context.World();
 	if (!TestNotNull(TEXT("Run in standalone TB_Lobby"), World)) return false;
 	if (!TestEqual(TEXT("Isolated standalone process"), World->GetNetMode(), NM_Standalone)) return false;
+	const TWeakObjectPtr<UWorld> Lobby(World);
+	ADD_LATENT_AUTOMATION_COMMAND(FUntilCommand([this, Lobby]()
+	{
+		UWorld* ReadyWorld = Lobby.Get();
+		if (!ReadyWorld)
+		{
+			AddError(TEXT("The lobby disappeared before the stage settings could be opened"));
+			return true;
+		}
+		if (UTBLoadingScreenSubsystem::IsCovering(ReadyWorld->GetGameInstance())) return false;
+		CheckDraft(ReadyWorld);
+		return true;
+	}, [this]()
+	{
+		AddError(TEXT("The loading screen still covers the lobby after 15 seconds"));
+		return true;
+	}, 15.f));
+	return true;
+}
+
+void FStageSettingsDraftChecks::CheckDraft(UWorld* World)
+{
 	auto* PC = Cast<ATBController>(World->GetFirstPlayerController());
 	auto* HUD = PC ? Cast<ATBHUD>(PC->GetHUD()) : nullptr;
 	auto* State = World->GetGameState<ATBGameState>();
 	auto* Mode = World->GetAuthGameMode<ATBGameMode>();
 	if (!TestNotNull(TEXT("Host"), PC) || !TestNotNull(TEXT("Canvas HUD"), HUD) ||
-	    !TestNotNull(TEXT("Match state"), State) || !TestNotNull(TEXT("Authority mode"), Mode)) return false;
+	    !TestNotNull(TEXT("Match state"), State) || !TestNotNull(TEXT("Authority mode"), Mode)) return;
 	if (!TestEqual(TEXT("Lobby phase"), State->Phase, ETBPhase::Lobby) ||
-	    !TestFalse(TEXT("No travel is pending"), State->bTravelPending)) return false;
+	    !TestFalse(TEXT("No travel is pending"), State->bTravelPending)) return;
 	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
 	auto* Player = PC->GetPlayerState<ATBPlayerState>();
-	if (!TestNotNull(TEXT("Lobby handoff"), Pending) || !TestNotNull(TEXT("Player state"), Player)) return false;
-	if (!TestTrue(TEXT("No handoff is in progress"), Pending->PendingMap.IsEmpty())) return false;
+	if (!TestNotNull(TEXT("Lobby handoff"), Pending) || !TestNotNull(TEXT("Player state"), Player)) return;
+	if (!TestTrue(TEXT("No handoff is in progress"), Pending->PendingMap.IsEmpty())) return;
 	const FTBSettings OriginalRules = State->Settings;
 	const int32 OriginalStage = State->SelectedStage, OriginalPendingStage = Pending->SelectedStage;
 	const FString OriginalName = State->StageName;
@@ -127,7 +157,7 @@ bool FTBStageSettingsUITest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Cancel discards the chosen stage"), State->SelectedStage, TBLobbySettings::DemoStageId);
 	Edit();
 	UTBOptionsMenu* Menu = OpenOptions();
-	if (!TestNotNull(TEXT("Stage options menu"), Menu)) return false;
+	if (!TestNotNull(TEXT("Stage options menu"), Menu)) return;
 	for (const FName Blocked : {FName(TEXT("OpenOptions")), FName(TEXT("CancelStage")), FName(TEXT("SaveStage")),
 	    FName(TEXT("DraftNextStage")), FName(TEXT("DraftMoreTime")), FName(TEXT("ToggleDraftNPCs")), FName(TEXT("DraftMoreNPCHumans"))})
 		HUD->NotifyHitBoxClick(Blocked);
@@ -143,7 +173,7 @@ bool FTBStageSettingsUITest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Options close removes the overlay"), Menu->IsInViewport());
 	TestTrue(TEXT("Options close returns to the stage draft"), HUD->IsStagePickerOpen() && HUD->IsLobbySettingsOpen());
 	Menu = OpenOptions();
-	if (!TestNotNull(TEXT("Stage options reopens"), Menu)) return false;
+	if (!TestNotNull(TEXT("Stage options reopens"), Menu)) return;
 	TestTrue(TEXT("Options consumes Escape"),
 	    Menu->SendKeyDownForTest(FKeyEvent(EKeys::Escape, FModifierKeysState(), 0, false, 0, 0)).IsEventHandled());
 	TestFalse(TEXT("Options Escape removes only the overlay"), Menu->IsInViewport());
@@ -268,6 +298,5 @@ bool FTBStageSettingsUITest::RunTest(const FString& Parameters)
 	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
 	TestEqual(TEXT("A stale increase click at capacity cannot add a human NPC"), State->Settings.NPCHumans, 0);
 	TestEqual(TEXT("A stale increase click at capacity cannot replace toy NPCs"), State->Settings.NPCToys, FullNPCs.NPCToys);
-	return true;
 }
 #endif

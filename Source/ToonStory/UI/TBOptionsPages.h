@@ -33,6 +33,11 @@ namespace TBOptionsPages
 		return TBText::String(bOn ? TEXT("Options.On") : TEXT("Options.Off"));
 	}
 
+	inline TArray<FString> ToggleChoices()
+	{
+		return {OnOff(false), OnOff(true)};
+	}
+
 	// 範囲の中の位置（0〜1）。スライダーの位置に使う。
 	inline float Fraction(float Value, float Min, float Max)
 	{

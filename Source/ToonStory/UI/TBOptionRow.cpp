@@ -4,20 +4,24 @@
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Components/Border.h"
-#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/ComboBoxString.h"
 #include "Components/SizeBox.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "TBPaperStyle.h"
-#include "TBUIText.h"
 
-void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, bool bBar)
+namespace
+{
+	constexpr float TrackWidth = 336.f;
+}
+
+void UTBOptionRow::Build(const FText& Label, UFont* HeadingFont, UFont* NumericFont, bool bBar)
 {
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
-	Size->SetWidthOverride(800);
-	Size->SetHeightOverride(50);
+	Size->SetWidthOverride(696);
+	Size->SetHeightOverride(53);
 	WidgetTree->RootWidget = Size;
 	auto* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Size->SetContent(Canvas);
@@ -27,108 +31,138 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 		Slot->SetPosition(FVector2D(X, Y));
 		Slot->SetSize(FVector2D(W, H));
 	};
-	auto Text = [&](const FText& String, int32 FontSize)
-	{
-		auto* Block = WidgetTree->ConstructWidget<UTextBlock>();
-		Block->SetText(String);
-		Block->SetFont(FSlateFontInfo(Font, FontSize));
-		Block->SetColorAndOpacity(TBPaper::Ink);
-		Block->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-		return Block;
-	};
-	auto Arrow = [&](const TCHAR* Glyph, float X, const TCHAR* ArtName)
-	{
-		auto* Button = WidgetTree->ConstructWidget<UButton>();
-		const FSlateBrush Keycap = TBPaper::ImageBrush(TBPaper::Art(ArtName));
-		Button->SetStyle(TBPaper::ArtButtonStyle(Keycap));
-		auto* Mark = Text(FText::FromString(Glyph), 20);
-		Mark->SetJustification(ETextJustify::Center);
-		Mark->SetRenderTranslation(FVector2D(0, -5));
-		Mark->SetToolTipText(FText::GetEmpty());
-		Button->SetContent(Mark);
-		Place(Button, X + 20, 5, 44, 40);
-		return Button;
-	};
 	auto* Divider = WidgetTree->ConstructWidget<UBorder>();
-	Divider->SetBrushColor(TBPaper::Outline.CopyWithNewOpacity(.28f));
+	Divider->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(209, 179, 139)), 0.f));
 	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Divider, 8, 49, 784, 1);
-	Place(Text(Label, 19), 8, 6, 224, 36);
-	DownButton = Arrow(bBar ? TEXT("−") : TEXT("‹"), 240, TEXT("Frame_SquareLavender"));
-	UpButton = Arrow(bBar ? TEXT("+") : TEXT("›"), 716, TEXT("Frame_SquareBrown"));
-	ValueText = Text(FText::GetEmpty(), 19);
+	Place(Divider, 0, 52, 696, 1);
+	auto* Name = WidgetTree->ConstructWidget<UTextBlock>();
+	Name->SetText(Label);
+	Name->SetFont(FSlateFontInfo(HeadingFont, 11));
+	Name->SetColorAndOpacity(TBPaper::Ink);
+	Place(Name, 6, 15, 264, 29);
 	if (bBar)
 	{
-		// つまんで動かすほか、バーのどこかを押すとそこへ飛ぶ。細かく合わせるときは「<」「>」を使う。
+		const FLinearColor Edge = FLinearColor::FromSRGBColor(FColor(72, 43, 26));
+		auto* Track = WidgetTree->ConstructWidget<UBorder>();
+		Track->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(226, 199, 155)), 4.f, Edge, 1.f));
+		Track->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Place(Track, 280, 22, TrackWidth, 8);
+		TrackFill = WidgetTree->ConstructWidget<UBorder>();
+		TrackFill->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(67, 152, 141)), 3.f));
+		TrackFill->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Place(TrackFill, 281, 23, 0, 6);
+
 		Slider = WidgetTree->ConstructWidget<USlider>();
-		// マウスでも目盛り（StepSize）にそろえる。表示より前に決める値なので、ここで入れる。
 		Slider->MouseUsesStep = true;
-		FSliderStyle SliderStyle = Slider->GetWidgetStyle();
-		SliderStyle.SetNormalBarImage(FSlateRoundedBoxBrush(TBPaper::Teal, 5.f, TBPaper::Outline, 1.8f));
-		SliderStyle.SetHoveredBarImage(FSlateRoundedBoxBrush(TBPaper::Teal, 5.f, TBPaper::Outline, 1.8f));
-		SliderStyle.SetBarThickness(10.f);
-		SliderStyle.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::Gold, 11.f, TBPaper::Outline, 2.5f, FVector2D(22, 22)));
-		SliderStyle.SetHoveredThumbImage(FSlateRoundedBoxBrush(TBPaper::Paper, 11.f, TBPaper::Outline, 2.5f, FVector2D(22, 22)));
-		SliderStyle.SetDisabledThumbImage(FSlateRoundedBoxBrush(TBPaper::Cream, 8.f, TBPaper::Muted, 2.f, FVector2D(22, 26)));
-		Slider->SetWidgetStyle(SliderStyle);
-		Slider->SetSliderBarColor(FLinearColor::White);
+		Slider->SetIndentHandle(false);
+		FSliderStyle Style = Slider->GetWidgetStyle();
+		Style.SetNormalBarImage(FSlateNoResource()).SetHoveredBarImage(FSlateNoResource());
+		Style.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::Gold, 9.f, Edge, 2.f, FVector2D(20, 20)));
+		Style.SetHoveredThumbImage(FSlateRoundedBoxBrush(TBPaper::Cream, 9.f, Edge, 2.f, FVector2D(20, 20)));
+		Slider->SetWidgetStyle(Style);
 		Slider->SetSliderHandleColor(FLinearColor::White);
 		Slider->OnValueChanged.AddDynamic(this, &ThisClass::SliderMoved);
 		Slider->OnMouseCaptureBegin.AddDynamic(this, &ThisClass::SliderGrabbed);
 		Slider->OnMouseCaptureEnd.AddDynamic(this, &ThisClass::SliderReleased);
-		Place(Slider, 340, 13, 250, 24);
-		Place(ValueText, 606, 6, 102, 36);
+		Place(Slider, 270, 7, TrackWidth + 20, 38);
+
+		ValueText = WidgetTree->ConstructWidget<UTextBlock>();
+		ValueText->SetFont(FSlateFontInfo(NumericFont, 14));
+		ValueText->SetColorAndOpacity(TBPaper::Ink);
+		ValueText->SetJustification(ETextJustify::Right);
+		Place(ValueText, 630, 12, 61, 32);
+		return;
 	}
-	else
+
+	ChoiceFont = HeadingFont;
+	Picker = WidgetTree->ConstructWidget<UComboBoxString>();
+	const FLinearColor ChoiceEdge = FLinearColor::FromSRGBColor(FColor(133, 100, 68));
+	const FSlateRoundedBoxBrush Face(FLinearColor::FromSRGBColor(FColor(255, 249, 233)), 5.f, ChoiceEdge, 1.5f);
+	FButtonStyle Button = TBPaper::CompactButtonStyle();
+	Button.SetNormal(Face).SetHovered(FSlateRoundedBoxBrush(TBPaper::Cream, 5.f, ChoiceEdge, 1.5f));
+	Button.SetPressed(FSlateRoundedBoxBrush(TBPaper::Cream, 5.f, ChoiceEdge, 1.5f));
+	Button.SetNormalPadding(FMargin(7, 2)).SetPressedPadding(FMargin(7, 3, 7, 1));
+	FComboBoxStyle Style = Picker->GetWidgetStyle();
+	FSlateBrush Arrow = Style.ComboButtonStyle.DownArrowImage;
+	Arrow.TintColor = TBPaper::Ink;
+	Style.ComboButtonStyle.SetButtonStyle(Button).SetDownArrowImage(Arrow);
+	Style.ComboButtonStyle.SetMenuBorderBrush(Face).SetMenuBorderPadding(FMargin(3));
+	Picker->SetWidgetStyle(Style);
+	FTableRowStyle Rows = Picker->GetItemStyle();
+	const FSlateRoundedBoxBrush Active(TBPaper::Cream, 3.f);
+	Rows.SetEvenRowBackgroundBrush(FSlateNoResource()).SetOddRowBackgroundBrush(FSlateNoResource());
+	Rows.SetEvenRowBackgroundHoveredBrush(Active).SetOddRowBackgroundHoveredBrush(Active);
+	Rows.SetActiveHoveredBrush(Active).SetInactiveHoveredBrush(Active).SetActiveBrush(Active).SetInactiveBrush(Active);
+	Picker->SetItemStyle(Rows);
+	Picker->SetContentPadding(FMargin(9, 3));
+	Picker->SetMaxListHeight(280);
+	Picker->OnGenerateWidgetEvent.BindDynamic(this, &ThisClass::ChoiceText);
+	Picker->OnSelectionChanged.AddDynamic(this, &ThisClass::SelectChoice);
+	Place(Picker, 280, 8, 411, 36);
+}
+
+UWidget* UTBOptionRow::ChoiceText(FString Choice)
+{
+	auto* Text = WidgetTree->ConstructWidget<UTextBlock>();
+	Text->SetText(FText::FromString(Choice));
+	Text->SetColorAndOpacity(TBPaper::Ink);
+	Text->SetFont(FSlateFontInfo(ChoiceFont, 11));
+	Text->SetMargin(FMargin(5, 3));
+	Text->SetJustification(ETextJustify::Center);
+	return Text;
+}
+
+bool UTBOptionRow::IsChoiceOpen() const
+{
+	return Picker && Picker->IsOpen();
+}
+
+void UTBOptionRow::SelectChoice(FString Choice, ESelectInfo::Type)
+{
+	// Slate also reports a controller's Accept as Direct. Suppress only our own refreshes.
+	if (bRefreshing || !Choices || !Select || !Value || Choice == Value()) return;
+	const int32 Index = Choices().IndexOfByKey(Choice);
+	if (Index != INDEX_NONE)
 	{
-		auto* ValuePlate = WidgetTree->ConstructWidget<UBorder>();
-		ValuePlate->SetBrush(TBPaper::SlicedArtwork(TBPaper::Art(TEXT("Frame_StageSelect")),
-		    FVector2D(196, 42), FMargin(.08f, .29f)));
-		ValuePlate->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Place(ValuePlate, 317, 5, 406, 40);
-		ValueText->SetJustification(ETextJustify::Center);
-		Place(ValueText, 330, 6, 380, 36);
+		Select(Index);
+		if (Changed) Changed();
 	}
-	DownButton->OnClicked.AddDynamic(this, &ThisClass::Down);
-	UpButton->OnClicked.AddDynamic(this, &ThisClass::Up);
 }
 
 void UTBOptionRow::Refresh()
 {
-	RefreshText();
-	// 動かしている途中は、指の位置を優先する（目盛りへのそろえで手元が跳ねないように）。
+	TGuardValue<bool> Guard(bRefreshing, true);
+	if (Picker && Choices && Value)
+	{
+		const FString Current = Value();
+		TArray<FString> Items = Choices();
+		// Keep a custom or unsupported current value readable without making it a new selectable setting.
+		Items.AddUnique(Current);
+		bool bSame = Picker->GetOptionCount() == Items.Num();
+		for (int32 I = 0; bSame && I < Items.Num(); ++I) bSame = Picker->GetOptionAtIndex(I) == Items[I];
+		if (!bSame)
+		{
+			Picker->ClearOptions();
+			for (const FString& Item : Items) Picker->AddOption(Item);
+		}
+		Picker->SetIsEnabled(Items.Num() > 1);
+		if (Picker->GetSelectedOption() != Current) Picker->SetSelectedOption(Current);
+	}
 	if (Slider && Fill && !bDragging)
 	{
-		TGuardValue<bool> Guard(bRefreshing, true);
 		Slider->SetStepSize(SliderStep > 0.f ? SliderStep : .01f);
 		Slider->SetValue(FMath::Clamp(Fill(), 0.f, 1.f));
 	}
+	RefreshText();
 }
 
 void UTBOptionRow::RefreshText()
 {
-	if (Value)
+	if (ValueText && Value) ValueText->SetText(FText::FromString(Value()));
+	if (TrackFill && Fill)
 	{
-		ValueText->SetText(FText::FromString(Value()));
+		CastChecked<UCanvasPanelSlot>(TrackFill->Slot)->SetSize(FVector2D((TrackWidth - 2.f) * FMath::Clamp(Fill(), 0.f, 1.f), 6));
 	}
-	DownButton->SetIsEnabled(!CanStep || CanStep(-1));
-	UpButton->SetIsEnabled(!CanStep || CanStep(1));
-}
-
-void UTBOptionRow::Down() { Move(-1); }
-void UTBOptionRow::Up() { Move(1); }
-
-void UTBOptionRow::Move(int32 Steps)
-{
-	if (Step)
-	{
-		Step(Steps);
-	}
-	if (Changed)
-	{
-		Changed();
-	}
-	Refresh();
 }
 
 void UTBOptionRow::SliderMoved(float Fraction)

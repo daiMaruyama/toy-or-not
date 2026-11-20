@@ -20,7 +20,6 @@ class UTBGameUserSettings;
 class UTBKeyRow;
 class UTBOptionRow;
 class UTextBlock;
-class UTexture2D;
 class UVerticalBox;
 
 /** オプション画面（音・画面・操作・言語）。タイトル・ロビー・試合中のメニューから、同じ画面を開く。
@@ -169,6 +168,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> EnglishButton;
 	UPROPERTY(Transient)
+	TObjectPtr<UWidget> LanguageCheck;
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTBOptionRow>> Rows;
 	UPROPERTY(Transient)
 	TObjectPtr<UScrollBox> ControlsScroll;
@@ -200,5 +201,5 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UFont> HeadingFont;
 	UPROPERTY(Transient)
-	TObjectPtr<UTexture2D> PaperTexture;
+	TObjectPtr<UFont> NumericFont;
 };

@@ -66,6 +66,7 @@ namespace
 			auto* State = World->GetGameState<ATBGameState>();
 			auto* Host = Cast<ATBController>(World->GetFirstPlayerController());
 			auto* HUD = Host ? Cast<ATBHUD>(Host->GetHUD()) : nullptr;
+			const bool bCovered = UTBLoadingScreenSubsystem::IsCovering(GI.Get());
 
 			switch (Step)
 			{
@@ -139,7 +140,7 @@ namespace
 					break;
 				case 20:
 					// Start in the lobby travels to the selected stage before starting the match.
-					if (World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
+					if (bCovered || World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
 						return false;
 					if (!Test->TestEqual(TEXT("Start action begins match"), State->Phase, ETBPhase::Playing))
 					{
@@ -193,12 +194,15 @@ namespace
 				case 21:
 					if (World->IsInSeamlessTravel() || !State || State->bTravelPending ||
 					    !TBLobbySettings::IsLobby(World) || !Host || !HUD) return false;
-					if (const auto* Loading = GI->GetSubsystem<UTBLoadingScreenSubsystem>(); Loading && Loading->IsCoveringViewport())
+					if (bCovered)
 					{
 						if (!bCheckedCoveredLobby && Host->GetPlayerState<ATBPlayerState>())
 						{
 							Host->TBReady();
 							Host->TBStart();
+							HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+							Host->ToggleLeaveMenu();
+							Test->TestFalse(TEXT("Covered lobby settings ignore mouse and menu shortcuts"), HUD->IsLobbySettingsOpen());
 							Test->TestFalse(TEXT("Ready shortcut stays inactive while loading covers the lobby"), Host->GetPlayerState<ATBPlayerState>()->bReady);
 							Test->TestFalse(TEXT("Start shortcut stays inactive while loading covers the lobby"), State->bTravelPending);
 							bCheckedCoveredLobby = true;
@@ -224,7 +228,7 @@ namespace
 					Step = 22;
 					break;
 				case 22:
-					if (World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
+					if (bCovered || World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
 						return false;
 					if (!Test->TestEqual(TEXT("Can start the rematch"), State->Phase, ETBPhase::Playing))
 					{
@@ -249,7 +253,7 @@ namespace
 					++Step;
 					break;
 				case 7:
-					if (!World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
+					if (bCovered || !World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
 					{
 						return false;
 					}
@@ -271,7 +275,7 @@ namespace
 					++Step;
 					break;
 				case 8:
-					if (!World->GetAuthGameMode<ATBGameMode>() || Session->IsBusy())
+					if (bCovered || !World->GetAuthGameMode<ATBGameMode>() || Session->IsBusy())
 					{
 						return false;
 					}
@@ -291,7 +295,7 @@ namespace
 					++Step;
 					break;
 				case 9:
-					if (!World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
+					if (bCovered || !World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
 					{
 						return false;
 					}

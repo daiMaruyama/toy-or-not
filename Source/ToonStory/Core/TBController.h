@@ -184,8 +184,7 @@ private:
 	ETBPhase LastPhase = ETBPhase::Lobby;
 	ETBToyState LastToyState = ETBToyState::Free;
 	void UpdateLobbyCamera(bool InLobby);
-	void UpdateMenuInput(bool ShowMenu);
-	// bLobbyInputに合わせた入力モードを入れる。
+	void UpdateMenuInput(bool ShowMenu, bool LobbyPointer = false);
 	void ApplyMenuInputMode();
 	bool bLobbyInput = false;
 	double NoticeExpires = 0;

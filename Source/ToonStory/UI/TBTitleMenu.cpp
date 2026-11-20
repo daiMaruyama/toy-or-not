@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2026 Mamodou. All Rights Reserved.
 
 #include "UI/TBTitleMenu.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/TBUIText.h"
 #include "Audio/TBAudioSubsystem.h"
 #include "Core/TBSession.h"
@@ -227,6 +228,7 @@ void UTBTitleMenu::EnterMenu()
 
 FReply UTBTitleMenu::NativeOnPreviewMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& MouseEvent)
 {
+	if (UTBLoadingScreenSubsystem::IsCovering(GetGameInstance())) return FReply::Handled();
 	if (State == EState::Story)
 	{
 		SkipStory();
@@ -238,6 +240,7 @@ FReply UTBTitleMenu::NativeOnPreviewMouseButtonDown(const FGeometry& Geometry, c
 
 FReply UTBTitleMenu::NativeOnAnalogValueChanged(const FGeometry& Geometry, const FAnalogInputEvent& InputEvent)
 {
+	if (UTBLoadingScreenSubsystem::IsCovering(GetGameInstance())) return FReply::Handled();
 	if (State == EState::Story && FMath::Abs(InputEvent.GetAnalogValue()) > .5f)
 	{
 		SkipStory();
@@ -287,9 +290,9 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 	UpdateIdle(DeltaTime);
 	UpdateBursts();
 	UpdateTitleCaptions();
-	WidgetTree->ForEachWidget([DeltaTime](UWidget* Widget)
+	for (UButton* Button : {HostButton.Get(), FindButton.Get(), HelpButton.Get(), OptionsButton.Get(), QuitButton.Get()})
 	{
-		if (auto* Button = Cast<UButton>(Widget))
+		if (Button)
 		{
 			const float Target = !Button->GetIsEnabled() ? 0.f : Button->IsPressed() ? -7.f :
 			    Button->IsHovered() || Button->HasKeyboardFocus() ? -3.f : 0.f;
@@ -297,7 +300,7 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 			Button->SetRenderTranslation(FVector2D(0, Y));
 			Button->SetRenderScale(FVector2D(1.f - Y * .002f));
 		}
-	});
+	}
 }
 
 void UTBTitleMenu::Refresh()
@@ -324,7 +327,7 @@ void UTBTitleMenu::Refresh()
 		Row->SetWidgetStyle(RowStyle);
 		auto* Caption = WidgetTree->ConstructWidget<UTextBlock>();
 		Caption->SetText(Session->GetRoomLabel(Index));
-		Caption->SetFont(FSlateFontInfo(PaperFont, 20));
+		Caption->SetFont(FSlateFontInfo(PaperFont, 15));
 		Caption->SetColorAndOpacity(TBPaper::Ink);
 		Caption->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
 		Row->SetContent(Caption);
@@ -340,6 +343,16 @@ void UTBTitleMenu::Refresh()
 	}
 	JoinButton->SetIsEnabled(Ready && SelectedRoom != INDEX_NONE);
 	RoomHintText->SetText(FText::FromString(TBPaper::Status(Session->Status)));
+	const bool bShowRooms = Ready && !Session->Rooms.IsEmpty();
+	auto* HintSlot = CastChecked<UCanvasPanelSlot>(RoomHintText->Slot);
+	HintSlot->SetPosition(bShowRooms ? FVector2D(550, 219) : FVector2D(340, 380));
+	HintSlot->SetSize(bShowRooms ? FVector2D(394, 48) : FVector2D(600, 62));
+	RoomHintText->SetJustification(bShowRooms ? ETextJustify::Right : ETextJustify::Center);
+	RoomList->SetVisibility(bShowRooms ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	JoinButton->SetVisibility(bShowRooms ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	auto* RefreshSlot = CastChecked<UCanvasPanelSlot>(RefreshRoomsButton->Slot);
+	RefreshSlot->SetPosition(FVector2D(bShowRooms ? 682 : 842, 552));
+	RefreshRoomsButton->SetStyle(TBPaper::SignButtonStyle(bShowRooms ? TBPaper::Paper : TBPaper::Gold));
 	// 普段の案内は出さない。通信中やエラーなど、知らせることがあるときだけ出す。
 	const bool bIdle = Session->Status == TEXT("Create a room or find friends to begin.");
 	StatusText->SetText(bIdle ? FText::GetEmpty() : FText::FromString(TBPaper::Status(Session->Status)));

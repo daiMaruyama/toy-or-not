@@ -2,6 +2,7 @@
 
 #include "UI/TBUIText.h"
 #include "UI/TBTitleMenu.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "Input/TBKeyLabels.h"
 #include "Core/TBSession.h"
 #include "Blueprint/WidgetTree.h"
@@ -27,21 +28,25 @@ namespace
 		FName Mapping;
 		const TCHAR* LabelKey;
 	};
-	const FHelpBinding HelpBindings[] = {
+	const FHelpBinding CommonHelpBindings[] = {
 		{TB::Keys::MoveForward, TEXT("Root.Help.Move")}, {NAME_None, TEXT("Root.Help.Look")},
-		{TB::Keys::Jump, TEXT("Keys.Action.Common_Jump")}, {TB::Keys::ToySprint, TEXT("Keys.Action.Toy_Sprint")},
-		{TB::Keys::HumanCrouch, TEXT("Keys.Action.Human_Crouch")}, {TB::Keys::HumanInteract, TEXT("Keys.Action.Human_Interact")},
-		{TB::Keys::ToyInteract, TEXT("Keys.Action.Toy_Interact")}, {TB::Keys::HumanDrop, TEXT("Keys.Action.Human_Drop")},
-		{TB::Keys::ToyTaunt, TEXT("Keys.Action.Toy_Taunt")}, {TB::Keys::HumanGaze, TEXT("Keys.Action.Human_Gaze")},
-		{TB::Keys::ToyPush, TEXT("Keys.Action.Toy_Push")}
+		{TB::Keys::Jump, TEXT("Keys.Action.Common_Jump")}
 	};
+	const FHelpBinding ToyHelpBindings[] = {
+		{TB::Keys::ToyInteract, TEXT("Keys.Action.Toy_Interact")}, {TB::Keys::ToySprint, TEXT("Keys.Action.Toy_Sprint")},
+		{TB::Keys::ToyPush, TEXT("Keys.Action.Toy_Push")}, {TB::Keys::ToyTaunt, TEXT("Keys.Action.Toy_Taunt")}
+	};
+	const FHelpBinding HumanHelpBindings[] = {
+		{TB::Keys::HumanInteract, TEXT("Keys.Action.Human_Interact")}, {TB::Keys::HumanGaze, TEXT("Keys.Action.Human_Gaze")},
+		{TB::Keys::HumanDrop, TEXT("Keys.Action.Human_Drop")}, {TB::Keys::HumanCrouch, TEXT("Keys.Action.Human_Crouch")}
+	};
+	static_assert(UE_ARRAY_COUNT(ToyHelpBindings) == UE_ARRAY_COUNT(HumanHelpBindings));
 }
 
 void UTBTitleMenu::BuildPaperLayout()
 {
 	PaperFont = TBPaper::Font(this);
 	LogoFont = TBPaper::Font(this, TBPaper::EFontRole::Heading);
-	PaperTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/PaperClub/Panel.Panel"));
 	// WBP が Root、TitleScale、TitleCanvas を置いていればそれを使う。足りなければ、ここで全部作る。
 	auto* Root = Cast<UCanvasPanel>(WidgetTree->RootWidget);
 	UScaleBox* Scale = TitleScale;
@@ -97,9 +102,9 @@ void UTBTitleMenu::BuildPaperLayout()
 	auto* ScaleSlot = Layer->AddChildToCanvas(Scale);
 	ScaleSlot->SetAnchors(FAnchors(0, 0, 1, 1));
 	ScaleSlot->SetOffsets(FMargin(0));
-	auto Label = [&](const FText& Text, int32 FontSize, FLinearColor Color, bool Logo = false)
+	auto Label = [&](const FText& Text, int32 FontSize, FLinearColor Color, bool Logo = false, FName Name = NAME_None)
 	{
-		auto* L = WidgetTree->ConstructWidget<UTextBlock>();
+		auto* L = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
 		L->SetText(Text);
 		L->SetFont(FSlateFontInfo(Logo ? LogoFont : PaperFont, FontSize));
 		L->SetColorAndOpacity(Color);
@@ -313,20 +318,13 @@ void UTBTitleMenu::BuildPaperLayout()
 	auto Card = [&](float X, float Y, float W, float H, FLinearColor Color)
 	{
 		auto* Shadow = WidgetTree->ConstructWidget<UBorder>();
-		Shadow->SetBrush(TBPaper::Brush(PaperTexture, TBPaper::Shadow));
+		Shadow->SetBrush(FSlateRoundedBoxBrush(TBPaper::Cream, 15.f, TBPaper::Outline, 2.f));
 		Shadow->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Place(Shadow, X + 5, Y + 7, W, H);
+		Place(Shadow, X, Y + 4, W, H);
 		auto* Panel = WidgetTree->ConstructWidget<UBorder>();
-		Panel->SetBrush(TBPaper::Brush(PaperTexture, Color));
+		Panel->SetBrush(FSlateRoundedBoxBrush(Color, 15.f, TBPaper::Outline, 2.5f));
 		Panel->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Place(Panel, X, Y, W, H);
-	};
-	auto Icon = [&](const TCHAR* Name, float X, float Y, float W, float H)
-	{
-		auto* Art = WidgetTree->ConstructWidget<UImage>();
-		Art->SetBrushFromTexture(TBPaper::Art(Name));
-		Art->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Place(Art, X, Y, W, H);
 	};
 	auto Sign = [&](const TCHAR* Name, const TCHAR* Key, float X, float Y, float Width, FLinearColor Tint)
 	{
@@ -337,56 +335,112 @@ void UTBTitleMenu::BuildPaperLayout()
 		TBPaper::FitSignCaption(*WidgetTree, *Button, *Caption);
 		return Button;
 	};
+	auto HeadingSign = [&](const TCHAR* Key, float X, float Y, float Width)
+	{
+		auto* SignFace = WidgetTree->ConstructWidget<UBorder>();
+		SignFace->SetBrush(TBPaper::SignButtonStyle(TBPaper::Gold).Normal);
+		SignFace->SetPadding(FMargin(10, 3, 10, 6));
+		SignFace->SetVisibility(ESlateVisibility::HitTestInvisible);
+		SignFace->SetRenderTransformAngle(-1.f);
+		auto* Caption = Label(TBText::Get(Key), 19, TBPaper::Ink, true);
+		Caption->SetAutoWrapText(false);
+		auto* Fit = WidgetTree->ConstructWidget<UScaleBox>();
+		Fit->SetStretch(EStretch::ScaleToFit);
+		Fit->SetStretchDirection(EStretchDirection::DownOnly);
+		Fit->SetContent(Caption);
+		SignFace->SetContent(Fit);
+		Place(SignFace, X, Y, Width, 50);
+	};
 	FinderOverlay = NewPopup();
-	Card(206, 122, 868, 556, TBPaper::Paper);
-	Place(Label(TBText::Get(TEXT("Root.Title.Find")), 32, TBPaper::Ink, true), 254, 155, 760, 56);
-	RoomHintText = Label(FText::GetEmpty(), 19, TBPaper::Muted);
-	Place(RoomHintText, 256, 228, 760, 66);
+	Card(305, 188, 670, 424, TBPaper::Paper);
+	HeadingSign(TEXT("Root.Title.Find"), 330, 212, 204);
+	RoomHintText = Label(FText::GetEmpty(), 16, TBPaper::Muted);
+	RoomHintText->SetJustification(ETextJustify::Center);
+	Place(RoomHintText, 340, 380, 600, 62);
 	RoomList = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("Rooms"));
 	RoomList->SetScrollbarThickness(FVector2D(6, 6));
-	Place(RoomList, 252, 304, 778, 244);
-	BackFromFinderButton = Sign(TEXT("BackFromFinder"), TEXT("Root.Common.Back"), 248, 577, 172, TBPaper::Paper);
-	RefreshRoomsButton = Sign(TEXT("RefreshRooms"), TEXT("Root.Title.Refresh"), 537, 577, 176, TBPaper::Teal);
-	JoinButton = Sign(TEXT("Join"), TEXT("Root.Title.Join"), 728, 577, 298, TBPaper::Gold);
+	Place(RoomList, 333, 278, 616, 244);
+	auto* FootRule = WidgetTree->ConstructWidget<UImage>();
+	FootRule->SetColorAndOpacity(TBPaper::Outline.CopyWithNewOpacity(.24f));
+	FootRule->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(FootRule, 316, 536, 648, 1);
+	auto FinderButton = [&](const TCHAR* Name, const TCHAR* Key, float X, float Width, FLinearColor Tint)
+	{
+		UButton* Button = Sign(Name, Key, X, 552, Width, Tint);
+		TBPaper::SignCaption(Button)->SetFont(FSlateFontInfo(LogoFont, 14));
+		CastChecked<UCanvasPanelSlot>(Button->Slot)->SetSize(FVector2D(Width, 40));
+		return Button;
+	};
+	BackFromFinderButton = FinderButton(TEXT("BackFromFinder"), TEXT("Root.Common.Back"), 334, 90, TBPaper::Paper);
+	RefreshRoomsButton = FinderButton(TEXT("RefreshRooms"), TEXT("Root.Title.Refresh"), 682, 104, TBPaper::Paper);
+	JoinButton = FinderButton(TEXT("Join"), TEXT("Root.Title.Join"), 797, 149, TBPaper::Gold);
 	BackFromFinderButton->OnClicked.AddDynamic(this, &ThisClass::CloseFinder);
 	RefreshRoomsButton->OnClicked.AddDynamic(this, &ThisClass::Find);
 	JoinButton->OnClicked.AddDynamic(this, &ThisClass::Join);
 	SetRoomCardsShown(false);
 
 	HelpOverlay = NewPopup();
-	Card(130, 36, 1020, 730, TBPaper::Paper);
-	Place(Label(TBText::Get(TEXT("Root.Title.Help")), 34, TBPaper::Ink, true), 180, 68, 890, 56);
-	Card(176, 136, 448, 258, TBPaper::Cream);
-	Card(640, 136, 464, 258, FMath::Lerp(TBPaper::Paper, TBPaper::Teal, .32f));
-	Icon(TEXT("Icon_Battery"), 200, 151, 51, 51);
-	Place(Label(TBText::Get(TEXT("Root.Common.Toy")), 27, TBPaper::Ink, true), 262, 154, 340, 48);
-	HelpToyText = Label(FText::GetEmpty(), 18, TBPaper::Ink);
-	Place(HelpToyText, 204, 219, 397, 160);
-	Icon(TEXT("Icon_PlayerRatio"), 663, 151, 51, 51);
-	Place(Label(TBText::Get(TEXT("Root.Common.Human")), 27, TBPaper::Ink, true), 726, 154, 348, 48);
-	HelpHumanText = Label(FText::GetEmpty(), 18, TBPaper::Ink);
-	Place(HelpHumanText, 668, 219, 411, 160);
-	Place(Label(TBText::Get(TEXT("Root.Help.Controls")), 23, TBPaper::Ink, true), 180, 418, 890, 40);
-	for (int32 Index = 0; Index < UE_ARRAY_COUNT(HelpBindings); ++Index)
+	const FLinearColor HelpPaper = FLinearColor::FromSRGBColor(FColor(255, 245, 222));
+	const FLinearColor Rule = FLinearColor::FromSRGBColor(FColor(205, 167, 123));
+	auto HelpPanel = [&](const FSlateBrush& Face, float X, float Y, float W, float H)
 	{
-		const float X = 184 + (Index % 3) * 310, Y = 475 + (Index / 3) * 43;
+		auto* Panel = WidgetTree->ConstructWidget<UBorder>();
+		Panel->SetBrush(Face);
+		Panel->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Place(Panel, X, Y, W, H);
+		return Panel;
+	};
+	Card(294, 142, 692, 502, TBPaper::Paper);
+	HeadingSign(TEXT("Root.Title.Help"), 316, 160, 195);
+	auto HelpTab = [&](const TCHAR* Name, const TCHAR* TextKey, float X)
+	{
+		auto* Button = AddButton(Name, TBText::Get(TextKey), X, 227, 316);
+		CastChecked<UCanvasPanelSlot>(Button->Slot)->SetSize(FVector2D(316, 41));
+		auto* Caption = CastChecked<UTextBlock>(Button->GetContent());
+		Caption->SetFont(FSlateFontInfo(LogoFont, 14));
+		auto* Slot = CastChecked<UButtonSlot>(Caption->Slot);
+		Slot->SetHorizontalAlignment(HAlign_Center);
+		Slot->SetVerticalAlignment(VAlign_Center);
+		return Button;
+	};
+	HelpToyTab = HelpTab(TEXT("HelpToyTab"), TEXT("Root.Common.Toy"), 318);
+	HelpHumanTab = HelpTab(TEXT("HelpHumanTab"), TEXT("Root.Common.Human"), 646);
+	HelpToyTab->OnClicked.AddDynamic(this, &ThisClass::ShowToyHelp);
+	HelpHumanTab->OnClicked.AddDynamic(this, &ThisClass::ShowHumanHelp);
+	HelpPanel(FSlateRoundedBoxBrush(HelpPaper, 8.f, Rule, 1.5f), 318, 278, 644, 126);
+	HelpRoleIcon = WidgetTree->ConstructWidget<UImage>();
+	HelpRoleIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(HelpRoleIcon, 335, 294, 33, 33);
+	HelpGoal = Label(FText::GetEmpty(), 16, TBPaper::Ink, true, TEXT("HelpGoal"));
+	Place(HelpGoal, 379, 295, 568, 33);
+	HelpDescription = Label(FText::GetEmpty(), 13, TBPaper::Ink, false, TEXT("HelpDescription"));
+	Place(HelpDescription, 338, 338, 606, 58);
+	Place(Label(TBText::Get(TEXT("Root.Help.Controls")), 15, TBPaper::Ink, true), 318, 420, 630, 30);
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(CommonHelpBindings) + UE_ARRAY_COUNT(ToyHelpBindings); ++Index)
+	{
+		const float X = 318 + (Index % 3) * 218, Y = 455 + (Index / 3) * 34;
 		auto* Keycap = WidgetTree->ConstructWidget<UBorder>();
-		Keycap->SetBrush(FSlateRoundedBoxBrush(TBPaper::Paper, 5.f, TBPaper::Muted, 1.5f));
-		Keycap->SetPadding(FMargin(5, 3));
+		Keycap->SetBrush(FSlateRoundedBoxBrush(HelpPaper, 5.f, TBPaper::Muted, 1.5f));
+		Keycap->SetPadding(FMargin(3, 1));
 		Keycap->SetHorizontalAlignment(HAlign_Center);
 		Keycap->SetVerticalAlignment(VAlign_Center);
 		auto* Fit = WidgetTree->ConstructWidget<UScaleBox>();
 		Fit->SetStretch(EStretch::ScaleToFit);
 		Fit->SetStretchDirection(EStretchDirection::DownOnly);
-		auto* Key = Label(FText::GetEmpty(), 17, TBPaper::Ink);
+		auto* Key = Label(FText::GetEmpty(), 12, TBPaper::Ink);
 		Key->SetAutoWrapText(false);
 		HelpKeyLabels.Add(Key);
 		Fit->SetContent(Key);
 		Keycap->SetContent(Fit);
-		Place(Keycap, X, Y, 98, 33);
-		Place(Label(TBText::Get(HelpBindings[Index].LabelKey), 16, TBPaper::Ink), X + 108, Y + 2, 196, 39);
+		Place(Keycap, X, Y, 78, 25);
+		auto* Action = Label(FText::GetEmpty(), 12, TBPaper::Ink);
+		HelpActions.Add(Action);
+		Place(Action, X + 87, Y + 1, 121, 32);
 	}
-	CloseHelpButton = Sign(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 742, 676, 354, TBPaper::Gold);
+	HelpPanel(FSlateRoundedBoxBrush(Rule, 0.f), 310, 568, 660, 1);
+	CloseHelpButton = Sign(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 795, 579, 167, TBPaper::Gold);
+	TBPaper::SignCaption(CloseHelpButton)->SetFont(FSlateFontInfo(LogoFont, 14));
+	CastChecked<UCanvasPanelSlot>(CloseHelpButton->Slot)->SetSize(FVector2D(167, 47));
 	CloseHelpButton->OnClicked.AddDynamic(this, &ThisClass::CloseHelp);
 	HelpOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	RefreshHelpText();
@@ -400,27 +454,54 @@ void UTBTitleMenu::Quit()
 void UTBTitleMenu::RefreshHelpText()
 {
 	const auto* PC = GetOwningPlayer();
-	const FString Interact = TB::KeyLabel(PC, TB::Keys::HumanInteract), ToyInteract = TB::KeyLabel(PC, TB::Keys::ToyInteract);
-	const FString Drop = TB::KeyLabel(PC, TB::Keys::HumanDrop);
-	HelpToyText->SetText(FText::Format(TBText::Get(TEXT("Root.Help.Toy")),
-	    FText::FromString(TB::KeyLabel(PC, TB::Keys::ToyPush)), FText::FromString(ToyInteract)));
-	HelpHumanText->SetText(FText::Format(TBText::Get(TEXT("Root.Help.Human")),
-	    FText::FromString(Interact), FText::FromString(Interact), FText::FromString(Drop)));
+	auto SetTabFace = [](UButton& Tab, bool Selected, const FLinearColor& TeamColor)
+	{
+		FButtonStyle Style = TBPaper::CompactButtonStyle();
+		Style.SetNormal(FSlateRoundedBoxBrush(Selected ? TeamColor : TBPaper::Paper, 6.f,
+		    Selected ? TBPaper::Outline : TBPaper::Muted, Selected ? 2.5f : 1.25f));
+		Style.SetHovered(FSlateRoundedBoxBrush(FMath::Lerp(TeamColor, TBPaper::Paper, .3f), 6.f, TBPaper::Outline, 2.f));
+		Style.SetPressed(FSlateRoundedBoxBrush(TeamColor, 6.f, TBPaper::Outline, 2.5f));
+		Tab.SetStyle(Style);
+	};
+	SetTabFace(*HelpToyTab, !bHumanHelp, FLinearColor::FromSRGBColor(FColor(246, 193, 151)));
+	SetTabFace(*HelpHumanTab, bHumanHelp, FLinearColor::FromSRGBColor(FColor(170, 218, 207)));
+	HelpRoleIcon->SetBrushFromTexture(TBPaper::Art(bHumanHelp ? TEXT("Icon_PlayerRatio") : TEXT("Icon_Battery")));
+	HelpGoal->SetText(TBText::Get(bHumanHelp ? TEXT("Root.Help.HumanGoal") : TEXT("Root.Help.ToyGoal")));
+	const FName Interact = bHumanHelp ? TB::Keys::HumanInteract : TB::Keys::ToyInteract;
+	HelpDescription->SetText(FText::Format(TBText::Get(bHumanHelp ? TEXT("Root.Help.Human") : TEXT("Root.Help.Toy")),
+	    FText::FromString(TB::KeyLabel(PC, Interact))));
 	for (int32 Index = 0; Index < HelpKeyLabels.Num(); ++Index)
 	{
-		const FName Mapping = HelpBindings[Index].Mapping;
+		const int32 RoleIndex = Index - UE_ARRAY_COUNT(CommonHelpBindings);
+		const FHelpBinding& Binding = RoleIndex < 0 ? CommonHelpBindings[Index]
+		    : (bHumanHelp ? HumanHelpBindings : ToyHelpBindings)[RoleIndex];
+		const FName Mapping = Binding.Mapping;
 		const FText Key = Mapping.IsNone() ? TBText::Get(TEXT("Root.Help.Mouse"))
 		    : FText::FromString(Mapping == TB::Keys::MoveForward ? TB::MoveKeysLabel(PC) : TB::KeyLabel(PC, Mapping));
 		HelpKeyLabels[Index]->SetText(Key);
+		HelpActions[Index]->SetText(TBText::Get(Binding.LabelKey));
 	}
+}
+
+void UTBTitleMenu::ShowToyHelp()
+{
+	bHumanHelp = false;
+	RefreshHelpText();
+	HelpToyTab->SetKeyboardFocus();
+}
+
+void UTBTitleMenu::ShowHumanHelp()
+{
+	bHumanHelp = true;
+	RefreshHelpText();
+	HelpHumanTab->SetKeyboardFocus();
 }
 
 void UTBTitleMenu::Help()
 {
-	RefreshHelpText();
 	TitleContent->SetVisibility(ESlateVisibility::Collapsed);
 	HelpOverlay->SetVisibility(ESlateVisibility::Visible);
-	CloseHelpButton->SetKeyboardFocus();
+	ShowToyHelp();
 }
 
 void UTBTitleMenu::CloseHelp()
@@ -432,6 +513,7 @@ void UTBTitleMenu::CloseHelp()
 
 FReply UTBTitleMenu::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)
 {
+	if (UTBLoadingScreenSubsystem::IsCovering(GetGameInstance())) return FReply::Handled();
 	// 音量・再生などのメディアキーは UE のキーにない（無効なキーで届く）。これでは飛ばさない。
 	if (State == EState::Story && KeyEvent.GetKey().IsValid())
 	{
@@ -439,10 +521,19 @@ FReply UTBTitleMenu::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKe
 		return FReply::Handled();
 	}
 	NoteInput();
-	if (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible && KeyEvent.GetKey() == EKeys::Escape)
+	if (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible)
 	{
-		CloseHelp();
-		return FReply::Handled();
+		const FKey Key = KeyEvent.GetKey();
+		if (Key == EKeys::Escape)
+		{
+			CloseHelp();
+			return FReply::Handled();
+		}
+		if (HelpToyTab->HasKeyboardFocus() || HelpHumanTab->HasKeyboardFocus())
+		{
+			if (Key == EKeys::Left || Key == EKeys::Gamepad_DPad_Left) { ShowToyHelp(); return FReply::Handled(); }
+			if (Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Right) { ShowHumanHelp(); return FReply::Handled(); }
+		}
 	}
 	if (bRoomCardsShown && KeyEvent.GetKey() == EKeys::Escape)
 	{

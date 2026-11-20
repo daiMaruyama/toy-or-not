@@ -12,6 +12,7 @@
 #include "Character/TBMovement.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
+#include "Components/TextBlock.h"
 #include "Components/SceneComponent.h"
 #include "Core/TBController.h"
 #include "Core/TBChat.h"
@@ -45,6 +46,8 @@
 #include "UI/TBTitleMenu.h"
 #include "UI/TBUIText.h"
 #include "UI/Loading/TBLoadingScreenSettings.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
+#include "GameFramework/HUDHitBox.h"
 #include "UnrealClient.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
@@ -243,11 +246,42 @@ namespace
 						    *Texture->GetName(), Texture->GetNumMips()), Texture->GetNumMips() > 1);
 				}
 				if (TitleSlateButton.IsValid() && !CheckTitleButton()) return true;
+				if (bTitle && (Step == 1 || Step == 10))
+				{
+					const auto* Goal = Cast<UTextBlock>(Title->WidgetTree->FindWidget(TEXT("HelpGoal")));
+					const TCHAR* Expected = Step == 1 ? TEXT("Root.Help.ToyGoal") : TEXT("Root.Help.HumanGoal");
+					if (!Test->TestNotNull(TEXT("Role page has an objective"), Goal) ||
+					    !Test->TestEqual(TEXT("Selected role shows its localized objective"),
+					        Goal->GetText().ToString(), TBText::String(Expected))) return true;
+				}
+				if (bTitle && Step == 3 && !CheckOptionSigns()) return true;
+				if (!bTitle && Step == 0 &&
+				    (!Test->TestNotNull(TEXT("Lobby has its own players button"), HUD->GetHitBoxWithName(TEXT("Players"))) ||
+				     !Test->TestNotNull(TEXT("Lobby has its own leave button"), HUD->GetHitBoxWithName(TEXT("Leave"))))) return true;
 				if (!bTitle && Step == 47)
 				{
 					if (!Test->TestNotNull(TEXT("Exit confirmation offers cancel"), HUD->GetHitBoxWithName(TEXT("CancelLeave"))) ||
 					    !Test->TestNotNull(TEXT("Exit confirmation offers confirm"), HUD->GetHitBoxWithName(TEXT("ConfirmLeave"))) ||
 					    !Test->TestNull(TEXT("Lobby controls are hidden behind the prompt"), HUD->GetHitBoxWithName(TEXT("Ready")))) return true;
+				}
+				if (!bTitle && Step == 9 &&
+				    !Test->TestTrue(TEXT("The loading capture contains the game's transition overlay"),
+				        UTBLoadingScreenSubsystem::IsCovering(World->GetGameInstance()))) return true;
+				if (!bTitle && Step == 14)
+				{
+					const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+					const double Scale = FMath::Min(Size.X / 1280., Size.Y / 800.);
+					const FVector2D Origin = FVector2D(Size) * .5 - FVector2D(360, 344) * Scale;
+					const auto Covers = [&](FName Id, FVector2D Center)
+					{
+						const FHUDHitBox* Hit = HUD->GetHitBoxWithName(Id);
+						return Hit && Hit->Contains(Origin + Center * Scale);
+					};
+					if (!Test->TestTrue(TEXT("Reset, resume and players respond on their three hanging cards"),
+					        Covers(TEXT("Unstuck"), {136, 374}) && Covers(TEXT("Resume"), {352, 374}) &&
+					        Covers(TEXT("Players"), {568, 374})) ||
+					    !Test->TestTrue(TEXT("Settings and leave respond on the two lower tiles"),
+					        Covers(TEXT("OpenOptions"), {448, 595}) && Covers(TEXT("Leave"), {590, 595}))) return true;
 				}
 				if (!bTitle && (Step == 1 || Step == 2 || Step == 23))
 				{
@@ -317,7 +351,7 @@ namespace
 			if (FScreenshotRequest::IsScreenshotRequested()) return false;
 			Test->TestTrue(*FString::Printf(TEXT("Rendered screenshot: %s"), *Name),
 			              IFileManager::Get().FileSize(*Path) > 1024);
-			if ((!bTitle && Step == 46) || (bTitle && Step == 3)) return true;
+			if ((!bTitle && Step == 46) || (bTitle && Step == 13)) return true;
 			// Photograph the settings return before the existing match sequence;
 			// retain the earlier step indices used by transition/gaze assertions.
 			if (bCompactHintsOnly && Step == 0) Step = 9;
@@ -327,6 +361,9 @@ namespace
 			else if (!bTitle && Step == 47) Step = 1;
 			else if (bTitle && Step == 0) Step = 4;
 			else if (bTitle && Step == 9) { RestoreTitleButton(); Step = 1; }
+			else if (bTitle && Step == 1) Step = 10;
+			else if (bTitle && Step == 10) Step = 2;
+			else if (bTitle && Step == 3) Step = 11;
 			else if (!bTitle && Step == 8) Step = 23;
 			else if (!bTitle && Step == 23) Step = 9;
 			else if (!bTitle && Step == 22) Step = 24;
@@ -588,6 +625,38 @@ namespace
 			return true;
 		}
 
+		bool CheckOptionSigns()
+		{
+			int32 VisibleSigns = 0;
+			bool bValid = true;
+			Options->WidgetTree->ForEachWidget([&](UWidget* Widget)
+			{
+				auto* Button = Cast<UButton>(Widget);
+				if (!Button || !Button->GetStyle().Normal.GetResourceName().ToString().EndsWith(TEXT("/Sign.svg"))) return;
+				const auto& Frame = Button->GetCachedGeometry();
+				if (Frame.GetLocalSize().GetMin() <= 0) return;
+				++VisibleSigns;
+				bValid &= Test->TestTrue(TEXT("Printed outlines are rendered whole"),
+				    Button->GetStyle().Normal.DrawAs == ESlateBrushDrawType::Image);
+				bool bFoundCaption = false;
+				UWidgetTree::ForEachWidgetAndChildrenUntil(Button, [&](UWidget* Child)
+				{
+					const auto* Caption = Cast<UTextBlock>(Child);
+					if (!Caption) return true;
+					bFoundCaption = true;
+					const auto& TextGeometry = Caption->GetCachedGeometry();
+					const FVector2D TL = Frame.AbsoluteToLocal(TextGeometry.LocalToAbsolute(FVector2D::ZeroVector));
+					const FVector2D BR = Frame.AbsoluteToLocal(TextGeometry.LocalToAbsolute(TextGeometry.GetLocalSize()));
+					bValid &= Test->TestTrue(*FString::Printf(TEXT("Caption stays inside its inked face: %s"),
+					    *Caption->GetText().ToString()), TextGeometry.GetLocalSize().GetMin() > 0 &&
+					    TL.X >= 3 && TL.Y >= 2 && BR.X <= Frame.GetLocalSize().X - 3 && BR.Y <= Frame.GetLocalSize().Y - 2);
+					return false;
+				});
+				bValid &= Test->TestTrue(TEXT("Printed button contains editable text"), bFoundCaption);
+			});
+			return Test->TestTrue(TEXT("Measured the four tabs and both footer buttons"), VisibleSigns >= 6) && bValid;
+		}
+
 		bool PrepareTitleReview()
 		{
 			bool bValid = true;
@@ -702,6 +771,10 @@ namespace
 				if (!ClickTitle(TEXT("HelpButton"))) return false;
 				Name = TEXT("02-how-to-play");
 				break;
+			case 10:
+				if (!ClickTitle(TEXT("HelpHumanTab"))) return false;
+				Name = TEXT("02-how-to-play-human");
+				break;
 			case 2:
 				if (!ClickTitle(TEXT("CloseHelp")) || !ClickTitle(TEXT("FindButton"))) return false;
 				Test->TestTrue(TEXT("Room finder reveals session cards"), Title->AreRoomCardsShown());
@@ -717,6 +790,11 @@ namespace
 				Name = TEXT("04-title-options");
 				break;
 			}
+			case 11: case 12: case 13:
+				Options->ShowPage(Step - 10);
+				Name = Step == 11 ? TEXT("04-title-display") :
+				    Step == 12 ? TEXT("04-title-controls") : TEXT("04-title-language");
+				break;
 			case 4: case 5: case 6: case 7: case 8: case 9:
 			{
 				RestoreTitleButton();

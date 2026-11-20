@@ -2,6 +2,7 @@
 
 #pragma once
 #include "CoreMinimal.h"
+#include "Async/Future.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Tickable.h"
@@ -12,6 +13,7 @@ class SWidget;
 class UGameViewportClient;
 class UNetDriver;
 class UTexture2D;
+struct FImage;
 struct FWorldContext;
 
 /**
@@ -31,6 +33,7 @@ public:
 
 	virtual void Tick(float DeltaTime) override;
 	bool IsCoveringViewport() const { return bHardLoad || Overlay.IsValid(); }
+	static bool IsCovering(const UGameInstance* Instance);
 	// 移動の向きの文字を決める部品。移動の行き先（URLから取ったマップ名）がわかっていればそれを優先し、なければGameStateから決めた値を使う。
 	static FString MapNameFromURL(const FString& URL);
 	static bool IsReturningLabel(const FString& DestMap, bool bReturningFromState);
@@ -46,6 +49,8 @@ private:
 	void Failed(UWorld* World, UNetDriver* Driver, ENetworkFailure::Type Type, const FString& Error);
 	void TravelFailed(UWorld* World, ETravelFailure::Type Type, const FString& Error);
 	void StopMovie();
+	void FinishPosterIfReady();
+	void EndFailedTravel(UWorld* World);
 	void NotePreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bSeamless);
 	void ShowOverlay();
 	void RemoveOverlay();
@@ -59,6 +64,7 @@ private:
 	// The same film still covers decoder startup and devices without a supported movie player.
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> FilmPoster;
+	TFuture<TSharedPtr<FImage>> PendingPoster;
 	TSharedPtr<STBLoadingScreen> Screen;
 	TSharedPtr<SWidget> Overlay;
 	TWeakObjectPtr<UGameViewportClient> OverlayViewport;
@@ -68,6 +74,8 @@ private:
 	// マップを読み直していて、読み終わったあと自分のキャラを待っているか。
 	bool bHardLoad = false;
 	double LoadedAt = 0;
+	// Wall time shared by native playback and its game-viewport handoff. Zero outside a real travel.
+	double TravelShownAt = 0;
 	// かぶせる理由がなくなってから、見た目とおもちゃを待ちはじめた時刻。0は待っていない。
 	double SettleFrom = 0;
 	// ロビーと試合の切り替わりを見るための、前のフレームの状態。ワールドが替わったら数え直す。

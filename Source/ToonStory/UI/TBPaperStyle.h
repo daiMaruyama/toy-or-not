@@ -7,7 +7,7 @@
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
-#include "Brushes/SlateBoxBrush.h"
+#include "Brushes/SlateImageBrush.h"
 
 namespace TBPaper
 {
@@ -168,14 +168,18 @@ namespace TBPaper
 		return Style;
 	}
 
-	// Match the curved title artwork with a blank sign so all captions stay editable.
+	// Rasterize the entire printed edge at the button's actual size. Slicing the curve
+	// into corners and strips introduces visible steps where the pieces meet.
 	inline FButtonStyle SignButtonStyle(FLinearColor Tint)
 	{
-		static const FSlateVectorBoxBrush Face(FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Sign.svg"),
-		    FVector2D(144, 50), FMargin(.10f, .23f));
+		static const FSlateVectorImageBrush Face(FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Sign.svg"),
+		    FVector2D(144, 42));
+		if (Tint == Teal) Tint = FLinearColor::FromSRGBColor(FColor(150, 218, 198));
+		else if (Tint == Gold) Tint = FLinearColor::FromSRGBColor(FColor(255, 220, 118));
+		else if (Tint == Paper) Tint = FLinearColor::FromSRGBColor(FColor(255, 246, 222));
 		FButtonStyle Style = ArtButtonStyle(Face, Tint);
-		Style.SetNormalPadding(FMargin(12, 4, 12, 8));
-		Style.SetPressedPadding(FMargin(12, 6, 12, 6));
+		Style.SetNormalPadding(FMargin(8, 4, 8, 6));
+		Style.SetPressedPadding(FMargin(8, 5, 8, 5));
 		return Style;
 	}
 } // namespace TBPaper

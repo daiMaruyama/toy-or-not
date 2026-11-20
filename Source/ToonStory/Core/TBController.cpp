@@ -108,7 +108,7 @@ void ATBController::PlayerTick(float DeltaTime)
 	const bool ShowMenu = State && (InLobby ? (BlockingPanel || IsChatOpen() || State->bTravelPending) :
 	    (State->Phase != ETBPhase::Playing && State->Phase != ETBPhase::Results) || IsChatOpen() || bLeaveMenuOpen || BlockingPanel);
 	UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
-	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()));
+	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()), InLobby);
 	UpdateScreenTransition();
 	UpdateResultView();
 	UpdateViewAspect();
@@ -493,22 +493,28 @@ void ATBController::UpdateLobbyCamera(bool InLobby)
 	}
 }
 
-void ATBController::UpdateMenuInput(bool ShowMenu)
+void ATBController::UpdateMenuInput(bool ShowMenu, bool LobbyPointer)
 {
+	const bool ShowPointer = ShowMenu || LobbyPointer;
+	const bool PointerChanged = bShowMouseCursor != ShowPointer;
 	if (bLobbyInput != ShowMenu)
 	{
 		bLobbyInput = ShowMenu;
-		bShowMouseCursor = ShowMenu;
-		bEnableClickEvents = ShowMenu;
 		SetIgnoreLookInput(ShowMenu);
 		SetIgnoreMoveInput(ShowMenu);
+	}
+	if (PointerChanged)
+	{
+		// The lobby camera is fixed: its controls and the moving pawn can share input.
+		bShowMouseCursor = ShowPointer;
+		bEnableClickEvents = ShowPointer;
 		ApplyMenuInputMode();
 	}
 }
 
 void ATBController::ApplyMenuInputMode()
 {
-	if (bLobbyInput)
+	if (bShowMouseCursor)
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetHideCursorDuringCapture(false);
@@ -636,6 +642,7 @@ void ATBController::SetupInputComponent()
 
 void ATBController::ToggleLeaveMenu()
 {
+	if (UTBLoadingScreenSubsystem::IsCovering(GetGameInstance())) return;
 	if (auto* HUD = Cast<ATBHUD>(GetHUD()); HUD && HUD->DismissConfirmation()) return;
 	const auto* State = TB::GS(GetWorld());
 	if (State && State->Phase == ETBPhase::Lobby && !State->bTravelPending && !IsChatOpen())
@@ -692,9 +699,8 @@ bool ATBController::CanUseLobbyShortcuts() const
 {
 	const auto* State = TB::GS(GetWorld());
 	const auto* HUD = Cast<ATBHUD>(GetHUD());
-	const auto* Loading = UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(GetGameInstance());
 	return State && State->Phase == ETBPhase::Lobby && !State->bTravelPending &&
-	    !(Loading && Loading->IsCoveringViewport()) && !(HUD && HUD->IsChatBlocked());
+	    !UTBLoadingScreenSubsystem::IsCovering(GetGameInstance()) && !(HUD && HUD->IsChatBlocked());
 }
 
 void ATBController::TBReady()
@@ -789,7 +795,8 @@ void ATBController::ClientNotice_Implementation(const FString& Message, bool bEr
 bool ATBController::CanUseChat() const
 {
 	const auto* State = TB::GS(GetWorld());
-	if (!IsLocalController() || !State || !TB::Chat::IsAvailable(State->Phase) || ShouldHidePreparationView() || UTBGameViewportClient::IsUIHidden(GetWorld()))
+	if (!IsLocalController() || !State || !TB::Chat::IsAvailable(State->Phase) || ShouldHidePreparationView() ||
+	    UTBLoadingScreenSubsystem::IsCovering(GetGameInstance()) || UTBGameViewportClient::IsUIHidden(GetWorld()))
 	{
 		return false;
 	}

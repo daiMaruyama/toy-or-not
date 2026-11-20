@@ -7,7 +7,7 @@
 
 class UTexture2D;
 
-/** ロード画面。紙色の小さな遊び場で、おもちゃが積み木の陰から箱の陰へこっそり走る。プロジェクト設定の「ロード画面」で変える */
+/** ロード映像と、イラスト表示用の演出設定。 */
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "ロード画面"))
 class TOONSTORY_API UTBLoadingScreenSettings : public UDeveloperSettings
 {
@@ -45,6 +45,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "試合の切り替えで見せる時間", Units = "s", ClampMin = "0"))
 	float MatchSwitchSeconds = 1.5f;
+	/** 実際のマップ移動の開始から数える。試合の操作や陣営の登場が始まったら、そちらを優先する。 */
+	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
+	          meta = (DisplayName = "移動中の映像を見せる最短時間", Units = "s", ClampMin = "0"))
+	float MinimumTravelSeconds = 3.5f;
 	/** 出しはじめに、黒から明けるまで */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "出るときの暗転", Units = "s", ClampMin = "0"))

@@ -136,11 +136,18 @@ private:
 	UFUNCTION()
 	void Help();
 	UFUNCTION() void CloseHelp();
+	UFUNCTION() void ShowToyHelp();
+	UFUNCTION() void ShowHumanHelp();
 	// キー名は割り当てで変わるので、開くたびに作り直す。
 	void RefreshHelpText();
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpToyText;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpHumanText;
+	bool bHumanHelp = false;
+	UPROPERTY(Transient) TObjectPtr<UButton> HelpToyTab;
+	UPROPERTY(Transient) TObjectPtr<UButton> HelpHumanTab;
+	UPROPERTY(Transient) TObjectPtr<class UImage> HelpRoleIcon;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpGoal;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpDescription;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpKeyLabels;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpActions;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitleContent;
 	UPROPERTY(Transient) TObjectPtr<UWidget> HelpOverlay;
 	UPROPERTY(Transient) TObjectPtr<UButton> CloseHelpButton;
@@ -151,7 +158,5 @@ private:
 	TObjectPtr<class UFont> PaperFont;
 	UPROPERTY(Transient)
 	TObjectPtr<class UFont> LogoFont;
-	UPROPERTY(Transient)
-	TObjectPtr<class UTexture2D> PaperTexture;
 	UFUNCTION() void RoomChecked(bool bChecked);
 };
