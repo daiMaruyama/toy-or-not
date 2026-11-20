@@ -135,10 +135,16 @@ void ATBBoxLid::OpenForEscape()
 
 void ATBBoxLid::Start(const FPlay& Next)
 {
+	// リザルトの演出でふたを持っている間に遅れて届いた合図は、手放したあとに開き直さないよう捨てる。
+	if (bResultHeld)
+	{
+		return;
+	}
 	if (Elapsed < 0.f)
 	{
 		Play = Next;
 		Elapsed = 0.f;
+		ExtendEscapeHold();
 		return;
 	}
 	// 脱出で大きく開いている間は、救助・収納の合図で小さくしない。
@@ -154,6 +160,22 @@ void ATBBoxLid::Start(const FPlay& Next)
 	const float NextAlpha = .5f - FMath::Sin(FMath::Asin(1.f - 2.f * Eased) / 3.f);
 	Play = Next;
 	Elapsed = FMath::Clamp(NextAlpha, 0.f, 1.f) * Play.OpenSeconds;
+	ExtendEscapeHold();
+}
+
+void ATBBoxLid::ExtendEscapeHold()
+{
+	if (!Play.bEscape)
+	{
+		return;
+	}
+	// 開き終えて閉じはじめるまでの残り。普通の値ではこれが移すまでの秒より長いので、延ばさない。
+	const float Remaining = Play.OpenSeconds + Play.HoldSeconds - Elapsed;
+	const float Delay = TB::PresentationData().Lid.EscapeReleaseDelay;
+	if (Remaining < Delay)
+	{
+		Play.HoldSeconds += Delay - Remaining;
+	}
 }
 
 void ATBBoxLid::HoldForResult(float Alpha)

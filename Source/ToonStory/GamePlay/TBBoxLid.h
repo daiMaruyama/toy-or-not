@@ -65,6 +65,8 @@ private:
 	static FPlay StandardPlay();
 	static FPlay EscapePlay();
 	void Start(const FPlay& Next);
+	// 脱出の開きは、新しい合図から EscapeReleaseDelay の間は閉じ始めない。足りないときだけ、開いたままの時間を延ばす。
+	void ExtendEscapeHold();
 	FPlay Play;
 	bool bResultHeld = false;
 	bool bBoundToBox = false;

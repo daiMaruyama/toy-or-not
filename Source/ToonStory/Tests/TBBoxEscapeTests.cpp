@@ -300,7 +300,11 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	TestEqual(TEXT("A blocked exit keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Course->Tick(0);
-	TestEqual(TEXT("An unblocked exit releases while still above the jump finish line"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	// 失敗したあとは、ゴールの高さに居続けても移さない。いったん離れて、もう一度届いたときに、頭突きのあとで移す（このテストは遅らせる秒が0）。
+	TestEqual(TEXT("An exit that opens while the toy stays at the finish height does not release it"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(FVector(200, 0, 20));
+	Place(Finish, MOVE_Falling);
+	TestEqual(TEXT("Leaving and reaching the finish height again releases through the unblocked exit"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	if (!Store(TEXT("Another capture succeeds"), Toy)) return false;
 	Place(FVector(200, 0, 20));
 	State->EndTime = State->GetServerWorldTimeSeconds() - .01;

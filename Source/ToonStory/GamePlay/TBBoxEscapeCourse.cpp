@@ -235,9 +235,20 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 			Attempt.bDescendedBelowGoal = true;
 		if (Contains(CourseBounds, Toy)) Toy->SetFrozen(false);
 		if (!Attempt.bDescendedBelowGoal) continue;
+		const bool bAtGoal = IsAtGoalHeight(Toy, Supports);
+		// 出口が塞がって失敗したあとは、ゴールの高さからいったん離れて、もう一度届いたときだけやり直す。
+		// やり直しも新しい頭突きとして、ふたを開き直してから、遅らせて移す。居続けても毎フレームは出さない。
+		if (Attempt.bFailed)
+		{
+			if (!bAtGoal) { Attempt.bLeftGoal = true; continue; }
+			if (!Attempt.bLeftGoal) continue;
+			Attempt.bFailed = false;
+			Attempt.bLeftGoal = false;
+			Attempt.bBumped = false;
+		}
 		if (!Attempt.bBumped)
 		{
-			if (!IsAtGoalHeight(Toy, Supports)) continue;
+			if (!bAtGoal) continue;
 			// Server deadlines and the current capture token still govern release.
 			if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
 			if (!Eligible(Toy) || State->Phase != ETBPhase::Playing) continue;
@@ -248,8 +259,6 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 		}
 		else Attempt.ReleaseIn -= DeltaSeconds;
 		if (Attempt.ReleaseIn > 0.f) continue;
-		// 出口が塞がって失敗したあとの再試行は、ゴールの高さにいる間だけ。箱の底へ戻ったあとに出口が空いても移さない。
-		if (Attempt.bRetry && !IsAtGoalHeight(Toy, Supports)) continue;
 		// 遅らせた間に試合が終わる・抜ける・捕まり直すことがあるので、移す時点で期限とキャプチャをもう一度確かめる。
 		if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
 		if (!Eligible(Toy) || State->Phase != ETBPhase::Playing || Box->CaptureGeneration(Toy) != Attempt.Generation) continue;
@@ -262,6 +271,10 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 			UTBAudioEvents::Emit(this, ETBSoundEvent::RescueComplete, Toy->TBPS(), Box->InteractionPoint->GetComponentLocation());
 			Attempts.Remove(Toy);
 		}
-		else Attempt.bRetry = true;
+		else
+		{
+			Attempt.bFailed = true;
+			Attempt.bLeftGoal = false;
+		}
 	}
 }

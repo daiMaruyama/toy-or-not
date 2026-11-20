@@ -39,9 +39,14 @@ bool FTBPresentationDataTest::RunTest(const FString& Parameters)
 		      EDataValidationResult::Invalid);
 		Check(TEXT("Escape hold shorter than rescue is rejected"), [](FTBLidFeel& Lid) { Lid.EscapeHoldSeconds = Lid.HoldSeconds - .1f; },
 		      EDataValidationResult::Invalid);
-		Check(TEXT("Release delay beyond the open lid is rejected"),
+		// 全開から開き直しても移すまで開いたままにするため、遅らせる秒は「開いたままの時間」以内。
+		Check(TEXT("Release delay beyond the hold time is rejected"),
+		      [](FTBLidFeel& Lid) { Lid.EscapeReleaseDelay = Lid.EscapeHoldSeconds + .01f; }, EDataValidationResult::Invalid);
+		Check(TEXT("Release delay beyond open plus hold is rejected"),
 		      [](FTBLidFeel& Lid) { Lid.EscapeReleaseDelay = Lid.EscapeOpenSeconds + Lid.EscapeHoldSeconds + .1f; },
 		      EDataValidationResult::Invalid);
+		Check(TEXT("Release delay equal to the hold time is allowed"),
+		      [](FTBLidFeel& Lid) { Lid.EscapeReleaseDelay = Lid.EscapeHoldSeconds; }, EDataValidationResult::Valid);
 		Check(TEXT("Zero release delay is allowed"), [](FTBLidFeel& Lid) { Lid.EscapeReleaseDelay = 0.f; }, EDataValidationResult::Valid);
 	}
 #endif

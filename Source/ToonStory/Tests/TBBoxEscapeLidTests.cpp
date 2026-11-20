@@ -222,7 +222,8 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	TestEqual(TEXT("A recaptured toy stays boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	TestEqual(TEXT("The old escape sends no further bump"), Bumps, BumpsBeforeRecapture);
 
-	// 5) 出口が全部塞がって失敗したあとの再試行は、ゴールの高さにいる間だけ。箱の底へ戻ったあとに出口が空いても移さない。
+	// 5) 出口が全部塞がって失敗したあと、ゴールの高さに居続けても頭突きは出ない。箱の底へ戻ったあとに出口が空いても移さない。
+	//    もう一度ゴールの高さに届いたときだけ、頭突きとふたの開きをもう一度出して、遅らせたあとで移す。
 	Toy = Begin(TEXT("Blocked exit case"));
 	if (!Toy || !Store(TEXT("Blocked toy is stored"), Toy)) return false;
 	TArray<UBoxComponent*> Blockers;
@@ -242,16 +243,51 @@ bool FTBBoxEscapeLidTest::RunTest(const FString&)
 	TestEqual(TEXT("The blocked goal still bumps once"), Bumps, BumpsBeforeBlocked + 1);
 	Course->Tick(PastDelay);
 	TestEqual(TEXT("Every exit blocked keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Course->Tick(PastDelay);
+	Course->Tick(PastDelay);
+	TestEqual(TEXT("Staying at the goal height after a failure does not bump every frame"), Bumps, BumpsBeforeBlocked + 1);
 	Place(Toy, Low, 0.f); // 箱の底へ着地した。
 	for (auto* Collision : Blockers) Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Course->Tick(.1f);
 	Course->Tick(.1f);
 	TestEqual(TEXT("An exit that opens after landing on the bottom does not warp the toy"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	TestTrue(TEXT("The toy stays at the bottom"), Toy->GetActorLocation().Equals(Low, 1.f));
-	Place(Toy, Finish, 0.1f);
-	TestEqual(TEXT("Reaching the goal height again releases the toy"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	TestEqual(TEXT("Waiting at the bottom sends no bump"), Bumps, BumpsBeforeBlocked + 1);
+	Place(Toy, Finish, 0.f);
+	TestEqual(TEXT("Reaching the goal height again bumps the lid again"), Bumps, BumpsBeforeBlocked + 2);
+	TestEqual(TEXT("The retry also waits for the delay"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Course->Tick(PastDelay);
+	TestEqual(TEXT("After the delay the retry releases the toy"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	TestTrue(TEXT("It reaches the safe exit"), Toy->GetActorLocation().Equals(ExitLocation, 1.f));
-	TestEqual(TEXT("The retry does not bump again"), Bumps, BumpsBeforeBlocked + 1);
+	TestEqual(TEXT("The release sends no extra bump"), Bumps, BumpsBeforeBlocked + 2);
+	// リザルトの演出でふたを持っている間に、遅れて届いた脱出の合図は、手放したあとに開き直さない。
+	Lid->HoldForResult(.5f);
+	Box->OnEscapeOpened.Broadcast();
+	Lid->Tick(EscapeFull);
+	Lid->HoldForResult(-1.f);
+	Lid->Tick(EscapeFull);
+	TestTrue(TEXT("A late escape signal during the result hold does not reopen the lid after release"), LidAngle() < .5f);
+
+	// 全開のところへ2人目の脱出の合図が来て開き直しても、移すまで開いたままにする。普通の値では延ばさず、決まった時間で閉じはじめる。
+	Lid->Tick(CloseAll);
+	Box->OnEscapeOpened.Broadcast();
+	Lid->Tick(L.EscapeOpenSeconds + L.EscapeHoldSeconds - .05f);
+	Box->OnEscapeOpened.Broadcast();
+	Lid->Tick(L.EscapeHoldSeconds - .05f);
+	TestTrue(TEXT("With normal data the reopened lid is still open just before the hold ends"), FMath::IsNearlyEqual(LidAngle(), L.EscapeOpenAngle, 1.5f));
+	Lid->Tick(.25f);
+	TestTrue(TEXT("With normal data the hold is not extended and the lid starts closing"), LidAngle() < L.EscapeOpenAngle - 5.f);
+	// データを変な値（開いたままの時間より遅らせる秒が長い）にしても、2人目の合図から移すまで開いている。
+	Lid->Tick(CloseAll);
+	Feel.Lid.EscapeHoldSeconds = .1f;
+	Feel.Lid.EscapeReleaseDelay = .5f;
+	Box->OnEscapeOpened.Broadcast();
+	Lid->Tick(Feel.Lid.EscapeOpenSeconds + .05f);
+	Box->OnEscapeOpened.Broadcast();
+	Lid->Tick(Feel.Lid.EscapeReleaseDelay - .05f);
+	TestTrue(TEXT("With odd data the lid stays open until the release delay after the second signal"),
+	         FMath::IsNearlyEqual(LidAngle(), Feel.Lid.EscapeOpenAngle, 1.5f));
+	Lid->Tick(CloseAll);
 	return !HasAnyErrors();
 }
 
@@ -268,8 +304,12 @@ bool FTBBoxLidHingeTest::RunTest(const FString&)
 	auto* Box = State->Box.Get();
 	auto* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (!TestNotNull(TEXT("Cube mesh"), Cube)) return false;
+	// 本物のデータ（開く角度が0でも正しい設定）に頼らないよう、決まった正の角度（初期値の60度）で確かめる。
+	auto& Feel = const_cast<UTBPresentationData&>(TB::PresentationData());
+	const FTBLidFeel OriginalFeel = Feel.Lid;
+	Feel.Lid = FTBLidFeel();
 	TArray<AActor*> Spawned;
-	ON_SCOPE_EXIT { for (auto* Actor : Spawned) if (IsValid(Actor)) Actor->Destroy(); };
+	ON_SCOPE_EXIT { Feel.Lid = OriginalFeel; for (auto* Actor : Spawned) if (IsValid(Actor)) Actor->Destroy(); };
 	// 本物と同じ大きさ（800x600、厚さ2）の天井を、離れた場所に置く。ゴールは本物と同じく、中心から(+245,+240)。
 	struct FTrial { ATBBoxLid* Lid = nullptr; AStaticMeshActor* Ceiling = nullptr; FVector Center; };
 	auto Make = [&](ETBLidHingeSide Side, FVector Center)
