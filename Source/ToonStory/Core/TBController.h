@@ -55,6 +55,7 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientPreparationTravelCancelled();
 	void ToggleLeaveMenu();
+	bool CanUseLobbyShortcuts() const;
 	/** リザルトで自分が勝っておらず、勝った人を観戦している */
 	bool IsSpectatingResults() const;
 	/** 観戦で切り替えられる勝者。NPCを除き、箱の外 → 番号の小さい順 */

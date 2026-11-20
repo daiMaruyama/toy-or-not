@@ -3,13 +3,13 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Components/ComboBoxString.h"
 #include "TBTitleMenu.generated.h"
 
 class UTBSession;
 class UButton;
 class UTextBlock;
 class UTexture2D;
+class UScrollBox;
 
 /** Title menu; observes the existing session subsystem. */
 UCLASS()
@@ -116,16 +116,20 @@ private:
 	TWeakObjectPtr<class ALevelSequenceActor> StoryActor;
 	UPROPERTY(Transient) TObjectPtr<UWidget> Blackout;
 	UPROPERTY(Transient) TObjectPtr<UWidget> MenuLayer;
-	UPROPERTY(Transient) TArray<TObjectPtr<UWidget>> RoomCardWidgets;
+	UPROPERTY(Transient) TObjectPtr<UWidget> FinderOverlay;
 	UPROPERTY(Transient) TObjectPtr<UTBSession> Session;
 	UPROPERTY(Transient) TObjectPtr<UButton> JoinButton;
-	UPROPERTY(Transient) TObjectPtr<UComboBoxString> RoomList;
+	UPROPERTY(Transient) TObjectPtr<UButton> RefreshRoomsButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> BackFromFinderButton;
+	UPROPERTY(Transient) TObjectPtr<UScrollBox> RoomList;
+	int32 SelectedRoom = INDEX_NONE;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> StatusText;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> RoomHintText;
 	UFUNCTION() void Refresh();
 	UFUNCTION() void Hover();
 	UFUNCTION() void Host();
 	UFUNCTION() void Find();
+	UFUNCTION() void CloseFinder();
 	UFUNCTION() void Join();
 	UFUNCTION()
 	void Quit();
@@ -136,20 +140,18 @@ private:
 	void RefreshHelpText();
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpToyText;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpHumanText;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpControlsText;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpKeyLabels;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitleContent;
 	UPROPERTY(Transient) TObjectPtr<UWidget> HelpOverlay;
 	UPROPERTY(Transient) TObjectPtr<UButton> CloseHelpButton;
 	// オプション画面（UTBOptionsMenu）を開く。ロビー・試合中のメニューと同じ画面。
 	UFUNCTION() void OpenOptions();
 	TWeakObjectPtr<class UTBOptionsMenu> Options;
-	UFUNCTION()
-	class UWidget* RoomLabel(FString Item);
 	UPROPERTY(Transient)
 	TObjectPtr<class UFont> PaperFont;
 	UPROPERTY(Transient)
 	TObjectPtr<class UFont> LogoFont;
 	UPROPERTY(Transient)
 	TObjectPtr<class UTexture2D> PaperTexture;
-	UFUNCTION() void SelectionChanged(FString Item, ESelectInfo::Type SelectionType);
+	UFUNCTION() void RoomChecked(bool bChecked);
 };

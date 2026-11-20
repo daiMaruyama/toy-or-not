@@ -177,6 +177,7 @@ namespace
 			if (PC.IsValid()) PC->ClientPreparationRole(OldRound, OldTeam);
 			if (HUD.IsValid())
 			{
+				HUD->DismissConfirmation();
 				HUD->NotifyHitBoxClick(TEXT("ClosePlayers"));
 				HUD->NotifyHitBoxClick(bOldSettings ? TEXT("OpenSettings") : TEXT("CloseSettings"));
 			}
@@ -242,6 +243,12 @@ namespace
 						    *Texture->GetName(), Texture->GetNumMips()), Texture->GetNumMips() > 1);
 				}
 				if (TitleSlateButton.IsValid() && !CheckTitleButton()) return true;
+				if (!bTitle && Step == 47)
+				{
+					if (!Test->TestNotNull(TEXT("Exit confirmation offers cancel"), HUD->GetHitBoxWithName(TEXT("CancelLeave"))) ||
+					    !Test->TestNotNull(TEXT("Exit confirmation offers confirm"), HUD->GetHitBoxWithName(TEXT("ConfirmLeave"))) ||
+					    !Test->TestNull(TEXT("Lobby controls are hidden behind the prompt"), HUD->GetHitBoxWithName(TEXT("Ready")))) return true;
+				}
 				if (!bTitle && (Step == 1 || Step == 2 || Step == 23))
 				{
 					const bool bNPCEnabled = Step != 1;
@@ -249,7 +256,8 @@ namespace
 					    HUD->GetHitBoxWithName(TEXT("DraftMoreNPCHumans")) != nullptr, bNPCEnabled) ||
 					    !Test->TestEqual(TEXT("NPC toy controls appear only while enabled"),
 					    HUD->GetHitBoxWithName(TEXT("DraftMoreNPCToys")) != nullptr, bNPCEnabled)) return true;
-					if (!Test->TestNotNull(TEXT("Stage has the shared settings entry"), HUD->GetHitBoxWithName(TEXT("OpenOptions")))) return true;
+					if (!Test->TestNotNull(TEXT("Stage has the shared settings entry"), HUD->GetHitBoxWithName(TEXT("OpenOptions"))) ||
+					    !Test->TestNotNull(TEXT("Room can be left from the stage menu"), HUD->GetHitBoxWithName(TEXT("Leave")))) return true;
 				}
 				if (!bTitle && ((Step >= 10 && Step <= 15 && Step != 12) || Step == 19 || Step == 21 || Step == 22 || Step >= 24) &&
 				    !Test->TestFalse(TEXT("HUD capture is not obscured by preparation masking"), PC->ShouldHidePreparationView()))
@@ -315,6 +323,8 @@ namespace
 			if (bCompactHintsOnly && Step == 0) Step = 9;
 			else if (bCompactHintsOnly && Step == 10) Step = 28;
 			else if (bCompactHintsOnly && Step == 36) Step = 40;
+			else if (!bTitle && Step == 0) Step = 47;
+			else if (!bTitle && Step == 47) Step = 1;
 			else if (bTitle && Step == 0) Step = 4;
 			else if (bTitle && Step == 9) { RestoreTitleButton(); Step = 1; }
 			else if (!bTitle && Step == 8) Step = 23;
@@ -699,7 +709,7 @@ namespace
 				break;
 			case 3:
 			{
-				if (!ClickTitle(TEXT("OptionsButton"))) return false;
+				if (!ClickTitle(TEXT("BackFromFinder")) || !ClickTitle(TEXT("OptionsButton"))) return false;
 				TArray<UUserWidget*> Found;
 				UWidgetBlueprintLibrary::GetAllWidgetsOfClass(World.Get(), Found, UTBOptionsMenu::StaticClass(), true);
 				if (!Test->TestEqual(TEXT("Title opens shared options"), Found.Num(), 1)) return false;
@@ -755,7 +765,14 @@ namespace
 				HUD->NotifyHitBoxClick(TEXT("CloseSettings"));
 				Name = TEXT("10-lobby");
 				break;
+			case 47:
+				HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+				HUD->NotifyHitBoxClick(TEXT("Leave"));
+				Name = TEXT("10b-confirm-leave");
+				break;
 			case 1:
+				HUD->DismissConfirmation();
+				HUD->NotifyHitBoxClick(TEXT("CancelStage"));
 				// Local screenshot state only; the fixture restores the original rules.
 				State->Settings.NPCHumans = State->Settings.NPCToys = 0;
 				HUD->NotifyHitBoxClick(TEXT("OpenSettings"));

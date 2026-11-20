@@ -12,6 +12,7 @@ class SWidget;
 class UGameViewportClient;
 class UNetDriver;
 class UTexture2D;
+struct FWorldContext;
 
 /**
  * ロード画面を出し入れする。ほかの処理は変えず、読むだけでつなぐ。
@@ -29,6 +30,7 @@ public:
 	virtual void Deinitialize() override;
 
 	virtual void Tick(float DeltaTime) override;
+	bool IsCoveringViewport() const { return bHardLoad || Overlay.IsValid(); }
 	// 移動の向きの文字を決める部品。移動の行き先（URLから取ったマップ名）がわかっていればそれを優先し、なければGameStateから決めた値を使う。
 	static FString MapNameFromURL(const FString& URL);
 	static bool IsReturningLabel(const FString& DestMap, bool bReturningFromState);
@@ -39,7 +41,7 @@ public:
 	virtual ETickableTickType GetTickableTickType() const override { return ETickableTickType::Conditional; }
 
 private:
-	void PreLoadMap(const FString& MapName);
+	void PreLoadMap(const FWorldContext& Context, const FString& MapName);
 	void PostLoadMap(UWorld* World);
 	void Failed(UWorld* World, UNetDriver* Driver, ENetworkFailure::Type Type, const FString& Error);
 	void TravelFailed(UWorld* World, ETravelFailure::Type Type, const FString& Error);
@@ -54,9 +56,9 @@ private:
 
 	// MoviePlayer に渡す絵と、ゲーム画面にかぶせる絵。同じ部品を2か所に付けないよう分ける。
 	TSharedPtr<STBLoadingScreen> MovieScreen;
-	// おもちゃの絵。ロードの直前に読むと出だしの1フレームが仮の絵（灰色の市松）になるので、起動時から持っておく。
+	// The same film still covers decoder startup and devices without a supported movie player.
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UTexture2D>> ToyTextures;
+	TObjectPtr<UTexture2D> FilmPoster;
 	TSharedPtr<STBLoadingScreen> Screen;
 	TSharedPtr<SWidget> Overlay;
 	TWeakObjectPtr<UGameViewportClient> OverlayViewport;

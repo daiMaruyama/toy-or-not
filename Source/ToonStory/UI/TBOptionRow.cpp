@@ -36,11 +36,16 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 		Block->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
 		return Block;
 	};
-	auto Arrow = [&](const TCHAR* Glyph, float X)
+	auto Arrow = [&](const TCHAR* Glyph, float X, const TCHAR* ArtName)
 	{
 		auto* Button = WidgetTree->ConstructWidget<UButton>();
-		Button->SetStyle(TBPaper::CompactButtonStyle());
-		Button->SetContent(Text(FText::FromString(Glyph), 19));
+		const FSlateBrush Keycap = TBPaper::ImageBrush(TBPaper::Art(ArtName));
+		Button->SetStyle(TBPaper::ArtButtonStyle(Keycap));
+		auto* Mark = Text(FText::FromString(Glyph), 20);
+		Mark->SetJustification(ETextJustify::Center);
+		Mark->SetRenderTranslation(FVector2D(0, -5));
+		Mark->SetToolTipText(FText::GetEmpty());
+		Button->SetContent(Mark);
 		Place(Button, X + 20, 5, 44, 40);
 		return Button;
 	};
@@ -48,9 +53,9 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 	Divider->SetBrushColor(TBPaper::Outline.CopyWithNewOpacity(.28f));
 	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
 	Place(Divider, 8, 49, 784, 1);
-	Place(Text(Label, 19), 8, 10, 224, 36);
-	DownButton = Arrow(bBar ? TEXT("−") : TEXT("‹"), 240);
-	UpButton = Arrow(bBar ? TEXT("+") : TEXT("›"), 716);
+	Place(Text(Label, 19), 8, 6, 224, 36);
+	DownButton = Arrow(bBar ? TEXT("−") : TEXT("‹"), 240, TEXT("Frame_SquareLavender"));
+	UpButton = Arrow(bBar ? TEXT("+") : TEXT("›"), 716, TEXT("Frame_SquareBrown"));
 	ValueText = Text(FText::GetEmpty(), 19);
 	if (bBar)
 	{
@@ -59,11 +64,11 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 		// マウスでも目盛り（StepSize）にそろえる。表示より前に決める値なので、ここで入れる。
 		Slider->MouseUsesStep = true;
 		FSliderStyle SliderStyle = Slider->GetWidgetStyle();
-		SliderStyle.SetNormalBarImage(FSlateRoundedBoxBrush(TBPaper::Teal, 4.f, TBPaper::Outline, 1.5f));
-		SliderStyle.SetHoveredBarImage(FSlateRoundedBoxBrush(TBPaper::Teal, 4.f, TBPaper::Outline, 1.5f));
-		SliderStyle.SetBarThickness(8.f);
-		SliderStyle.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::Gold, 8.f, TBPaper::Outline, 2.5f, FVector2D(22, 26)));
-		SliderStyle.SetHoveredThumbImage(FSlateRoundedBoxBrush(TBPaper::Cream, 8.f, TBPaper::Outline, 3.f, FVector2D(24, 28)));
+		SliderStyle.SetNormalBarImage(FSlateRoundedBoxBrush(TBPaper::Teal, 5.f, TBPaper::Outline, 1.8f));
+		SliderStyle.SetHoveredBarImage(FSlateRoundedBoxBrush(TBPaper::Teal, 5.f, TBPaper::Outline, 1.8f));
+		SliderStyle.SetBarThickness(10.f);
+		SliderStyle.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::Gold, 11.f, TBPaper::Outline, 2.5f, FVector2D(22, 22)));
+		SliderStyle.SetHoveredThumbImage(FSlateRoundedBoxBrush(TBPaper::Paper, 11.f, TBPaper::Outline, 2.5f, FVector2D(22, 22)));
 		SliderStyle.SetDisabledThumbImage(FSlateRoundedBoxBrush(TBPaper::Cream, 8.f, TBPaper::Muted, 2.f, FVector2D(22, 26)));
 		Slider->SetWidgetStyle(SliderStyle);
 		Slider->SetSliderBarColor(FLinearColor::White);
@@ -72,12 +77,17 @@ void UTBOptionRow::Build(const FText& Label, UFont* Font, UTexture2D* Paper, boo
 		Slider->OnMouseCaptureBegin.AddDynamic(this, &ThisClass::SliderGrabbed);
 		Slider->OnMouseCaptureEnd.AddDynamic(this, &ThisClass::SliderReleased);
 		Place(Slider, 340, 13, 250, 24);
-		Place(ValueText, 606, 10, 102, 36);
+		Place(ValueText, 606, 6, 102, 36);
 	}
 	else
 	{
+		auto* ValuePlate = WidgetTree->ConstructWidget<UBorder>();
+		ValuePlate->SetBrush(TBPaper::SlicedArtwork(TBPaper::Art(TEXT("Frame_StageSelect")),
+		    FVector2D(196, 42), FMargin(.08f, .29f)));
+		ValuePlate->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Place(ValuePlate, 317, 5, 406, 40);
 		ValueText->SetJustification(ETextJustify::Center);
-		Place(ValueText, 330, 10, 380, 36);
+		Place(ValueText, 330, 6, 380, 36);
 	}
 	DownButton->OnClicked.AddDynamic(this, &ThisClass::Down);
 	UpButton->OnClicked.AddDynamic(this, &ThisClass::Up);

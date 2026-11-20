@@ -21,6 +21,7 @@
 #include "Data/TBRuleData.h"
 #include "UI/TBChatBox.h"
 #include "UI/TBHUD.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/TBGameViewportClient.h"
 #include "HAL/PlatformTime.h"
 #include "InputKeyEventArgs.h"
@@ -635,6 +636,7 @@ void ATBController::SetupInputComponent()
 
 void ATBController::ToggleLeaveMenu()
 {
+	if (auto* HUD = Cast<ATBHUD>(GetHUD()); HUD && HUD->DismissConfirmation()) return;
 	const auto* State = TB::GS(GetWorld());
 	if (State && State->Phase == ETBPhase::Lobby && !State->bTravelPending && !IsChatOpen())
 	{
@@ -686,11 +688,18 @@ void ATBController::TBQuit()
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
+bool ATBController::CanUseLobbyShortcuts() const
+{
+	const auto* State = TB::GS(GetWorld());
+	const auto* HUD = Cast<ATBHUD>(GetHUD());
+	const auto* Loading = UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(GetGameInstance());
+	return State && State->Phase == ETBPhase::Lobby && !State->bTravelPending &&
+	    !(Loading && Loading->IsCoveringViewport()) && !(HUD && HUD->IsChatBlocked());
+}
+
 void ATBController::TBReady()
 {
-	const auto* HUD = Cast<ATBHUD>(GetHUD());
-	if (HUD && HUD->IsStagePickerOpen()) return;
-	ServerReady();
+	if (CanUseLobbyShortcuts()) ServerReady();
 }
 
 void ATBController::TBLobby()
@@ -708,9 +717,7 @@ void ATBController::ServerReturnToLobby_Implementation()
 
 void ATBController::TBStart()
 {
-	const auto* HUD = Cast<ATBHUD>(GetHUD());
-	if (HUD && HUD->IsStagePickerOpen()) return;
-	ServerStart();
+	if (CanUseLobbyShortcuts()) ServerStart();
 }
 
 void ATBController::TBRules(int32 HumanCount, int32 ToyCount, float Seconds, int32 Items)

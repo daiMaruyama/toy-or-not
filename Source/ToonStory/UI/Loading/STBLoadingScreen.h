@@ -3,12 +3,16 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Math/RandomStream.h"
+#include "MediaPlayer.h"
+#include "MediaTexture.h"
 #include "Styling/SlateBrush.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SLeafWidget.h"
 
 class UFont;
 class UTexture2D;
+
+enum class ETBLoadingBackdrop { Illustrations, NativeMovie, ViewportMovie };
 
 /**
  * ロード画面の絵。紙色の小さな遊び場で、おもちゃが積み木の陰から顔を出し、箱の陰へ小走りで隠れる。
@@ -17,18 +21,30 @@ class UTexture2D;
 class STBLoadingScreen : public SLeafWidget
 {
 public:
-	SLATE_BEGIN_ARGS(STBLoadingScreen) {}
+	SLATE_BEGIN_ARGS(STBLoadingScreen) : _Backdrop(ETBLoadingBackdrop::Illustrations), _Poster(nullptr) {}
+		SLATE_ARGUMENT(ETBLoadingBackdrop, Backdrop)
+		SLATE_ARGUMENT(UTexture2D*, Poster)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	~STBLoadingScreen();
+	static const TCHAR* MovieName() { return TEXT("ToyDance"); }
+	double GetShownAt() const { return ShownAt; }
+	void ShowNativePoster() { bShowNativePoster.Store(true); }
+	void SetMovieVisible(bool bVisible, double MovieStartedAt = 0.);
+	virtual void Tick(const FGeometry& Geometry, double CurrentTime, float DeltaTime) override;
+#if WITH_DEV_AUTOMATION_TESTS
+	UMediaPlayer* GetPlaybackForReview() const { return Player.Get(); }
+#endif
 	// 下に出す状態の文字。ロード中は描画が別スレッドなので、ロードを始める前に決めておく。
-	void SetStatus(const FText& Text) { Status = Text; }
+	void SetStatus(const FText& Text);
 	// 出しはじめ。黒から明けて出てくる。
 	void Restart() { ShownAt = FPlatformTime::Seconds(), Exit = 0.f, ToyEndsAt = -1.0; }
 	// ロード中に MoviePlayer が描いていた絵から、時間・おもちゃ・文字を引き継ぐ。同じ部品を2か所に付けないため、別に作って続ける。
 	void ContinueFrom(const STBLoadingScreen& Other)
 	{
-		Status = Other.Status, ShownAt = Other.ShownAt, Started = Other.Started, Exit = 0.f, ToyEndsAt = -1.0;
+		SetStatus(Other.Status);
+		ShownAt = Other.ShownAt, Started = Other.Started, Exit = 0.f, ToyEndsAt = -1.0;
 		Loop = Other.Loop, Toy = Other.Toy;
 	}
 	// 消え具合。0で出ている、0.5で真っ黒、1で消えきる（下のゲーム画面が明けて見える）。
@@ -45,6 +61,15 @@ public:
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(1280, 720); }
 
 private:
+	ETBLoadingBackdrop Backdrop = ETBLoadingBackdrop::Illustrations;
+	TAtomic<bool> bShowNativePoster{false};
+	bool bStartMovieWhenReady = false;
+	double ResumeMovieFrom = 0.;
+	TStrongObjectPtr<UMediaPlayer> Player;
+	TStrongObjectPtr<UMediaTexture> Film;
+	TStrongObjectPtr<UTexture2D> Poster;
+	FSlateBrush FilmBrush, PosterBrush;
+	FVector2f StatusSize = FVector2f::ZeroVector;
 	TArray<TStrongObjectPtr<UTexture2D>> Textures;
 	TArray<FSlateBrush> Brushes;
 	TStrongObjectPtr<UFont> Font;

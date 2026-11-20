@@ -25,6 +25,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
+#include "InputCoreTypes.h"
 #include "Misc/PackageName.h"
 
 static TAutoConsoleVariable<int32> CVarTBDebugHUD(TEXT("tb.DebugHUD"), 0, TEXT("Show detailed match diagnostics."));
@@ -136,7 +137,7 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 			return true;
 		}
 		if (Stage != INDEX_NONE) DraftStage = Stage;
-		else if (Name == TEXT("DraftNextStage"))
+		else if (Name == TEXT("DraftNextStage") || Name == TEXT("DraftPreviousStage"))
 			DraftStage = DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::DemoStageId : TBLobbySettings::HouseStageId;
 		else if (Name == TEXT("DraftLessTime")) StageDraft.Duration -= Match.DurationStep;
 		else if (Name == TEXT("DraftMoreTime")) StageDraft.Duration += Match.DurationStep;
@@ -201,7 +202,7 @@ void ATBHUD::DrawLobby()
 			DrawRect(Color, X + PX * S, Y + PY * S, W * S, H * S);
 		}
 	};
-	auto DrawNotice = [&](float PY, float Width, float AvailableHeight, bool IncludeStatus = false)
+	auto DrawNotice = [&](float PX, float PY, float Width, float AvailableHeight, bool IncludeStatus = false)
 	{
 		constexpr float FontScale = .85f;
 		float TextWidth = 0, TextHeight = 0;
@@ -251,9 +252,9 @@ void ATBHUD::DrawLobby()
 		}
 		if (!Line.IsEmpty() && Lines.Num() < MaxLines) Lines.Add(Line);
 		if (Lines.IsEmpty()) return;
-		Panel(28, PY, Width, 16.f + Lines.Num() * LineHeight, TBPaper::Cream);
+		Panel(PX, PY, Width, 16.f + Lines.Num() * LineHeight, TBPaper::Cream);
 		for (int32 Index = 0; Index < Lines.Num(); ++Index)
-			Text(Lines[Index], 42, PY + 8.f + 10.f * FontScale + Index * LineHeight, FontScale, Ink);
+			Text(Lines[Index], PX + 14, PY + 8.f + 10.f * FontScale + Index * LineHeight, FontScale, Ink);
 	};
 	auto Button = [&](FName Id, const FString& Label, float PX, float PY, float W,
 	                  bool Enabled = true, bool Selected = false, float Height = 42)
@@ -281,25 +282,24 @@ void ATBHUD::DrawLobby()
 	if (!bLobbySettingsOpen)
 	{
 		const float Bottom = (Canvas->ClipY - Y) / S - 84;
-		FramePanel(X + 28 * S, Y + (Bottom - 42) * S, 1144 * S, 110 * S);
-		Art(TEXT("Tape_Cream"), 52, Bottom - 53, 104, 22);
-		Art(TEXT("Icon_Check"), 1130, Bottom - 32, 24, 24);
-		Text(!EnoughPlayers ? TBText::Literal(TEXT("Canvas.NeedsTeams"))
-		     : !EveryoneReady ? TBText::Literal(TEXT("Canvas.WaitReady"))
-		     : State->bTravelPending ? TBText::Literal(TEXT("Canvas.TravelStage")) : TBText::Literal(TEXT("Canvas.EveryoneReady")),
-		     48, Bottom - 30, .9f, Ink);
+		RoundedPanel(TBPaper::Paper, X + 28 * S, Y + (Bottom - 44) * S, 1144 * S, 103 * S, 15, 2.5f);
+		const TCHAR* Status = !EnoughPlayers ? TEXT("Canvas.NeedsTeams") :
+		    State->bTravelPending ? TEXT("Canvas.TravelStage") : !EveryoneReady ? TEXT("Canvas.WaitReady") : TEXT("Canvas.EveryoneReady");
+		DrawFittedText(TBText::String(Status), Muted, X + 50 * S, Y + (Bottom - 29) * S, 1100 * S, .84f * S);
+		DrawRect(TBPaper::Outline.CopyWithNewOpacity(.19f), X + 600 * S, Y + (Bottom + 3) * S, 1.5f * S, 36 * S);
 		const FString ReadyKey = TB::KeyLabel(PC, TB::Keys::LobbyReady);
 		const FString StartKey = TB::KeyLabel(PC, TB::Keys::LobbyStart);
 		Button(TEXT("Ready"),
 		       Local && Local->bReady ? FString::Format(TBText::Literal(TEXT("Canvas.UnreadyKey")), {*ReadyKey}) : FString::Format(TBText::Literal(TEXT("Canvas.ReadyKey")), {*ReadyKey}),
-		       48, Bottom, 240, Local != nullptr && !State->bTravelPending, Local && Local->bReady);
-		Text(FString::Format(TBText::Literal(TEXT("Canvas.ReadyCount")), {ReadyCount, PlayerCount}), 308, Bottom + 2, 1.05f, Ink);
-		DrawProgress(float(ReadyCount) / FMath::Max(1, PlayerCount), X + 308 * S, Y + (Bottom + 30) * S, 220 * S, 8 * S, TBPaper::Teal);
+		       308, Bottom, 260, Local != nullptr && !State->bTravelPending, Local && Local->bReady);
+		DrawFittedText(FString::Format(TBText::Literal(TEXT("Canvas.ReadyCount")), {ReadyCount, PlayerCount}), Ink,
+		    X + 50 * S, Y + (Bottom + 3) * S, 229 * S, .99f * S, true);
+		DrawProgress(float(ReadyCount) / FMath::Max(1, PlayerCount), X + 50 * S, Y + (Bottom + 30) * S, 229 * S, 8 * S, TBPaper::Teal);
 		Button(TEXT("OpenSettings"), TBText::Literal(TEXT("Canvas.SettingsKey")), 622, Bottom, 216);
 		Button(TEXT("Start"),
 		       PC->HasAuthority() ? FString::Format(TBText::Literal(TEXT("Canvas.StartKey")), {*StartKey}) : FString(TBText::Literal(TEXT("Canvas.WaitHost"))),
 		       858, Bottom, 294, CanStart, CanStart);
-		DrawNotice(Bottom - 166, 1144, 110);
+		DrawNotice(656, Bottom - 161, 516, 108);
 		return;
 	}
 	DrawRect(FLinearColor(.025f, .019f, .015f, .64f), 0, 0, Canvas->ClipX, Canvas->ClipY);
@@ -317,31 +317,46 @@ void ATBHUD::DrawLobby()
 		auto Label = [&](const TCHAR* Key, float PX, float PY, float Width, float Size = 1.f)
 		{ DrawFittedText(TBText::String(Key), Ink, X + PX * S, Y + PY * S, Width * S, Size * S, true); };
 		float MX = 0, MY = 0;
-		PC->GetMousePosition(MX, MY);
+		const bool HasPointer = PC->GetMousePosition(MX, MY);
+		const bool PointerDown = PC->IsInputKeyDown(EKeys::LeftMouseButton);
 		auto Hovered = [&](float PX, float PY, float Width, float Height)
-		{ return MX >= X + PX * S && MX < X + (PX + Width) * S && MY >= Y + PY * S && MY < Y + (PY + Height) * S; };
-		auto FlatButton = [&](FName Id, const FString& Caption, float PX, float PY, float Width, float Height,
-		                      bool Enabled, FLinearColor Fill, float Size = .85f, bool Selected = false)
+		{ return HasPointer && MX >= X + PX * S && MX < X + (PX + Width) * S && MY >= Y + PY * S && MY < Y + (PY + Height) * S; };
+		auto PaperControl = [&](FName Id, const FString& Caption, float PX, float PY, float Width, float Height,
+		                        bool Enabled, FLinearColor Fill, float Size = .85f, bool Selected = false, FName Icon = NAME_None)
 		{
 			const bool Over = Enabled && Hovered(PX, PY, Width, Height);
-			RoundedPanel(!Enabled ? FMath::Lerp(Fill, TBPaper::Cream, .65f) : Over && !Selected ? TBPaper::Gold : Fill,
-			    X + PX * S, Y + PY * S, Width * S, Height * S, 5, Over ? 3 : 2.5f);
-			float TW = 0, TH = 0;
-			GetTextSize(Caption, TW, TH, HeadingFont, Size * S);
-			const float Fit = FMath::Min(1.f, (Width - 16) * S / FMath::Max(1.f, TW));
-			DrawFittedText(Caption, !Enabled ? Muted : Selected && (Id == TEXT("Child") || Id == TEXT("Toy")) ? TBPaper::Paper : Ink,
-			    X + (PX + 8) * S, Y + PY * S + (Height * S - TH * Fit) * .5f + 10 * Size * S * Fit,
-			    (Width - 16) * S, Size * S, true, true);
-			if (Selected)
+			const bool Pressed = Over && PointerDown;
+			const float FaceY = PY + (Pressed ? 1.5f : Over ? -1.5f : 0.f);
+			const float Depth = Enabled && !Pressed ? 2.5f : .75f;
+			const FLinearColor Face = !Enabled ? FMath::Lerp(Fill, TBPaper::Paper, .6f)
+			    : Pressed ? FMath::Lerp(Fill, Ink, .16f) : Fill;
+			const FLinearColor Edge = Enabled ? TBPaper::Outline : Muted;
+			RoundedPanel(Edge, X + PX * S, Y + (FaceY + Depth) * S, Width * S, Height * S, 6, 0);
+			RoundedPanel(Face, X + PX * S, Y + FaceY * S, Width * S, Height * S, 6, 2, Edge);
+			if (Over && !Pressed)
+				RoundedPanel(Face, X + (PX + 3.5f) * S, Y + (FaceY + 3.5f) * S,
+				    (Width - 7) * S, (Height - 7) * S, 3, 1.25f, TBPaper::Paper);
+			const bool HasIcon = !Icon.IsNone() && ArtTextures.Contains(Icon);
+			if (HasIcon)
+				Art(Icon, PX + 8, FaceY + (Height - 26) * .5f, 26, 26);
+			else if (Selected)
 			{
-				const float CX = X + (PX + 8) * S, CY = Y + (PY + Height * .5f) * S;
-				const FLinearColor CheckColor = Id == TEXT("Either") ? Ink : TBPaper::Paper;
-				DrawSmoothPolygon({{CX, CY}, {CX + 2 * S, CY - 2 * S}, {CX + 7 * S, CY + 3 * S},
-				    {CX + 5 * S, CY + 5 * S}}, CheckColor);
-				DrawSmoothPolygon({{CX + 4 * S, CY + 2 * S}, {CX + 11 * S, CY - 6 * S},
-				    {CX + 13 * S, CY - 4 * S}, {CX + 6 * S, CY + 4 * S}}, CheckColor);
+				Art(TEXT("Icon_Check"), PX + 6, FaceY + (Height - 19) * .5f, 19, 19);
+			}
+			const float Padding = HasIcon ? 37.f : Selected ? 27.f : 8.f;
+			if (!Caption.IsEmpty())
+			{
+				const float TextWidth = (Width - Padding - 8) * S;
+				float TW = 0, TH = 0;
+				GetTextSize(Caption, TW, TH, HeadingFont, Size * S);
+				const float Fit = FMath::Min(1.f, TextWidth / FMath::Max(1.f, TW));
+				const bool LightText = Selected && (Id == TEXT("Child") || Id == TEXT("Toy"));
+				DrawFittedText(Caption, LightText ? TBPaper::Paper : Enabled ? Ink : Muted,
+				    X + (PX + Padding) * S, Y + FaceY * S + (Height * S - TH * Fit) * .5f + 10 * Size * S * Fit,
+				    TextWidth, Size * S, true, true, LightText);
 			}
 			if (Enabled) AddHitBox({X + PX * S, Y + PY * S}, {Width * S, Height * S}, Id, true);
+			return FaceY - PY;
 		};
 		auto Wrapped = [&](const FString& Copy, float PX, float PY, float Width, float Size, int32 MaxLines, FLinearColor Color)
 		{
@@ -387,102 +402,129 @@ void ATBHUD::DrawLobby()
 		auto Stepper = [&](FName Less, FName More, const FString& Value, float PX, float PY, float Width,
 		                   bool CanLess, bool CanMore, float Height = 32.f, float ValueSize = 1.35f)
 		{
-			FlatButton(Less, TEXT("−"), PX, PY, Height, Height, Host && CanLess, TBPaper::Paper, .95f);
-			FlatButton(More, TEXT("+"), PX + Width - Height, PY, Height, Height, Host && CanMore, TBPaper::Paper, .95f);
+			auto Key = [&](FName Id, float KeyX, bool CanChange, bool Plus)
+			{
+				const FName Surface = Plus ? TEXT("Frame_SquareBrown") : TEXT("Frame_SquareLavender");
+				const bool Enabled = Host && CanChange;
+				const bool Over = Enabled && Hovered(KeyX, PY, Height, Height);
+				const float FaceY = PY + (Over ? PointerDown ? 1.5f : -1.5f : 0.f);
+				if (!Enabled)
+					RoundedPanel(FMath::Lerp(TBPaper::Cream, TBPaper::Paper, .5f), X + KeyX * S, Y + FaceY * S,
+					    Height * S, Height * S, Height * .2f, 1.25f, Muted);
+				else if (ArtTextures.Contains(Surface))
+				{
+					Art(Surface, KeyX, FaceY, Height, Height);
+					if (Over && !PointerDown)
+						DrawRect(TBPaper::Paper, X + (KeyX + Height * .22f) * S, Y + (FaceY + Height * .14f) * S,
+						    Height * .56f * S, 1.5f * S);
+				}
+				else
+					RoundedPanel(TBPaper::Cream, X + KeyX * S, Y + FaceY * S, Height * S, Height * S, 5, 2);
+				// Match the authored key faces with a crisp, centered symbol at either NPC or full size.
+				const float Bar = Height * .42f, Thick = Height * .085f;
+				const float CX = X + (KeyX + Height * .5f) * S, CY = Y + (FaceY + Height * .5f) * S;
+				const FLinearColor Symbol = Enabled ? Ink : Muted;
+				RoundedPanel(Symbol, CX - Bar * S * .5f, CY - Thick * S * .5f, Bar * S, Thick * S, Thick * .5f, 0);
+				if (Plus) RoundedPanel(Symbol, CX - Thick * S * .5f, CY - Bar * S * .5f, Thick * S, Bar * S, Thick * .5f, 0);
+				if (Enabled) AddHitBox({X + KeyX * S, Y + PY * S}, {Height * S, Height * S}, Id, true);
+			};
+			Key(Less, PX, CanLess, false);
+			Key(More, PX + Width - Height, CanMore, true);
 			Numerals(Value, PX + Height + 4, PY, Width - Height * 2 - 8, Height, ValueSize);
 		};
 
-		// One continuous sheet matches the approved mock; all copy and controls stay live.
-		RoundedPanel(TBPaper::Shadow, X + 4 * S, Y + 6 * S, 1200 * S, 740 * S, 24, 0, TBPaper::Shadow);
-		RoundedPanel(TBPaper::Cream, X, Y, 1200 * S, 740 * S, 24, 4);
-		RoundedPanel(TBPaper::Gold, X + 4 * S, Y + 4 * S, 1192 * S, 132 * S, 20, 0);
-		DrawRect(TBPaper::Cream, X + 4 * S, Y + 118 * S, 1192 * S, 24 * S);
-		DrawRect(TBPaper::Outline, X + 4 * S, Y + 116 * S, 1192 * S, 3 * S);
-		Art(TEXT("Icon_Stage"), 32, 28, 70, 70);
-		DrawFittedText(TBText::String(TEXT("Stage.Eyebrow")), Muted, X + 124 * S, Y + 34 * S, 650 * S, .72f * S);
-		Label(TEXT("Stage.Title"), 122, 66, 650, 1.65f);
-		FlatButton(TEXT("OpenOptions"), TEXT(""), 830, 37, 108, 44, true, TBPaper::Teal);
-		Art(TEXT("Icon_Settings"), 842, 47, 24, 24);
-		Label(TEXT("Stage.Options"), 874, 55, 54, .8f);
-		FlatButton(TEXT("Players"), TEXT(""), 956, 31, 212, 58, true, TBPaper::Paper);
-		DrawFittedText(TBText::String(TEXT("Stage.Room")), Muted, X + 972 * S, Y + 54 * S, 70 * S, .7f * S, true);
+		// Hard cover, cream pages, and two binding staples between the rules and stage photo.
+		RoundedPanel(TBPaper::Shadow, X + 3 * S, Y + 53 * S, 1200 * S, 654 * S, 23, 0);
+		RoundedPanel(TBPaper::Teal, X - 2 * S, Y + 47 * S, 1204 * S, 653 * S, 22, 3);
+		RoundedPanel(TBPaper::Paper, X, Y + 42 * S, 1200 * S, 651 * S, 21, 3);
+		RoundedPanel(TBPaper::Gold, X + 3 * S, Y + 45 * S, 1194 * S, 87 * S, 17, 0);
+		DrawRect(TBPaper::Gold, X + 3 * S, Y + 108 * S, 1194 * S, 23 * S);
+		DrawRect(TBPaper::Outline, X + 3 * S, Y + 131 * S, 1194 * S, 2 * S);
+		DrawRect(FMath::Lerp(TBPaper::Paper, TBPaper::Cream, .36f), X + 489 * S, Y + 133 * S, 708 * S, 494 * S);
+		DrawRect(Muted.CopyWithNewOpacity(.36f), X + 488 * S, Y + 133 * S, 1.4f * S, 494 * S);
+		for (const float StapleY : {196.f, 560.f})
+			RoundedPanel(TBPaper::Cream, X + 480 * S, Y + StapleY * S, 18 * S, 5 * S, 2.5f, 1.f, Muted);
+		Art(TEXT("Icon_Stage"), 29, 59, 63, 52);
+		Label(TEXT("Stage.Title"), 109, 80, 610, 1.65f);
+		PaperControl(TEXT("Leave"), TBText::String(Host ? TEXT("Root.Room.Close") : TEXT("Stage.Leave")),
+		    645, 65, 164, 43, !State->bTravelPending, TBPaper::Paper, .82f);
+		const float RoomLift = PaperControl(TEXT("Players"), TEXT(""), 827, 65, 182, 43, true, TBPaper::Paper);
+		DrawFittedText(TBText::String(TEXT("Stage.Room")), Muted, X + 839 * S, Y + (81 + RoomLift) * S, 83 * S, .7f * S, true);
 		Numerals(FText::Format(TBText::Get(TEXT("Stage.RoomPlayers")), PlayerCount, State->PlayerLimit).ToString(),
-		    1052, 31, 100, 58, 1.4f);
+		    922, 65 + RoomLift, 77, 43, 1.08f);
+		PaperControl(TEXT("OpenOptions"), TBText::String(TEXT("Stage.Options")), 1025, 65, 143, 43, true,
+		    TBPaper::Teal, .85f, false, TEXT("Icon_Settings"));
 
 		Label(TEXT("Stage.RulesTitle"), 32, 158, 232, 1.08f);
 		DrawSmoothPolygon({{X + 275 * S, Y + 158 * S}, {X + 472 * S, Y + 153 * S},
 		    {X + 472 * S, Y + 160 * S}, {X + 275 * S, Y + 165 * S}}, TBPaper::Teal);
-		for (const float LineY : {274.f, 344.f, 650.f})
-			DrawRect(Muted.CopyWithNewOpacity(.3f), X + 32 * S, Y + LineY * S, (LineY == 650 ? 1136 : 440) * S, 2 * S);
+		for (const float LineY : {267.f, 344.f, 465.f})
+			DrawRect(Muted.CopyWithNewOpacity(.32f), X + 32 * S, Y + LineY * S, 430 * S, 1.5f * S);
+		DrawRect(Muted.CopyWithNewOpacity(.42f), X + 3 * S, Y + 627 * S, 1194 * S, 1.5f * S);
 		Art(TEXT("Icon_Hourglass"), 40, 204, 32, 40);
 		Label(TEXT("Stage.Time"), 86, 214, 210, .94f);
-		DrawFittedText(TBText::String(TEXT("Stage.TimeHelp")), Muted, X + 86 * S, Y + 245 * S, 210 * S, .73f * S);
 		const int32 Seconds = FMath::RoundToInt(StageDraft.Duration);
 		Stepper(TEXT("DraftLessTime"), TEXT("DraftMoreTime"),
 		    Number(Seconds % 60 == 0 ? TEXT("Stage.Minutes") : TEXT("Stage.Seconds"), Seconds % 60 == 0 ? Seconds / 60 : Seconds),
 		    316, 210, 156, StageDraft.Duration > TB::Rules().Match.MinDuration, StageDraft.Duration < TB::Rules().Match.MaxDuration);
 		Art(TEXT("Icon_BatteryPickup"), 40, 282, 32, 40);
 		Label(TEXT("Stage.Batteries"), 86, 291, 210, .94f);
-		DrawFittedText(TBText::String(TEXT("Stage.BatteryHelp")), Muted, X + 86 * S, Y + 322 * S, 210 * S, .73f * S);
 		Stepper(TEXT("DraftFewerItems"), TEXT("DraftMoreItems"), Number(TEXT("Stage.Items"), StageDraft.RequiredItems),
 		    316, 286, 156, StageDraft.RequiredItems > 1, StageDraft.RequiredItems < TBLobbySettings::StageItemCount(DraftStage));
 
-		RoundedPanel(FMath::Lerp(TBPaper::Cream, TBPaper::Gold, .35f), X + 32 * S, Y + 358 * S, 440 * S, 168 * S, 10, 2.5f);
-		Art(TEXT("Icon_PlayerRatio"), 46, 370, 28, 28);
-		Label(TEXT("Canvas.ChooseTeam"), 84, 382, 260, .8f);
-		DrawFittedText(TBText::String(TEXT("Stage.PersonalChoice")), Muted, X + 354 * S, Y + 383 * S, 104 * S, .6f * S, false, true);
+		Label(TEXT("Canvas.ChooseTeam"), 32, 367, 430, .97f);
 		const bool CanChooseTeam = Local && !State->bTravelPending;
 		const ETBTeam Preference = Local ? Local->Preference : ETBTeam::None;
-		FlatButton(TEXT("Child"), TBText::String(TEXT("Canvas.Human")), 46, 408, 129, 38, CanChooseTeam,
+		PaperControl(TEXT("Child"), TBText::String(TEXT("Canvas.Human")), 32, 399, 136, 40, CanChooseTeam,
 		    Preference == ETBTeam::Human ? TBPaper::HumanBlue : TBPaper::Paper, .8f, Preference == ETBTeam::Human);
-		FlatButton(TEXT("Toy"), TBText::String(TEXT("Canvas.Toy")), 187, 408, 129, 38, CanChooseTeam,
+		PaperControl(TEXT("Toy"), TBText::String(TEXT("Canvas.Toy")), 179, 399, 136, 40, CanChooseTeam,
 		    Preference == ETBTeam::Toy ? Accent : TBPaper::Paper, .8f, Preference == ETBTeam::Toy);
-		FlatButton(TEXT("Either"), TBText::String(TEXT("Canvas.Either")), 328, 408, 130, 38, CanChooseTeam,
+		PaperControl(TEXT("Either"), TBText::String(TEXT("Canvas.Either")), 326, 399, 136, 40, CanChooseTeam,
 		    Preference == ETBTeam::None ? TBPaper::Teal : TBPaper::Paper, .8f, Preference == ETBTeam::None);
-		DrawFittedText(FText::Format(TBText::Get(TEXT("Stage.PreferenceSelected")),
-		    TBText::Get(Preference == ETBTeam::Human ? TEXT("Canvas.Human") : Preference == ETBTeam::Toy ? TEXT("Canvas.Toy") : TEXT("Canvas.Either"))).ToString(),
-		    Ink, X + 46 * S, Y + 463 * S, 412 * S, .72f * S);
-		Wrapped(TBText::String(TEXT("Stage.TeamHelp")), 46, 486, 412, .65f, 2, Muted);
 
-		Art(TEXT("Icon_Npc"), 40, 536, 38, 42);
-		Label(TEXT("Stage.NPCs"), 86, 549, 270, .87f);
-		DrawFittedText(Number(TEXT("Stage.NPCTotal"), NPCCount), Muted, X + 86 * S, Y + 575 * S, 264 * S, .72f * S);
+		Art(TEXT("Icon_Npc"), 32, 488, 38, 42);
+		Label(TEXT("Stage.NPCs"), 83, 503, 270, .94f);
 		const bool NPCEnabled = NPCCount > 0;
+		if (NPCEnabled)
+			DrawFittedText(Number(TEXT("Stage.NPCTotal"), NPCCount), Muted, X + 83 * S, Y + 531 * S, 260 * S, .72f * S);
 		const bool CanToggleNPC = Host && (NPCEnabled || CanAddNPC);
-		const float ToggleX = X + 412 * S, ToggleY = Y + 546 * S;
-		DrawFittedText(TBText::String(NPCEnabled ? TEXT("Options.On") : TEXT("Options.Off")), Muted,
-		    X + 358 * S, Y + 558 * S, 46 * S, .65f * S, false, true);
-		RoundedPanel(NPCEnabled ? TBPaper::Teal : FMath::Lerp(TBPaper::Cream, Muted, .35f), ToggleX, ToggleY, 60 * S, 32 * S, 16, 2.5f);
-		RoundedPanel(CanToggleNPC ? TBPaper::Paper : TBPaper::Cream,
-		    ToggleX + (NPCEnabled ? 33 : 5) * S, ToggleY + 5 * S, 22 * S, 22 * S, 11, 1);
+		const float ToggleX = X + 402 * S, ToggleY = Y + 495 * S;
+		const bool ToggleOver = CanToggleNPC && Hovered(402, 495, 60, 32);
+		const FLinearColor Track = NPCEnabled ? TBPaper::Teal : FMath::Lerp(TBPaper::Cream, Muted, .35f);
+		RoundedPanel(Track, ToggleX, ToggleY, 60 * S, 32 * S, 16, 2.5f, CanToggleNPC ? TBPaper::Outline : Muted);
+		const float KnobX = ToggleX + (NPCEnabled ? 33 : 5) * S;
+		const float KnobY = ToggleY + (ToggleOver ? PointerDown ? 6.f : 4.f : 5.f) * S;
+		RoundedPanel(FMath::Lerp(Track, Ink, .4f), KnobX, ToggleY + 7 * S, 22 * S, 22 * S, 11, 0);
+		RoundedPanel(CanToggleNPC ? TBPaper::Paper : TBPaper::Cream, KnobX, KnobY, 22 * S, 22 * S, 11, 1);
 		if (CanToggleNPC) AddHitBox({ToggleX, ToggleY}, {60 * S, 32 * S}, TEXT("ToggleDraftNPCs"), true);
 		if (NPCEnabled)
 		{
 			for (int32 Team = 0; Team < 2; ++Team)
 			{
-				const float PX = Team == 0 ? 32.f : 262.f;
+				const float PX = Team == 0 ? 32.f : 252.f;
 				const FLinearColor TeamColor = Team == 0 ? TBPaper::HumanBlue : Accent;
-				RoundedPanel(TBPaper::Paper, X + PX * S, Y + 592 * S, 210 * S, 42 * S, 6, 1.5f, Muted.CopyWithNewOpacity(.65f));
+				RoundedPanel(TBPaper::Paper, X + PX * S, Y + 557 * S, 210 * S, 42 * S, 6, 1.5f, Muted.CopyWithNewOpacity(.65f));
 				DrawFittedText(TBText::String(Team == 0 ? TEXT("Stage.Human") : TEXT("Stage.Toy")), TeamColor,
-				    X + (PX + 10) * S, Y + 608 * S, 88 * S, .71f * S, true);
+				    X + (PX + 10) * S, Y + 571 * S, 88 * S, .71f * S, true);
 				Stepper(Team == 0 ? TEXT("DraftFewerNPCHumans") : TEXT("DraftFewerNPCToys"),
 				    Team == 0 ? TEXT("DraftMoreNPCHumans") : TEXT("DraftMoreNPCToys"),
-				    FString::FromInt(Team == 0 ? StageDraft.NPCHumans : StageDraft.NPCToys), PX + 112, 600, 90,
+				    FString::FromInt(Team == 0 ? StageDraft.NPCHumans : StageDraft.NPCToys), PX + 112, 565, 90,
 				    (Team == 0 ? StageDraft.NPCHumans : StageDraft.NPCToys) > 0, CanAddNPC, 26, 1.25f);
 			}
 		}
-		else
-		{
-			Wrapped(TBText::String(CanAddNPC ? TEXT("Stage.NPCDisabledHint") : TEXT("Stage.NPCFullHint")), 46, 612, 412, .74f, 1, Muted);
-		}
+		else if (!CanAddNPC)
+			Wrapped(TBText::String(TEXT("Stage.NPCFullHint")), 32, 558, 430, .74f, 2, Muted);
 
 		Label(TEXT("Stage.ChooseStage"), 512, 158, 520, 1.08f);
 		DrawFittedText(House ? TEXT("01 / 02") : TEXT("02 / 02"), Ink, X + 1080 * S, Y + 158 * S, 88 * S, .95f * S, false, true);
-		RoundedPanel(TBPaper::Outline, X + 512 * S, Y + 192 * S, 656 * S, 328 * S, 14, 0);
-		if (const auto* Preview = ArtTextures.Find(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo")); Preview && *Preview)
+		constexpr float PhotoX = 512, PhotoY = 192, PhotoW = 656, PhotoH = 328;
+		RoundedPanel(TBPaper::Shadow, X + (PhotoX + 2) * S, Y + (PhotoY + 4) * S, PhotoW * S, PhotoH * S, 6, 0);
+		RoundedPanel(TBPaper::Paper, X + PhotoX * S, Y + PhotoY * S, PhotoW * S, PhotoH * S, 6, 1.5f, Muted);
+		if (const auto* Preview = ArtTextures.Find(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo")); Preview && *Preview && Preview->Get()->GetResource())
 		{
 			// Cover the preview area, preserving the source aspect ratio and a smooth rounded silhouette.
-			const float LX = X + 516 * S, LY = Y + 196 * S, PW = 648 * S, PH = 320 * S, R = 10 * S;
+			const float LX = X + (PhotoX + 6) * S, LY = Y + (PhotoY + 6) * S;
+			const float PW = (PhotoW - 12) * S, PH = (PhotoH - 12) * S, R = 3 * S;
 			const FVector2D Center(LX + PW * .5f, LY + PH * .5f);
 			const float Aspect = float(Preview->Get()->GetSizeX()) / FMath::Max(1, Preview->Get()->GetSizeY());
 			const FVector2D UVSize(FMath::Min(1.f, (PW / PH) / Aspect), FMath::Min(1.f, Aspect / (PW / PH)));
@@ -535,49 +577,81 @@ void ATBHUD::DrawLobby()
 			Gradient.BlendMode = SE_BLEND_Translucent;
 			Canvas->DrawItem(Gradient);
 		}
-		RoundedPanel(TBPaper::Teal, X + 1004 * S, Y + 209 * S, 146 * S, 32 * S, 4, 2);
-		DrawFittedText(TBText::String(TEXT("Stage.Preview")), Ink, X + 1013 * S, Y + 220 * S, 128 * S, .65f * S, true, true);
-		DrawText(House ? TEXT("01") : TEXT("02"), TBPaper::Gold, X + 538 * S, Y + 452 * S, PaperFont, .9f * S);
-		DrawFittedText(TBText::String(House ? TEXT("Stage.House") : TEXT("Stage.Demo")), TBPaper::Paper,
-		    X + 538 * S, Y + 483 * S, 600 * S, 1.38f * S, true);
-		auto Arrow = [&](FName Id, const TCHAR* Glyph, float PX)
+		if (const auto* Tape = ArtTextures.Find(TEXT("Tape_Cream")); Tape && *Tape)
 		{
-			DrawFittedText(Glyph, Host ? Hovered(PX, 536, 34, 44) ? TBPaper::Teal : Ink : Muted,
-			    X + PX * S, Y + 547 * S, 34 * S, 2.f * S, true, true);
-			if (Host) AddHitBox({X + PX * S, Y + 536 * S}, {34 * S, 44 * S}, Id, true);
+			const float TapeSize = 57.f * S;
+			DrawTexture(Tape->Get(), X + (PhotoX + PhotoW * .5f) * S - TapeSize * .5f,
+			    Y + PhotoY * S - TapeSize * .5f, TapeSize, TapeSize, 0, 0, 1, 1,
+			    FLinearColor(1, 1, 1, .93f), BLEND_Translucent, 1.f, false, 45.f, FVector2D(.5, .5));
+		}
+		PaperSign(TBPaper::Teal, X + 528 * S, Y + 212 * S, 128 * S, 32 * S);
+		DrawFittedText(TBText::String(House ? TEXT("Stage.HideAndSeek") : TEXT("Stage.Explore")), Ink,
+		    X + 536 * S, Y + 223 * S, 112 * S, .7f * S, true, true);
+		DrawFittedText(TBText::String(House ? TEXT("Stage.House") : TEXT("Stage.Demo")), TBPaper::Paper,
+		    X + 538 * S, Y + 483 * S, 600 * S, 1.38f * S, true, false, true);
+		auto Arrow = [&](FName Id, bool Previous, float PX)
+		{
+			constexpr float PY = PhotoY + PhotoH * .5f - 20.f;
+			const bool Over = Host && Hovered(PX, PY, 36, 40);
+			const float FaceY = PY + (Over ? PointerDown ? 1.f : -1.f : 0.f);
+			RoundedPanel(Over ? TBPaper::Gold : TBPaper::Paper, X + PX * S, Y + FaceY * S, 36 * S, 40 * S, 8, 2);
+			const float Direction = Previous ? -1.f : 1.f;
+			const FVector2D Mid(X + (PX + 18) * S, Y + (FaceY + 20) * S);
+			auto Point = [&](float U, float V) { return Mid + FVector2D(Direction * U * S, V * S); };
+			const FLinearColor Color = Host ? Ink : Muted;
+			DrawSmoothPolygon({Point(-5, -8), Point(-2, -10), Point(7, 0), Point(2, 0)}, Color);
+			DrawSmoothPolygon({Point(2, 0), Point(7, 0), Point(-2, 10), Point(-5, 8)}, Color);
+			if (Host) AddHitBox({X + PX * S, Y + PY * S}, {36 * S, 40 * S}, Id, true);
 		};
-		Arrow(House ? TEXT("StageExpanded") : TEXT("StagePlayroom"), TEXT("‹"), 508);
-		Arrow(TEXT("DraftNextStage"), TEXT("›"), 1138);
-		RoundedPanel(House ? TBPaper::Teal : TBPaper::Cream, X + 552 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
-		RoundedPanel(House ? TBPaper::Cream : TBPaper::Teal, X + 574 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
-		Wrapped(TBText::String(House ? TEXT("Stage.HouseDescription") : TEXT("Stage.DemoDescription")), 612, 550, 510, .74f, 2, Muted);
-		RoundedPanel(TBPaper::Teal, X + 780 * S, Y + 600 * S, 9 * S, 9 * S, 4.5f, 1, Muted);
-		DrawFittedText(TBText::String(TEXT("Stage.Explore")), Muted, X + 798 * S, Y + 601 * S, 90 * S, .72f * S);
-		RoundedPanel(TBPaper::Gold, X + 900 * S, Y + 600 * S, 9 * S, 9 * S, 4.5f, 1, Muted);
-		DrawFittedText(TBText::String(TEXT("Stage.HideAndSeek")), Muted, X + 918 * S, Y + 601 * S, 180 * S, .72f * S);
+		Arrow(TEXT("DraftPreviousStage"), true, PhotoX + 13);
+		Arrow(TEXT("DraftNextStage"), false, PhotoX + PhotoW - 49);
+		auto Thumbnail = [&](bool IsHouse, float PX)
+		{
+			constexpr float PY = 545, Width = 319, Height = 58;
+			const bool Selected = House == IsHouse;
+			const bool Over = Host && Hovered(PX, PY, Width, Height);
+			const float FaceY = PY + (Over ? PointerDown ? 1.f : -1.f : 0.f);
+			RoundedPanel(Selected ? TBPaper::Cream : TBPaper::Paper, X + PX * S, Y + FaceY * S, Width * S, Height * S,
+			    8, Selected ? 2.6f : 1.4f, Selected ? TBPaper::Teal : Muted);
+			Art(IsHouse ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo"), PX + 7, FaceY + 8, 70, 42);
+			DrawFittedText(TBText::String(IsHouse ? TEXT("Stage.House") : TEXT("Stage.Demo")), Ink,
+			    X + (PX + 89) * S, Y + (FaceY + 21) * S, 192 * S, .88f * S, true);
+			if (Selected) Art(TEXT("Icon_Check"), PX + Width - 28, FaceY + 20, 18, 18);
+			if (Host) AddHitBox({X + PX * S, Y + PY * S}, {Width * S, Height * S},
+			    IsHouse ? TEXT("StagePlayroom") : TEXT("StageExpanded"), true);
+		};
+		Thumbnail(true, PhotoX);
+		Thumbnail(false, PhotoX + PhotoW - 319);
 
 		const bool Dirty = DraftStage != State->SelectedStage || !FMath::IsNearlyEqual(StageDraft.Duration, State->Settings.Duration) ||
 		    StageDraft.RequiredItems != State->Settings.RequiredItems || StageDraft.NPCHumans != State->Settings.NPCHumans ||
 		    StageDraft.NPCToys != State->Settings.NPCToys;
 		const bool HasNotice = !StageDraftNotice.IsNone();
-		RoundedPanel(HasNotice ? Accent : TBPaper::Teal, X + 32 * S, Y + 700 * S, 7 * S, 7 * S, 3.5f, 0);
-		Wrapped(TBText::String(HasNotice ? *StageDraftNotice.ToString() : !Host ? TEXT("Stage.HostOnly") :
-		    Dirty ? TEXT("Stage.UnsavedRules") : TEXT("Stage.SavedRules")), 48, 699, 482, .73f, 2, HasNotice ? Accent : Muted);
-		FlatButton(TEXT("Leave"), TBText::String(TEXT("Stage.Leave")), 554, 684, 146, 40, true, TBPaper::Cream, .76f);
+		if (HasNotice || (Host && Dirty))
+		{
+			RoundedPanel(HasNotice ? Accent : TBPaper::Teal, X + 32 * S, Y + 658 * S, 7 * S, 7 * S, 3.5f, 0);
+			Wrapped(TBText::String(HasNotice ? *StageDraftNotice.ToString() : TEXT("Stage.UnsavedRules")),
+			    48, 654, 620, .78f, 2, HasNotice ? Accent : Muted);
+		}
 		auto Action = [&](FName Id, const TCHAR* Key, float PX, float Width, FLinearColor Color, bool Enabled)
 		{
-			const bool Over = Enabled && Hovered(PX, 676, Width, 58);
+			constexpr float PY = 637, Height = 46;
+			const bool Over = Enabled && Hovered(PX, PY, Width, Height);
+			const float FaceY = PY + (Over ? PointerDown ? 2.f : -2.f : 0.f);
 			PaperSign(Enabled ? Color : FMath::Lerp(Color, TBPaper::Cream, .65f),
-			    X + PX * S, Y + (676 - (Over ? 2 : 0)) * S, Width * S, 58 * S);
+			    X + PX * S, Y + FaceY * S, Width * S, Height * S);
 			DrawFittedText(TBText::String(Key), Enabled ? Ink : Muted, X + (PX + 14) * S,
-			    Y + (696 - (Over ? 2 : 0)) * S, (Width - 28) * S, 1.08f * S, true, true);
-			if (Enabled) AddHitBox({X + PX * S, Y + 676 * S}, {Width * S, 58 * S}, Id, true);
+			    Y + (FaceY + 16) * S, (Width - 28) * S, .99f * S, true, true);
+			if (Enabled) AddHitBox({X + PX * S, Y + PY * S}, {Width * S, Height * S}, Id, true);
 		};
-		Action(TEXT("CancelStage"), TEXT("Stage.Cancel"), 744, 180, TBPaper::Teal, true);
-		Action(TEXT("SaveStage"), TEXT("Stage.SaveAction"), 946, 222, TBPaper::Gold, Host);
+		if (Host)
+		{
+			Action(TEXT("CancelStage"), TEXT("Stage.Cancel"), 744, 180, TBPaper::Teal, true);
+			Action(TEXT("SaveStage"), TEXT("Stage.SaveAction"), 946, 222, TBPaper::Gold, true);
+		}
+		else Action(TEXT("CancelStage"), TEXT("Keys.Close"), 970, 198, TBPaper::Teal, true);
 		return;
 	}
-
 }
 
 // ママのひと言。おもちゃが勝ったら散らかった部屋を叱り、人間が勝ったら片付けをほめる。絵は共通。
@@ -638,18 +712,18 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 		DrawMomBubble(MatchState, W * .5f, H * .68f, 560 * S, 150 * S, Alpha);
 	}
 	const bool ShowError = !MatchState.bTravelPending && !MatchState.LobbyReturnError.IsEmpty();
-	PaperSign(TBPaper::Gold, X, 24 * S, 680 * S, (ShowError ? 196 : 126) * S);
-	DrawArt(TEXT("Tape_Cream"), X + 296 * S, 13 * S, 88 * S, 30 * S);
-	DrawArt(TEXT("Icon_Crown"), X + 24 * S, 45 * S, 62 * S, 62 * S);
-	DrawFittedText(MatchState.Phase == ETBPhase::Aborted ? TBText::Literal(TEXT("Canvas.Again")) : TBText::Literal(TEXT("Canvas.Results")),
-	    TBPaper::Ink, X + 104 * S, 46 * S, 550 * S, .78f * S);
 	const auto* ResultPlayer = GetOwningPlayerController()->GetPlayerState<ATBPlayerState>();
+	const bool MissedRide = MatchState.bVehicleEscapeResult && ResultPlayer && ResultPlayer->Team == ETBTeam::Toy &&
+	    !MatchState.EscapedInVehicle(ResultPlayer);
+	const bool Celebrate = !ShowError && MatchState.Phase != ETBPhase::Aborted && !MissedRide;
+	const auto Fill = Celebrate ? (MatchState.Winner == ETBWinner::Humans ? TBPaper::Teal : TBPaper::Gold) : TBPaper::Paper;
+	PaperSign(Fill, X, 24 * S, 680 * S, (ShowError ? 196 : 112) * S);
+	if (Celebrate) DrawArt(TEXT("Icon_Crown"), X + 33 * S, 52 * S, 48 * S, 48 * S);
 	const FString Title = MatchState.Phase == ETBPhase::Aborted ? TBText::Literal(TEXT("Canvas.GameOver")) :
 	    MatchState.bVehicleEscapeResult && ResultPlayer && ResultPlayer->Team == ETBTeam::Toy ?
 	        (MatchState.EscapedInVehicle(ResultPlayer) ? TBText::Literal(TEXT("Canvas.Escaped")) : TBText::Literal(TEXT("Canvas.NotEscaped"))) :
 	    MatchState.Winner == ETBWinner::Toys ? TBText::Literal(TEXT("Canvas.ToysWin")) : TBText::Literal(TEXT("Canvas.HumansWin"));
-	DrawFittedText(Title, MatchState.Winner == ETBWinner::Humans ? TBPaper::HumanBlue : TBPaper::Accent,
-	    X + 104 * S, 65 * S, 548 * S, 1.8f * S, true);
+	DrawFittedText(Title, TBPaper::Ink, X + 91 * S, 49 * S, 498 * S, 1.75f * S, true, true);
 	const int32 Seconds = FMath::CeilToInt(FMath::Max(0., MatchState.EndTime - MatchState.GetServerWorldTimeSeconds()));
 	if (ShowError)
 	{
@@ -668,7 +742,7 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 	}
 	const FString Status = MatchState.bTravelPending ? TBText::Literal(TEXT("Canvas.TravelLobby")) :
 	    FString::Format(TBText::Literal(TEXT("Canvas.LobbySeconds")), {Seconds});
-	DrawFittedText(Status, TBPaper::Muted, X + 104 * S, 116 * S, 548 * S, .9f * S);
+	DrawFittedText(Status, TBPaper::Muted, X + 40 * S, 95 * S, 600 * S, .87f * S, false, true);
 	auto* PC = Cast<ATBController>(GetOwningPlayerController());
 	if (MatchState.Phase != ETBPhase::Results || !PC) return;
 	const float Y = 168 * S;
@@ -865,54 +939,11 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		}
 	}
 	// Box escape guidance belongs in the existing corner goal, leaving the climb view clear.
-	const bool Boxed = Player && Player->Team == ETBTeam::Toy && Player->ToyState == ETBToyState::Boxed;
 	const FLinearColor TeamColor = Child ? TBPaper::HumanBlue : Accent;
-	PaperSign(TBPaper::Cream, 24 * HUDScale, 44 * HUDScale, 394 * HUDScale, 80 * HUDScale);
-	PaperSign(TBPaper::Gold, 78 * HUDScale, 25 * HUDScale, 126 * HUDScale, 41 * HUDScale);
-	DrawFittedText(TBText::String(Boxed ? TEXT("Canvas.EscapeGoal") : TEXT("Canvas.Goal")), Ink,
-	    87 * HUDScale, 39 * HUDScale, 108 * HUDScale, 1.08f * HUDScale, true, true);
-	// The reference goal artwork includes its label and long background. Draw only
-	// the flag here, with the same smooth paper edges and a live, separate heading.
-	{
-		auto Ellipse = [&](float X, float Y, float RX, float RY, FLinearColor Color)
-		{
-			TArray<FVector2D> Points;
-			Points.Reserve(32);
-			for (int32 Step = 0; Step < 32; ++Step)
-			{
-				const float Angle = Step * 2.f * PI / 32.f;
-				Points.Emplace((X + FMath::Cos(Angle) * RX) * HUDScale,
-				    (Y + FMath::Sin(Angle) * RY) * HUDScale);
-			}
-			DrawSmoothPolygon(Points, Color);
-		};
-		auto Cloth = [&](float X, float Y, float Width, float Height, FLinearColor Color)
-		{
-			TArray<FVector2D> Points;
-			Points.Reserve(34);
-			for (int32 Side = 0; Side < 2; ++Side)
-			{
-				for (int32 Step = 0; Step <= 16; ++Step)
-				{
-					const float T = (Side == 0 ? Step : 16 - Step) / 16.f;
-					const float Wave = .07f * FMath::Sin(T * 2.f * PI);
-					Points.Emplace((X + Width * T) * HUDScale,
-					    (Y + Height * ((Side == 0 ? .1f : .9f) + Wave)) * HUDScale);
-				}
-			}
-			DrawSmoothPolygon(Points, Color);
-		};
-		Ellipse(44.f, 110.f, 8.f, 4.f, TBPaper::Outline);
-		Ellipse(44.f, 109.5f, 5.5f, 2.f, TBPaper::Gold);
-		RoundedPanel(TBPaper::Gold, 41.5f * HUDScale, 63 * HUDScale, 5 * HUDScale, 46 * HUDScale,
-		    2.f, 1.12f, TBPaper::Outline);
-		Cloth(44.f, 63.f, 33.f, 31.f, TBPaper::Outline);
-		Cloth(46.5f, 66.f, 28.f, 25.f, TeamColor);
-		Ellipse(44.f, 63.f, 4.5f, 4.5f, TBPaper::Outline);
-		Ellipse(44.f, 63.f, 2.5f, 2.5f, TBPaper::Gold);
-	}
-	DrawFittedText(Child ? TBText::Literal(TEXT("Canvas.Human")) : TBText::Literal(TEXT("Canvas.Toy")), TeamColor,
-	    256 * HUDScale, 65 * HUDScale, 141 * HUDScale, .75f * HUDScale, true, true);
+	PaperSign(TBPaper::Paper, 24 * HUDScale, 35 * HUDScale, 328 * HUDScale, 72 * HUDScale);
+	RoundedPanel(TeamColor, 41 * HUDScale, 54 * HUDScale, 22 * HUDScale, 5 * HUDScale, 2, 0);
+	DrawFittedText(TBText::String(Child ? TEXT("Canvas.Human") : TEXT("Canvas.Toy")), TeamColor,
+	    71 * HUDScale, 48 * HUDScale, 258 * HUDScale, .77f * HUDScale, true);
 	const TCHAR* Objective = Child ? TBText::Literal(TEXT("Canvas.HumanObjective")) : TBText::Literal(TEXT("Canvas.ToyObjective"));
 	if (MatchState.IsPreparing() && Player && Player->Team == ETBTeam::Toy)
 		Objective = TBText::Literal(TEXT("Canvas.HideObjective"));
@@ -943,7 +974,7 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 				break;
 		}
 	}
-	DrawFittedText(Objective, Ink, 85 * HUDScale, 88 * HUDScale, 307 * HUDScale, 1.05f * HUDScale, true, true);
+	DrawFittedText(Objective, Ink, 41 * HUDScale, 74 * HUDScale, 294 * HUDScale, 1.02f * HUDScale, true);
 	const int32 Seconds = FMath::Max(0, FMath::CeilToInt(MatchState.Remaining()));
 	PaperSign(TBPaper::Gold, W * .5f - 110 * HUDScale, 28 * HUDScale, 220 * HUDScale, 80 * HUDScale);
 	DrawArt(TEXT("Icon_Hourglass"), W * .5f - 90 * HUDScale, 41 * HUDScale, 42 * HUDScale, 54 * HUDScale);
@@ -1035,7 +1066,8 @@ void ATBHUD::BeginPlay()
 	    TEXT("Tag_Any"), TEXT("Burst_Yellow"), TEXT("Burst_Teal"), TEXT("TitleLogo"),
 	    TEXT("PauseHeader"), TEXT("Underline_Coral"), TEXT("Card_Hanging"), TEXT("Tape_Brown"),
 	    TEXT("Card_HangingActive"), TEXT("Progress_Yellow"), TEXT("Progress_Track"),
-	    TEXT("Button_Gear"), TEXT("Button_Leave"), TEXT("Mark_TriangleBrown"), TEXT("Label_You"),
+	    TEXT("Button_Gear"), TEXT("Button_Leave"), TEXT("Mark_TriangleBrown"), TEXT("Mark_TriangleYellow"), TEXT("Label_You"),
+	    TEXT("Frame_SquareBrown"), TEXT("Frame_SquareLavender"), TEXT("Gauge_Green"), TEXT("Gauge_Orange"), TEXT("Gauge_Gray"),
 	    TEXT("Frame_Settings"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")};
 	for (const TCHAR* Name : Names)
 	{
@@ -1047,7 +1079,7 @@ void ATBHUD::BeginPlay()
 }
 
 void ATBHUD::DrawText(const FString& Text, FLinearColor Color, float X, float Y, UFont* Font, float Scale,
-                      bool ScalePosition)
+                      bool ScalePosition, bool Outlined)
 {
 	if (!Canvas || Scale <= 0.f) return;
 	UFont* Face = Font ? Font : PaperFont.Get();
@@ -1060,6 +1092,8 @@ void ATBHUD::DrawText(const FString& Text, FLinearColor Color, float X, float Y,
 	FCanvasTextItem Item(FVector2D(X, Y - 10.f * Scale), FText::FromString(Text),
 	    FSlateFontInfo(Face, RasterPoints), Color);
 	Item.Scale = FVector2D(Points / RasterPoints);
+	Item.bOutlined = Outlined;
+	Item.OutlineColor = TBPaper::Ink.CopyWithNewOpacity(Color.A);
 	Canvas->DrawItem(Item);
 }
 
@@ -1070,17 +1104,21 @@ void ATBHUD::DrawArt(FName Name, float X, float Y, float W, float H, FLinearColo
 	UTexture2D* Texture = Found->Get();
 	const float Scale = FMath::Min(W / FMath::Max(1, Texture->GetSizeX()), H / FMath::Max(1, Texture->GetSizeY()));
 	const float AW = Texture->GetSizeX() * Scale, AH = Texture->GetSizeY() * Scale;
-	DrawTexture(Texture, X + (W - AW) * .5f, Y + (H - AH) * .5f, AW, AH, 0, 0, 1, 1, Tint);
+	// Some illustrations touch the source border. Sample inside the displayed mip to prevent wrap bleed.
+	const float InsetU = .5f / FMath::Max(2.f, FMath::Min(AW, float(Texture->GetSizeX())));
+	const float InsetV = .5f / FMath::Max(2.f, FMath::Min(AH, float(Texture->GetSizeY())));
+	DrawTexture(Texture, X + (W - AW) * .5f, Y + (H - AH) * .5f, AW, AH,
+	    InsetU, InsetV, 1.f - 2.f * InsetU, 1.f - 2.f * InsetV, Tint);
 }
 
 void ATBHUD::DrawFittedText(const FString& Text, FLinearColor Color, float X, float Y, float Width,
-                           float Scale, bool Heading, bool Center)
+                           float Scale, bool Heading, bool Center, bool Outlined)
 {
 	UFont* Font = Heading && HeadingFont ? HeadingFont.Get() : PaperFont.Get();
 	float TW = 0, TH = 0;
 	GetTextSize(Text, TW, TH, Font, Scale);
 	const float Fit = FMath::Min(1.f, Width / FMath::Max(1.f, TW));
-	DrawText(Text, Color, X + (Center ? (Width - TW * Fit) * .5f : 0.f), Y, Font, Scale * Fit);
+	DrawText(Text, Color, X + (Center ? (Width - TW * Fit) * .5f : 0.f), Y, Font, Scale * Fit, false, Outlined);
 }
 
 void ATBHUD::DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
@@ -1099,24 +1137,25 @@ void ATBHUD::DrawButton(FName Id, const FString& Label, float X, float Y, float 
 	    Id == TEXT("Toy") ? TBPaper::Accent : TBPaper::Teal;
 	if (ReadyAction || StartAction)
 	{
-		const FLinearColor ActionColor = !Enabled || (ReadyAction && Selected) ? FLinearColor::FromSRGBColor(FColor(105, 105, 105)) :
-		    ReadyAction ? TBPaper::ReadyGreen : TBPaper::StartOrange;
-		PaperSign(ActionColor, X, Y - Lift, W, H);
+		const FLinearColor Fill = !Enabled ? TBPaper::Lavender : StartAction ? TBPaper::Gold :
+		    Selected ? TBPaper::Cream : TBPaper::Teal;
+		PaperSign(Hovered ? FMath::Lerp(Fill, TBPaper::Paper, .16f) : Fill, X, Y - Lift, W, H);
 		const bool ShowKey = Enabled && PC;
 		if (ShowKey)
 			DrawKeycap(TB::KeyLabel(PC, ReadyAction ? TB::Keys::LobbyReady : TB::Keys::LobbyStart),
 			    X + 12 * S, Y + 8 * S - Lift, 38 * S, H - 16 * S);
 		const FString ActionLabel = ReadyAction ? Selected ? TBText::Literal(TEXT("Canvas.Unready")) : TBText::Literal(TEXT("Canvas.Ready")) :
-		    Enabled ? TBText::Literal(TEXT("Canvas.Start")) : TBText::Literal(TEXT("Canvas.Waiting"));
-		DrawFittedText(ActionLabel, TBPaper::Paper, X + (ShowKey ? 62 : 12) * S,
-		    Y + H * .5f - 7 * S - Lift, W - (ShowKey ? 74 : 24) * S, 1.15f * S, true, true);
+		    Enabled ? TBText::Literal(TEXT("Canvas.Start")) : PC && !PC->HasAuthority() ? Label : TBText::String(TEXT("Canvas.Waiting"));
+		DrawFittedText(ActionLabel, Enabled ? TBPaper::Ink : TBPaper::Muted, X + (ShowKey ? 62 : 12) * S,
+		    Y + H * .5f - 7 * S - Lift, W - (ShowKey ? 74 : 24) * S, 1.13f * S, true, true);
 	}
 	else
 	{
-		const bool Primary = Id == TEXT("ChangeStage") || Id == TEXT("OpenSettings") || Id == TEXT("RetryLobbyReturn") ||
+		const bool Primary = Id == TEXT("ChangeStage") || Id == TEXT("Resume") || Id == TEXT("RetryLobbyReturn") ||
 		    Id == TEXT("DraftNextStage");
-		const bool Secondary = Id == TEXT("CloseSettings") || Id == TEXT("OpenOptions");
-		const FLinearColor Fill = !Enabled ? TBPaper::Lavender : Selected ? Active :
+		const bool Secondary = Id == TEXT("CloseSettings") || Id == TEXT("OpenOptions") || Id == TEXT("Players");
+		const bool Confirm = Id == TEXT("ConfirmKick") || Id == TEXT("ConfirmLeave");
+		const FLinearColor Fill = !Enabled ? TBPaper::Lavender : Confirm ? FLinearColor::FromSRGBColor(FColor(243, 163, 136)) : Selected ? Active :
 		    Hovered || Primary ? TBPaper::Gold : Secondary ? TBPaper::Teal : TBPaper::Cream;
 		if (W > 85 * S && H >= 30 * S) PaperSign(Fill, X, Y - Lift, W, H);
 		else PaperPanel(Fill, X, Y - Lift, W, H);
@@ -1132,7 +1171,7 @@ void ATBHUD::DrawButton(FName Id, const FString& Label, float X, float Y, float 
 		const float TextY = Y + (H - TH * Fit) * .5f + 10 * TextScale * Fit - Lift;
 		const bool LightText = Selected && (Id == TEXT("Child") || Id == TEXT("Toy") || Destructive);
 		DrawFittedText(Label, !Enabled ? TBPaper::Muted : LightText ? TBPaper::Paper :
-		    Destructive ? TBPaper::Danger : TBPaper::Ink,
+		    Destructive && !Confirm ? TBPaper::Danger : TBPaper::Ink,
 		    X + 8 * S, TextY, W - 16 * S, TextScale, Heading, true);
 	}
 	if (Enabled) AddHitBox(FVector2D(X, Y), FVector2D(W, H), Id, true);
@@ -1197,6 +1236,20 @@ void ATBHUD::PaperPanel(FLinearColor Tint, float X, float Y, float W, float H)
 	Layer(Tint, X + Border, Y + Border, W - 2 * Border, H - 2 * Border);
 }
 
+void ATBHUD::DrawSlicedArt(UTexture2D* Texture, float X, float Y, float W, float H, float Edge,
+                          FVector2D UVEdge, FLinearColor Tint)
+{
+	Edge = FMath::Min(Edge, .5f * FMath::Min(W, H));
+	const float PX[] = {X, X + Edge, X + W - Edge, X + W};
+	const float PY[] = {Y, Y + Edge, Y + H - Edge, Y + H};
+	const double U[] = {0, UVEdge.X, 1 - UVEdge.X, 1};
+	const double V[] = {0, UVEdge.Y, 1 - UVEdge.Y, 1};
+	for (int32 Row = 0; Row < 3; ++Row)
+		for (int32 Col = 0; Col < 3; ++Col)
+			DrawTexture(Texture, PX[Col], PY[Row], PX[Col + 1] - PX[Col], PY[Row + 1] - PY[Row],
+			    U[Col], V[Row], U[Col + 1] - U[Col], V[Row + 1] - V[Row], Tint);
+}
+
 void ATBHUD::FramePanel(float X, float Y, float W, float H)
 {
 	const auto* Frame = ArtTextures.Find(TEXT("Frame_Settings"));
@@ -1207,19 +1260,9 @@ void ATBHUD::FramePanel(float X, float Y, float W, float H)
 	}
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
 	const float Edge = FMath::Min(24.f * S, FMath::Min(W, H) * .25f);
-	const float UV[] = {0.f, .25f, .75f, 1.f};
-	// Keep the original drawn corners and border width, including on large settings cards.
-	for (int32 Layer = 0; Layer < 2; ++Layer)
-	{
-		const float LX = X + (Layer == 0 ? 3 * S : 0), LY = Y + (Layer == 0 ? 5 * S : 0);
-		const float PX[] = {LX, LX + Edge, LX + W - Edge, LX + W};
-		const float PY[] = {LY, LY + Edge, LY + H - Edge, LY + H};
-		for (int32 Row = 0; Row < 3; ++Row)
-			for (int32 Col = 0; Col < 3; ++Col)
-				DrawTexture(Frame->Get(), PX[Col], PY[Row], PX[Col + 1] - PX[Col], PY[Row + 1] - PY[Row],
-				    UV[Col], UV[Row], UV[Col + 1] - UV[Col], UV[Row + 1] - UV[Row],
-				    Layer == 0 ? TBPaper::Shadow : FLinearColor::White);
-	}
+	const FVector2D UVEdge(.25, .25);
+	DrawSlicedArt(Frame->Get(), X + 3 * S, Y + 5 * S, W, H, Edge, UVEdge, TBPaper::Shadow);
+	DrawSlicedArt(Frame->Get(), X, Y, W, H, Edge, UVEdge);
 }
 
 void ATBHUD::PaperSign(FLinearColor Fill, float X, float Y, float W, float H)
@@ -1230,36 +1273,45 @@ void ATBHUD::PaperSign(FLinearColor Fill, float X, float Y, float W, float H)
 	static const TArray<FVector2D> Edge = []
 	{
 		TArray<FVector2D> Points;
-		Points.Reserve(26);
-		for (int32 Step = 0; Step <= 12; ++Step)
+		// Trace the high right corner, rounded shoulder, and lower bowed edge of the title labels.
+		FVector2D Start(.034, .077);
+		Points.Add(Start);
+		auto Curve = [&](FVector2D Control, FVector2D End, int32 Steps)
 		{
-			const float T = Step / 12.f, U = 1.f - T;
-			Points.Add(U * U * FVector2D(.02f, .06f) + 2 * U * T * FVector2D(.5f, .14f) + T * T * FVector2D(.978f, .015f));
-		}
-		for (int32 Step = 0; Step <= 12; ++Step)
-		{
-			const float T = Step / 12.f, U = 1.f - T;
-			Points.Add(U * U * FVector2D(.995f, .895f) + 2 * U * T * FVector2D(.5f, 1.03f) + T * T * FVector2D(.005f, .9f));
-		}
+			for (int32 Step = 1; Step <= Steps; ++Step)
+			{
+				const float T = float(Step) / Steps, U = 1.f - T;
+				Points.Add(U * U * Start + 2 * U * T * Control + T * T * End);
+			}
+			Start = End;
+		};
+		Curve({.49, .158}, {.963, .016}, 12);
+		Curve({.979, .012}, {.980, .071}, 4);
+		Curve({.986, .48}, {.995, .836}, 2);
+		Curve({.998, .894}, {.979, .903}, 4);
+		Curve({.51, 1.036}, {.022, .918}, 12);
+		Curve({.004, .915}, {.005, .859}, 4);
+		Curve({.019, .43}, {.017, .132}, 2);
+		Curve({.016, .074}, Points[0], 4);
 		return Points;
 	}();
-	auto Layer = [&](FLinearColor Color, float LX, float LY, float LW, float LH)
+	auto Layer = [&](FLinearColor Color, float LX, float LY, float LW, float LH, bool Shade = false)
 	{
 		TArray<FVector2D> Points;
 		Points.Reserve(Edge.Num());
 		for (const FVector2D& Point : Edge) Points.Emplace(LX + Point.X * LW, LY + Point.Y * LH);
-		DrawSmoothPolygon(Points, Color);
+		DrawSmoothPolygon(Points, Color, Shade);
 	};
 	const float Border = FMath::Min(3.f * S, FMath::Min(W, H) * .1f);
 	Layer(TBPaper::Shadow.CopyWithNewOpacity(TBPaper::Shadow.A * Fill.A), X + 2 * S, Y + 4 * S, W, H);
 	Layer(TBPaper::Outline.CopyWithNewOpacity(Fill.A), X, Y, W, H);
-	Layer(Fill, X + Border, Y + Border, W - 2 * Border, H - 2 * Border);
+	Layer(Fill, X + Border, Y + Border, W - 2 * Border, H - 2 * Border, true);
 }
 
 // Canvas triangles do not inherit the scene's AA. A one-pixel coverage fringe keeps
 // the authored curved edge sharp without stair steps or overlapping translucent corners.
 // Callers supply an ordered outline whose centre sees every edge (rounded cards / bowed labels).
-void ATBHUD::DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color)
+void ATBHUD::DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color, bool ShadePaper)
 {
 	if (!Canvas || Color.A <= 0.f || Points.Num() < 3) return;
 	TArray<FVector2D, TInlineAllocator<64>> Boundary;
@@ -1310,13 +1362,29 @@ void ATBHUD::DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Col
 		Triangle.V0_UV = Triangle.V1_UV = Triangle.V2_UV = FVector2D::ZeroVector;
 		Triangle.V0_Color = CA; Triangle.V1_Color = CB; Triangle.V2_Color = CC;
 	};
-	const FLinearColor Transparent = Color.CopyWithNewOpacity(0.f);
+	// A small variation across the face follows the painted paper without adding a texture seam.
+	double Top = 0, Height = 1;
+	if (ShadePaper)
+	{
+		const FBox2D Bounds(Boundary.GetData(), Count);
+		Top = Bounds.Min.Y;
+		Height = FMath::Max(1.0, Bounds.GetSize().Y);
+	}
+	auto FaceColor = [&](double Y)
+	{
+		if (!ShadePaper) return Color;
+		const float T = FMath::Clamp(float((Y - Top) / Height), 0.f, 1.f);
+		return FMath::Lerp(FMath::Lerp(Color, TBPaper::Paper, .11f), FMath::Lerp(Color, TBPaper::Ink, .09f), T)
+		    .CopyWithNewOpacity(Color.A);
+	};
+	const FLinearColor Middle = FaceColor(Center.Y);
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		const int32 Next = (Index + 1) % Count;
-		Add(Center, Inner[Index], Inner[Next], Color, Color, Color);
-		Add(Inner[Index], Outer[Index], Outer[Next], Color, Transparent, Transparent);
-		Add(Inner[Index], Outer[Next], Inner[Next], Color, Transparent, Color);
+		const FLinearColor A = FaceColor(Inner[Index].Y), B = FaceColor(Inner[Next].Y);
+		Add(Center, Inner[Index], Inner[Next], Middle, A, B);
+		Add(Inner[Index], Outer[Index], Outer[Next], A, A.CopyWithNewOpacity(0), B.CopyWithNewOpacity(0));
+		Add(Inner[Index], Outer[Next], Inner[Next], A, B.CopyWithNewOpacity(0), B);
 	}
 	FCanvasTriangleItem Item(FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector, GWhiteTexture);
 	Item.TriangleList = MoveTemp(Triangles);
@@ -1356,13 +1424,15 @@ void ATBHUD::RoundedPanel(FLinearColor Fill, float X, float Y, float W, float H,
 		DrawSmoothPolygon(Points, Color);
 	};
 	const float B = FMath::Min(Border * S, FMath::Min(W, H) * .25f);
-	Layer(Outline, X, Y, W, H, Radius * S);
+	if (B > 0.f) Layer(Outline, X, Y, W, H, Radius * S);
 	Layer(Fill, X + B, Y + B, W - 2 * B, H - 2 * B, FMath::Max(0.f, Radius * S - B));
 }
 
 void ATBHUD::DrawKeycap(const FString& Key, float X, float Y, float W, float H)
 {
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	RoundedPanel(TBPaper::Cream, X, Y, W, H, 5, 2);
-	DrawFittedText(Key, TBPaper::Ink, X + 5 * S, Y + H * .5f - 6 * S, W - 10 * S, .95f * S, true, true);
+	const float Lip = FMath::Min(3.f * S, H * .12f);
+	RoundedPanel(TBPaper::Muted, X, Y, W, H, 6, 1.8f);
+	RoundedPanel(TBPaper::Paper, X, Y, W, H - Lip, 6, 1.8f);
+	DrawFittedText(Key, TBPaper::Ink, X + 5 * S, Y + (H - Lip) * .5f - 6 * S, W - 10 * S, .95f * S, true, true);
 }

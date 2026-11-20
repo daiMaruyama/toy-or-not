@@ -74,7 +74,7 @@ void UTBChatBox::NativeOnInitialized()
 	Scroll->AddChild(LineBox);
 
 	InputBack = WidgetTree->ConstructWidget<UBorder>();
-	InputBack->SetBrush(FSlateRoundedBoxBrush(TBPaper::Muted, FVector4(0, 0, 16, 16), TBPaper::Cream, 2.f));
+	InputBack->SetBrush(FSlateRoundedBoxBrush(TBPaper::Cream, FVector4(0, 0, 16, 16), TBPaper::Outline, 2.5f));
 	InputBack->SetPadding(FMargin(12, 8));
 	Panel->AddChildToVerticalBox(InputBack);
 	auto* InputSize = WidgetTree->ConstructWidget<USizeBox>();
@@ -83,7 +83,8 @@ void UTBChatBox::NativeOnInitialized()
 	auto* InputCanvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 	InputSize->SetContent(InputCanvas);
 	auto* InputPlate = WidgetTree->ConstructWidget<UBorder>();
-	InputPlate->SetBrush(FSlateRoundedBoxBrush(TBPaper::Lavender, 9.f));
+	InputPlate->SetBrush(TBPaper::SlicedArtwork(TBPaper::Art(TEXT("Frame_StageSelect")),
+	    FVector2D(196, 42), FMargin(.08f, .29f)));
 	InputPlate->SetPadding(FMargin(42, 4, 10, 4));
 	InputPlate->SetVerticalAlignment(VAlign_Center);
 	auto* InputPlateSlot = InputCanvas->AddChildToCanvas(InputPlate);
@@ -107,11 +108,11 @@ void UTBChatBox::NativeOnInitialized()
 	TalkSlot->SetPosition(FVector2D(8, 12));
 	TalkSlot->SetSize(FVector2D(28, 28));
 	SendButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SendChatButton"));
-	FButtonStyle SendStyle = TBPaper::CompactButtonStyle();
-	SendStyle.SetNormal(FSlateRoundedBoxBrush(TBPaper::Teal, 10.f, TBPaper::Cream, 2.f));
-	SendStyle.SetHovered(FSlateRoundedBoxBrush(TBPaper::Teal, 10.f, TBPaper::Gold, 3.f));
-	SendStyle.SetPressed(FSlateRoundedBoxBrush((TBPaper::Teal * .8f).CopyWithNewOpacity(1.f), 10.f, TBPaper::Cream, 2.f));
-	SendButton->SetStyle(SendStyle);
+	// The supplied green face has the border and inset of the send artwork, without baked-in text.
+	FSlateBrush SendFace = TBPaper::ImageBrush(TBPaper::Art(TEXT("Gauge_Green")));
+	SendFace.DrawAs = ESlateBrushDrawType::RoundedBox;
+	SendFace.OutlineSettings = FSlateBrushOutlineSettings(8.f, TBPaper::Outline, 2.5f);
+	SendButton->SetStyle(TBPaper::ArtButtonStyle(SendFace));
 	// クリックで入力欄からフォーカスを奪わない。キーボードでは従来どおりEnterで送れる。
 	// UButton has no public setter in UE 5.8; this is set before its Slate widget is built.
 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
@@ -119,8 +120,9 @@ void UTBChatBox::NativeOnInitialized()
 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 	auto* SendText = WidgetTree->ConstructWidget<UTextBlock>();
 	SendText->SetText(TBText::Get(TEXT("Root.Chat.Send")));
-	SendText->SetFont(FSlateFontInfo(PaperFont, 18));
-	SendText->SetColorAndOpacity(TBPaper::Paper);
+	auto* ChatHeading = TBPaper::Font(this, TBPaper::EFontRole::Heading);
+	SendText->SetFont(FSlateFontInfo(ChatHeading, 16));
+	SendText->SetColorAndOpacity(TBPaper::Ink);
 	SendButton->SetContent(SendText);
 	SendButton->OnClicked.AddDynamic(this, &UTBChatBox::SendClicked);
 	auto* SendSlot = InputCanvas->AddChildToCanvas(SendButton);
@@ -130,14 +132,16 @@ void UTBChatBox::NativeOnInitialized()
 	// 入力中は送信方法と文字数を出す。
 	OpenHint = WidgetTree->ConstructWidget<UTextBlock>();
 	OpenHint->SetText(TBText::Get(TEXT("Root.Chat.Open")));
-	OpenHint->SetFont(FSlateFontInfo(PaperFont, 13));
-	OpenHint->SetColorAndOpacity(FLinearColor(1, 1, 1, .75f));
-	OpenHint->SetShadowOffset(FVector2D(1, 1));
-	OpenHint->SetShadowColorAndOpacity(FLinearColor(0, 0, 0, .8f));
+	OpenHint->SetColorAndOpacity(TBPaper::Paper);
+	OpenHint->SetShadowOffset(FVector2D(0, 1));
+	OpenHint->SetShadowColorAndOpacity(TBPaper::Outline);
+	OpenHint->SetFont(FSlateFontInfo(PaperFont, 13, NAME_None, FFontOutlineSettings(1, TBPaper::Outline)));
 	Panel->AddChildToVerticalBox(OpenHint)->SetPadding(FMargin(10, 4, 0, 0));
 	// 履歴が薄れても入口は残す。キーボードと同じController経路で開く。
 	OpenButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("OpenChatButton"));
-	FButtonStyle OpenStyle = TBPaper::CompactButtonStyle(true);
+	const FSlateBrush OpenFace = TBPaper::SlicedArtwork(TBPaper::Art(TEXT("Frame_Settings")),
+	    FVector2D(50, 50), FMargin(.28f));
+	FButtonStyle OpenStyle = TBPaper::ArtButtonStyle(OpenFace);
 	OpenStyle.SetNormalPadding(FMargin(16, 10));
 	OpenStyle.SetPressedPadding(FMargin(16, 12, 16, 8));
 	OpenButton->SetStyle(OpenStyle);
@@ -146,7 +150,7 @@ void UTBChatBox::NativeOnInitialized()
 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 	auto* OpenText = WidgetTree->ConstructWidget<UTextBlock>();
 	OpenText->SetText(TBText::Get(TEXT("Root.Chat.Open")));
-	OpenText->SetFont(FSlateFontInfo(PaperFont, 15));
+	OpenText->SetFont(FSlateFontInfo(ChatHeading, 14));
 	OpenText->SetColorAndOpacity(TBPaper::Ink);
 	OpenButton->SetContent(OpenText);
 	OpenButton->OnClicked.AddDynamic(this, &UTBChatBox::OpenClicked);
@@ -173,8 +177,8 @@ void UTBChatBox::SetOpen(bool bInOpen)
 	bOpen = bInOpen;
 	Panel->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::SelfHitTestInvisible);
 	LogBack->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::HitTestInvisible);
-	LogBack->SetBrush(FSlateRoundedBoxBrush(TBPaper::Ink.CopyWithNewOpacity(bOpen ? .58f : 0.f),
-	    FVector4(16, 16, 0, 0), TBPaper::Cream.CopyWithNewOpacity(bOpen ? 1.f : 0.f), 2.f));
+	LogBack->SetBrush(FSlateRoundedBoxBrush(TBPaper::Ink.CopyWithNewOpacity(bOpen ? .77f : 0.f),
+	    FVector4(16, 16, 0, 0), TBPaper::Outline.CopyWithNewOpacity(bOpen ? 1.f : 0.f), 2.5f));
 	InputBack->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	OpenHint->SetText(bOpen
 	    ? FText::Format(TBText::Get(TEXT("Root.Chat.Controls")), Input->GetText().ToString().Len(), TB::Rules().Chat.MaxLength)
@@ -241,7 +245,7 @@ void UTBChatBox::AddLine(const FTBChatLine& Line)
 		auto* NameSize = WidgetTree->ConstructWidget<USizeBox>();
 		NameSize->SetWidthOverride(110);
 		auto* NamePlate = WidgetTree->ConstructWidget<UBorder>();
-		NamePlate->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(45, 142, 170)), 7.f));
+		NamePlate->SetBrush(FSlateRoundedBoxBrush(TBPaper::HumanBlue, 7.f, TBPaper::Paper.CopyWithNewOpacity(.84f), 1.f));
 		NamePlate->SetPadding(FMargin(8, 3));
 		NameSize->SetContent(NamePlate);
 		auto* Name = MakeText(Line.Name, TBPaper::Paper);

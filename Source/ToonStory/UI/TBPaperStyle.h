@@ -7,6 +7,7 @@
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Brushes/SlateBoxBrush.h"
 
 namespace TBPaper
 {
@@ -142,6 +143,39 @@ namespace TBPaper
 		Style.SetDisabled(FSlateRoundedBoxBrush(Cream, 9.f, Muted, 2.f));
 		Style.SetNormalPadding(FMargin(6, 2));
 		Style.SetPressedPadding(FMargin(6, 4, 6, 0));
+		return Style;
+	}
+
+	// Preserve the supplied frame corners while only stretching the plain center and straight edges.
+	inline FSlateBrush SlicedArtwork(UTexture2D* Texture, FVector2D LayoutSize, FMargin UVBorder)
+	{
+		FSlateBrush Result = Brush(Texture);
+		Result.ImageSize = LayoutSize;
+		Result.Margin = UVBorder;
+		return Result;
+	}
+
+	inline FButtonStyle ArtButtonStyle(const FSlateBrush& Face, FLinearColor Tint = FLinearColor::White)
+	{
+		FButtonStyle Style = CompactButtonStyle();
+		if (!Face.GetResourceObject() && Face.GetResourceName().IsNone()) return Style;
+		FSlateBrush Normal = Face, Hovered = Face, Pressed = Face, Disabled = Face;
+		Normal.TintColor = Tint;
+		Hovered.TintColor = FMath::Lerp(Tint, FLinearColor::White, .5f) * FLinearColor(1.f, .92f, .74f, 1.f);
+		Pressed.TintColor = Tint * FLinearColor(.79f, .79f, .79f, 1.f);
+		Disabled.TintColor = FLinearColor(.57f, .51f, .45f, .7f);
+		Style.SetNormal(Normal).SetHovered(Hovered).SetPressed(Pressed).SetDisabled(Disabled);
+		return Style;
+	}
+
+	// Match the curved title artwork with a blank sign so all captions stay editable.
+	inline FButtonStyle SignButtonStyle(FLinearColor Tint)
+	{
+		static const FSlateVectorBoxBrush Face(FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Sign.svg"),
+		    FVector2D(144, 50), FMargin(.10f, .23f));
+		FButtonStyle Style = ArtButtonStyle(Face, Tint);
+		Style.SetNormalPadding(FMargin(12, 4, 12, 8));
+		Style.SetPressedPadding(FMargin(12, 6, 12, 6));
 		return Style;
 	}
 } // namespace TBPaper

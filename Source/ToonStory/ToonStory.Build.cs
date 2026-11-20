@@ -9,7 +9,7 @@ public class ToonStory : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PrivateDependencyModuleNames.Add("PhysicsCore");
 		// ロード画面（UI/Loading）。マップの読み込み中も絵を出し続ける。
-		PrivateDependencyModuleNames.AddRange(new string[] { "MoviePlayer", "EngineSettings" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "MoviePlayer", "MediaAssets", "EngineSettings" });
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
@@ -47,6 +47,7 @@ public class ToonStory : ModuleRules
 		PrivateDefinitions.Add("WITH_TB_STEAM=" + (bSteam ? "1" : "0"));
 		if (Target.ProjectFile != null)
 		{
+			RuntimeDependencies.Add("$(ProjectDir)/Content/UI/PaperClub/Sign.svg", StagedFileType.NonUFS);
 			string UILocalization = System.IO.Path.Combine(Target.ProjectFile.Directory.FullName, "Content", "Localization", "UI");
 			if (System.IO.Directory.Exists(UILocalization))
 				foreach (string File in System.IO.Directory.GetFiles(UILocalization, "*.csv"))

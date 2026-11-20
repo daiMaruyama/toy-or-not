@@ -259,7 +259,8 @@ bool FTBUILocalizationOptionsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Same title widget now has English text"), ExistingTitle->GetText().ToString(), FString(TEXT("Options")));
 	TestEqual(TEXT("Language page remains selected"), Menu->GetPage(), 3);
 	TestNotNull(TEXT("English language tab is visibly selected"), FindText(*Menu, TEXT("●  Language")));
-	TestNotNull(TEXT("English language description is present"), FindText(*Menu, TBText::String(TEXT("Options.LanguageNote"))));
+	TestNotNull(TEXT("English choice is marked as active"), FindText(*Menu, TEXT("●  English")));
+	TestNotNull(TEXT("Japanese remains available in its native script"), FindText(*Menu, TEXT("日本語")));
 	TestTrue(TEXT("Switches back with the same menu"), TBText::SetLanguage(TEXT("ja")));
 	TestEqual(TEXT("Same title widget returns to Japanese"), ExistingTitle->GetText().ToString(), FString(TEXT("オプション")));
 	return true;

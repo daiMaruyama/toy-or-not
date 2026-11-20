@@ -6,6 +6,9 @@
 #include "Core/TBSession.h"
 #include "Core/TBTitleStory.h"
 #include "Components/Button.h"
+#include "Components/CheckBox.h"
+#include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
 #include "LevelSequenceActor.h"
@@ -105,10 +108,8 @@ float UTBTitleMenu::GetMenuOpacity() const
 void UTBTitleMenu::SetRoomCardsShown(bool bShown)
 {
 	bRoomCardsShown = bShown;
-	for (UWidget* Widget : RoomCardWidgets)
-	{
-		Widget->SetVisibility(bShown ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
+	FinderOverlay->SetVisibility(bShown ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	TitleContent->SetVisibility(bShown ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 }
 
 void UTBTitleMenu::EnterStory()
@@ -119,6 +120,7 @@ void UTBTitleMenu::EnterStory()
 	State = EState::Story;
 	if (ALevelSequenceActor* Loop = FindSequence(this, LoopTag)) Loop->GetSequencePlayer()->Stop();
 	MenuLayer->SetVisibility(ESlateVisibility::Collapsed);
+	SetRoomCardsShown(false);
 	HelpOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	TitleContent->SetIsEnabled(true);
 	StoryActor = Actor;
@@ -186,7 +188,7 @@ void UTBTitleMenu::NoteInput()
 bool UTBTitleMenu::IsBusyInMenu() const
 {
 	// 部屋を探している・入ろうとしている途中、ヘルプやオプションを読んでいる途中に、寸劇で割り込まない。
-	return (Session && Session->IsBusy()) || (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible) ||
+	return bRoomCardsShown || (Session && Session->IsBusy()) || (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible) ||
 	       (Options.IsValid() && Options->IsInViewport());
 }
 
@@ -265,6 +267,11 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 		MenuFade = FMath::Min(1.f, MenuFade + DeltaTime / MenuFadeSeconds);
 		MenuLayer->SetRenderOpacity(MenuFade);
 	}
+	if (State == EState::Menu && MenuLayer->GetVisibility() == ESlateVisibility::Collapsed &&
+	    !(Options.IsValid() && Options->IsInViewport()))
+	{
+		MenuLayer->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
 	if (BlackoutFade > 0.f && Blackout)
 	{
 		BlackoutFade = FMath::Max(0.f, BlackoutFade - DeltaTime / BlackoutSeconds);
@@ -299,26 +306,63 @@ void UTBTitleMenu::Refresh()
 	const bool Ready = !Session->IsBusy();
 	HostButton->SetIsEnabled(Ready);
 	FindButton->SetIsEnabled(Ready);
-	RoomList->SetIsEnabled(Ready && !Session->Rooms.IsEmpty());
-	// Prefix with the index: two rooms can have identical display names.
-	const int32 Previous = RoomList->GetSelectedIndex();
-	RoomList->ClearOptions();
+	RefreshRoomsButton->SetIsEnabled(Ready);
+	const bool bRestoreRowFocus = bRoomCardsShown && RoomList->HasFocusedDescendants();
+	RoomList->SetIsEnabled(Ready);
+	RoomList->ClearChildren();
+	SelectedRoom = Session->Rooms.IsEmpty() ? INDEX_NONE : FMath::Clamp(SelectedRoom, 0, Session->Rooms.Num() - 1);
+	FCheckBoxStyle RowStyle;
+	const FSlateRoundedBoxBrush Normal(TBPaper::Paper, 7.f, TBPaper::Outline.CopyWithNewOpacity(.55f), 2.f);
+	const FSlateRoundedBoxBrush Hovered(TBPaper::Cream, 7.f, TBPaper::Outline, 2.f);
+	const FSlateRoundedBoxBrush Selected(FMath::Lerp(TBPaper::Paper, TBPaper::Teal, .48f), 7.f, TBPaper::Outline, 2.5f);
+	RowStyle.SetCheckBoxType(ESlateCheckBoxType::ToggleButton).SetPadding(FMargin(18, 12));
+	RowStyle.SetUncheckedImage(Normal).SetUncheckedHoveredImage(Hovered).SetUncheckedPressedImage(Selected);
+	RowStyle.SetCheckedImage(Selected).SetCheckedHoveredImage(Selected).SetCheckedPressedImage(Selected);
 	for (int32 Index = 0; Index < Session->Rooms.Num(); ++Index)
-		RoomList->AddOption(FString::Printf(TEXT("%d  %s"), Index + 1, *Session->GetRoomLabel(Index).ToString()));
-	if (!Session->Rooms.IsEmpty()) RoomList->SetSelectedIndex(FMath::Clamp(Previous, 0, Session->Rooms.Num() - 1));
-	JoinButton->SetIsEnabled(Ready && Session->Rooms.IsValidIndex(RoomList->GetSelectedIndex()));
-	RoomHintText->SetText(FText::FromString(!Ready ? TBText::Literal(TEXT("Root.Title.Searching")) :
-	    Session->Rooms.IsEmpty() ? TBText::Literal(TEXT("Root.Title.Empty")) :
-	    TBText::Literal(TEXT("Root.Title.JoinHint"))));
+	{
+		auto* Row = WidgetTree->ConstructWidget<UCheckBox>();
+		Row->SetWidgetStyle(RowStyle);
+		auto* Caption = WidgetTree->ConstructWidget<UTextBlock>();
+		Caption->SetText(Session->GetRoomLabel(Index));
+		Caption->SetFont(FSlateFontInfo(PaperFont, 20));
+		Caption->SetColorAndOpacity(TBPaper::Ink);
+		Caption->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+		Row->SetContent(Caption);
+		Row->SetIsChecked(SelectedRoom == Index);
+		Row->OnCheckStateChanged.AddDynamic(this, &ThisClass::RoomChecked);
+		CastChecked<UScrollBoxSlot>(RoomList->AddChild(Row))->SetPadding(FMargin(0, 0, 8, 8));
+	}
+	if (bRestoreRowFocus)
+	{
+		UWidget* NextFocus = Ready ? RefreshRoomsButton.Get() : BackFromFinderButton.Get();
+		if (Ready && SelectedRoom != INDEX_NONE) NextFocus = RoomList->GetChildAt(SelectedRoom);
+		NextFocus->SetKeyboardFocus();
+	}
+	JoinButton->SetIsEnabled(Ready && SelectedRoom != INDEX_NONE);
+	RoomHintText->SetText(FText::FromString(TBPaper::Status(Session->Status)));
 	// 普段の案内は出さない。通信中やエラーなど、知らせることがあるときだけ出す。
 	const bool bIdle = Session->Status == TEXT("Create a room or find friends to begin.");
 	StatusText->SetText(bIdle ? FText::GetEmpty() : FText::FromString(TBPaper::Status(Session->Status)));
 }
 
-void UTBTitleMenu::SelectionChanged(FString Item, ESelectInfo::Type SelectionType)
+void UTBTitleMenu::RoomChecked(bool bChecked)
 {
-	if (SelectionType != ESelectInfo::Direct) Hover();
-	if (Session) JoinButton->SetIsEnabled(!Session->IsBusy() && Session->Rooms.IsValidIndex(RoomList->GetSelectedIndex()));
+	if (bChecked)
+	{
+		for (int32 Index = 0; Index < RoomList->GetChildrenCount(); ++Index)
+		{
+			if (Index != SelectedRoom && CastChecked<UCheckBox>(RoomList->GetChildAt(Index))->IsChecked())
+			{
+				SelectedRoom = Index;
+				Hover();
+				break;
+			}
+		}
+	}
+	for (int32 Index = 0; Index < RoomList->GetChildrenCount(); ++Index)
+	{
+		CastChecked<UCheckBox>(RoomList->GetChildAt(Index))->SetIsChecked(Index == SelectedRoom);
+	}
 }
 namespace
 {
@@ -334,17 +378,28 @@ void UTBTitleMenu::Find()
 {
 	PlayMenuClick(GetGameInstance());
 	SetRoomCardsShown(true);
+	BackFromFinderButton->SetKeyboardFocus();
 	if (Session) Session->Find();
 }
-void UTBTitleMenu::Join() { PlayMenuClick(GetGameInstance()); if (Session) Session->Join(RoomList->GetSelectedIndex()); }
+void UTBTitleMenu::CloseFinder()
+{
+	PlayMenuClick(GetGameInstance(), ETBSoundEvent::UIBack);
+	SetRoomCardsShown(false);
+	if (FindButton->GetIsEnabled()) FindButton->SetKeyboardFocus();
+	else SetKeyboardFocus();
+}
+void UTBTitleMenu::Join() { PlayMenuClick(GetGameInstance()); if (Session) Session->Join(SelectedRoom); }
 void UTBTitleMenu::Hover() { PlayMenuClick(GetGameInstance(), ETBSoundEvent::UIHover); }
 
 void UTBTitleMenu::OpenOptions()
 {
 	PlayMenuClick(GetGameInstance());
 	TWeakObjectPtr<UButton> Button = OptionsButton;
-	Options = UTBOptionsMenu::Open(GetOwningPlayer(), [Button]
+	TWeakObjectPtr<UWidget> Title = MenuLayer;
+	Options = UTBOptionsMenu::Open(GetOwningPlayer(), [Button, Title]
 	{
+		if (Title.IsValid()) Title->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		if (Button.IsValid()) Button->SetKeyboardFocus();
 	});
+	if (Options.IsValid()) MenuLayer->SetVisibility(ESlateVisibility::Collapsed);
 }

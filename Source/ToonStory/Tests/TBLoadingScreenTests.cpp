@@ -9,6 +9,11 @@
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "Framework/Application/SlateApplication.h"
+#include "ImageUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "MediaPlayer.h"
+#include "MoviePlayer.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
@@ -180,6 +185,135 @@ bool FTBLoadingIllustrations::RunTest(const FString&)
 	    !TestEqual(TEXT("Five loading illustrations are configured"), GetDefault<UTBLoadingScreenSettings>()->Toys.Num(), 5) ||
 	    !TestFalse(TEXT("No other screenshot is pending"), FScreenshotRequest::IsScreenshotRequested())) return false;
 	ADD_LATENT_AUTOMATION_COMMAND(FLoadingIllustrationReview(this, Viewport));
+	return true;
+}
+
+namespace
+{
+	// Read actual Slate pixels: an advancing frame index alone also passes for a black texture.
+	class FLoadingFilmReview : public IAutomationLatentCommand
+	{
+	public:
+		FLoadingFilmReview(FAutomationTestBase* InTest, UGameViewportClient* InViewport)
+		    : Test(InTest), Viewport(InViewport), Deadline(FPlatformTime::Seconds() + 30.)
+		{
+			Screen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::ViewportMovie);
+			Screen->SetStatus(TBText::Get(TEXT("Root.Loading.Prepare")));
+			Viewport->AddViewportWidgetContent(Screen.ToSharedRef(), 100000);
+		}
+		~FLoadingFilmReview() override
+		{
+			if (Viewport.IsValid()) Viewport->RemoveViewportWidgetContent(Screen.ToSharedRef());
+		}
+		bool Update() override
+		{
+			if (!Viewport.IsValid() || FPlatformTime::Seconds() > Deadline)
+			{
+				Test->AddError(TEXT("The loading film did not render two poses and loop within 30 seconds"));
+				return true;
+			}
+			UMediaPlayer* Player = Screen->GetPlaybackForReview();
+			if (!Player || !Player->IsPlaying()) return false;
+			const double Now = Player->GetTime().GetTotalSeconds();
+			const bool bWrapped = Now + .5 < Previous;
+			Previous = Now;
+			if (Captured < 2 && Now >= (Captured == 0 ? .6 : 1.7))
+			{
+				TArray<FColor> Pixels;
+				FIntVector Size;
+				if (!FSlateApplication::Get().TakeScreenshot(Screen.ToSharedRef(), Pixels, Size) || Pixels.IsEmpty())
+				{
+					Test->AddError(TEXT("Could not read the rendered loading film"));
+					return true;
+				}
+				TArray<FColor> Samples;
+				for (int32 Y = Size.Y / 4; Y < Size.Y * 3 / 4; Y += 8)
+					for (int32 X = Size.X / 4; X < Size.X * 3 / 4; X += 8)
+						Samples.Add(Pixels[Y * Size.X + X]);
+				if (Captured == 0) FirstSamples = MoveTemp(Samples);
+				else
+				{
+					int32 Changed = 0;
+					for (int32 I = 0; I < FMath::Min(Samples.Num(), FirstSamples.Num()); ++I)
+						Changed += FMath::Abs(int32(Samples[I].R) - FirstSamples[I].R) > 12;
+					Test->TestTrue(TEXT("The visible toys change pose between decoded frames"), Changed > Samples.Num() / 100);
+				}
+				const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/LoadingFilm");
+				IFileManager::Get().MakeDirectory(*Folder, true);
+				TArray64<uint8> PNG;
+				FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
+				Test->TestTrue(TEXT("Rendered film frame saved"), FFileHelper::SaveArrayToFile(PNG,
+				    *(Folder / FString::Printf(TEXT("Pose%d.png"), ++Captured))));
+			}
+			if (Captured != 2 || !bWrapped) return false;
+			Test->TestTrue(TEXT("The real film loops at 4.8 seconds"), Player->IsLooping() &&
+			    FMath::IsNearlyEqual(Player->GetDuration().GetTotalSeconds(), 4.8, .1));
+			return true;
+		}
+	private:
+		FAutomationTestBase* Test;
+		TWeakObjectPtr<UGameViewportClient> Viewport;
+		TSharedPtr<STBLoadingScreen> Screen;
+		TArray<FColor> FirstSamples;
+		double Deadline, Previous = 0.;
+		int32 Captured = 0;
+	};
+
+	class FLoadingFilmTravelReview : public IAutomationLatentCommand
+	{
+	public:
+		explicit FLoadingFilmTravelReview(FAutomationTestBase* InTest) : Test(InTest) {}
+		~FLoadingFilmTravelReview() override
+		{
+			if (StartHandle.IsValid()) GetMoviePlayer()->OnMoviePlaybackStarted().Remove(StartHandle);
+		}
+		bool Update() override
+		{
+			auto* World = GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetWorld() : nullptr;
+			if (!StartHandle.IsValid())
+			{
+				if (!Test->TestTrue(TEXT("Native loading movie is enabled in the standalone game"), World && IsMoviePlayerEnabled()))
+					return true;
+				StartHandle = GetMoviePlayer()->OnMoviePlaybackStarted().AddLambda([this]
+				{
+					ActiveMovie = GetMoviePlayer()->GetMovieName();
+				});
+				Destination = World->GetMapName().EndsWith(TEXT("Title")) ? TEXT("TB_Lobby") : TEXT("Title");
+				Deadline = FPlatformTime::Seconds() + 120.;
+				UGameplayStatics::OpenLevel(World, FName(*(TEXT("/Game/Maps/") + Destination)));
+				return false;
+			}
+			if (World && World->GetMapName().EndsWith(Destination))
+			{
+				Test->TestEqual(TEXT("Real hard map travel opened the native movie streamer"), ActiveMovie,
+				                FString(STBLoadingScreen::MovieName()));
+				return true;
+			}
+			if (FPlatformTime::Seconds() < Deadline) return false;
+			Test->AddError(TEXT("The requested hard map travel did not finish"));
+			return true;
+		}
+	private:
+		FAutomationTestBase* Test;
+		FDelegateHandle StartHandle;
+		FString ActiveMovie, Destination;
+		double Deadline = 0.;
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBLoadingFilm, "ToonStory.UI.VisualReview.LoadingFilm",
+    EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBLoadingFilm::RunTest(const FString&)
+{
+	if (!FParse::Param(FCommandLine::Get(), TEXT("UIReviewScreenshots")))
+	{
+		AddInfo(TEXT("Use -UIReviewScreenshots in a rendered game process to exercise video decoding"));
+		return true;
+	}
+	auto* Viewport = GEngine ? GEngine->GameViewport.Get() : nullptr;
+	if (!TestNotNull(TEXT("Rendered game viewport"), Viewport)) return false;
+	ADD_LATENT_AUTOMATION_COMMAND(FLoadingFilmReview(this, Viewport));
+	ADD_LATENT_AUTOMATION_COMMAND(FLoadingFilmTravelReview(this));
 	return true;
 }
 #endif

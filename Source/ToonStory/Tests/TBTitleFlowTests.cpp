@@ -12,10 +12,11 @@
 #include "Core/TBController.h"
 #include "UI/TBTitleMenu.h"
 #include "UI/TBHUD.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
-#include "Components/ComboBoxString.h"
+#include "Components/ScrollBox.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
@@ -86,19 +87,19 @@ namespace
 					}
 					{
 						auto* Menu = GetTitle();
-						auto* Rooms = Cast<UComboBoxString>(Menu->WidgetTree->FindWidget(TEXT("Rooms")));
+						auto* Rooms = Cast<UScrollBox>(Menu->WidgetTree->FindWidget(TEXT("Rooms")));
 						auto* Join = Cast<UButton>(Menu->WidgetTree->FindWidget(TEXT("Join")));
 						if (!Rooms || !Join)
 						{
 							Test->AddError(TEXT("Room selection UI missing"));
 							return true;
 						}
-						Test->TestEqual(TEXT("Room list reflects session results"), Rooms->GetOptionCount(),
+						Test->TestEqual(TEXT("Room list reflects session results"), Rooms->GetChildrenCount(),
 						                Session->Rooms.Num());
 						Test->TestEqual(TEXT("Join requires a selected result"), Join->GetIsEnabled(),
 						                !Session->Rooms.IsEmpty());
 					}
-					if (!ClickTitle(TEXT("HostButton")))
+					if (!ClickTitle(TEXT("BackFromFinder")) || !ClickTitle(TEXT("HostButton")))
 					{
 						return true;
 					}
@@ -117,6 +118,7 @@ namespace
 						Test->AddError(TEXT("Stage controller/HUD missing"));
 						return true;
 					}
+					if (!Host->CanUseLobbyShortcuts()) return false;
 					Test->TestNull(TEXT("Title UI removed on entering the stage"), GetTitle());
 					Test->TestTrue(TEXT("Hosted session survives Title -> stage"), HasSession(World));
 					Second = Cast<ATBController>(UGameplayStatics::CreatePlayer(World, -1, true));
@@ -128,6 +130,10 @@ namespace
 					Host->TBRules(1, 1, 10.f, 5);
 					HUD->NotifyHitBoxClick(TEXT("Ready"));
 					Second->TBReady();
+					Step = 23;
+					break;
+				case 23:
+					if (!Host || !HUD || !Host->CanUseLobbyShortcuts()) return false;
 					HUD->NotifyHitBoxClick(TEXT("Start"));
 					Step = 20;
 					break;
@@ -187,6 +193,19 @@ namespace
 				case 21:
 					if (World->IsInSeamlessTravel() || !State || State->bTravelPending ||
 					    !TBLobbySettings::IsLobby(World) || !Host || !HUD) return false;
+					if (const auto* Loading = GI->GetSubsystem<UTBLoadingScreenSubsystem>(); Loading && Loading->IsCoveringViewport())
+					{
+						if (!bCheckedCoveredLobby && Host->GetPlayerState<ATBPlayerState>())
+						{
+							Host->TBReady();
+							Host->TBStart();
+							Test->TestFalse(TEXT("Ready shortcut stays inactive while loading covers the lobby"), Host->GetPlayerState<ATBPlayerState>()->bReady);
+							Test->TestFalse(TEXT("Start shortcut stays inactive while loading covers the lobby"), State->bTravelPending);
+							bCheckedCoveredLobby = true;
+						}
+						return false;
+					}
+					if (!Host->CanUseLobbyShortcuts()) return false;
 					if (auto* Player = GI->GetLocalPlayerByIndex(1))
 						Second = Cast<ATBController>(Player->GetPlayerController(World));
 					if (!Test->TestTrue(TEXT("Second participant returns to the lobby"), Second.IsValid())) return true;
@@ -197,6 +216,10 @@ namespace
 					Test->TestFalse(TEXT("Second ready reset"), Second->GetPlayerState<ATBPlayerState>()->bReady);
 					HUD->NotifyHitBoxClick(TEXT("Ready"));
 					Second->TBReady();
+					Step = 24;
+					break;
+				case 24:
+					if (!Host || !HUD || !Host->CanUseLobbyShortcuts()) return false;
 					HUD->NotifyHitBoxClick(TEXT("Start"));
 					Step = 22;
 					break;
@@ -218,6 +241,11 @@ namespace
 					}
 					Test->TestTrue(TEXT("In-match leave menu open"), Host->IsLeaveMenuOpen());
 					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					Test->TestTrue(TEXT("Leave confirmation blocks underlying controls"), HUD->IsChatBlocked());
+					HUD->NotifyHitBoxClick(TEXT("CancelLeave"));
+					Test->TestTrue(TEXT("Cancel keeps the session"), HasSession(World));
+					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					HUD->NotifyHitBoxClick(TEXT("ConfirmLeave"));
 					++Step;
 					break;
 				case 7:
@@ -255,6 +283,11 @@ namespace
 					Test->TestTrue(TEXT("Can host again"), HasSession(World));
 					Test->TestEqual(TEXT("Rehost begins in lobby"), State->Phase, ETBPhase::Lobby);
 					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					Test->TestTrue(TEXT("Leave confirmation blocks underlying controls"), HUD->IsChatBlocked());
+					HUD->NotifyHitBoxClick(TEXT("CancelLeave"));
+					Test->TestTrue(TEXT("Cancel keeps the session"), HasSession(World));
+					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					HUD->NotifyHitBoxClick(TEXT("ConfirmLeave"));
 					++Step;
 					break;
 				case 9:
@@ -311,6 +344,7 @@ namespace
 		TWeakObjectPtr<ATBController> Second;
 		double Deadline;
 		int32 Step = 0;
+		bool bCheckedCoveredLobby = false;
 	};
 } // namespace
 

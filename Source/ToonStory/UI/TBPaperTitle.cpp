@@ -6,19 +6,36 @@
 #include "Core/TBSession.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
-#include "Components/VerticalBox.h"
-#include "Components/VerticalBoxSlot.h"
+#include "Components/ScrollBox.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/SizeBox.h"
 #include "Engine/GameInstance.h"
 #include "TBPaperStyle.h"
+#include "TBPaperButton.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ScaleBox.h"
 #include "Components/Image.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "InputCoreTypes.h"
+
+namespace
+{
+	struct FHelpBinding
+	{
+		FName Mapping;
+		const TCHAR* LabelKey;
+	};
+	const FHelpBinding HelpBindings[] = {
+		{TB::Keys::MoveForward, TEXT("Root.Help.Move")}, {NAME_None, TEXT("Root.Help.Look")},
+		{TB::Keys::Jump, TEXT("Keys.Action.Common_Jump")}, {TB::Keys::ToySprint, TEXT("Keys.Action.Toy_Sprint")},
+		{TB::Keys::HumanCrouch, TEXT("Keys.Action.Human_Crouch")}, {TB::Keys::HumanInteract, TEXT("Keys.Action.Human_Interact")},
+		{TB::Keys::ToyInteract, TEXT("Keys.Action.Toy_Interact")}, {TB::Keys::HumanDrop, TEXT("Keys.Action.Human_Drop")},
+		{TB::Keys::ToyTaunt, TEXT("Keys.Action.Toy_Taunt")}, {TB::Keys::HumanGaze, TEXT("Keys.Action.Human_Gaze")},
+		{TB::Keys::ToyPush, TEXT("Keys.Action.Toy_Push")}
+	};
+}
 
 void UTBTitleMenu::BuildPaperLayout()
 {
@@ -259,76 +276,40 @@ void UTBTitleMenu::BuildPaperLayout()
 	EditableArtCaption(HelpButton, TEXT("Root.Title.Help"), TEXT("あそびかた"),
 	    FVector2D(260, 105), FVector4(82, 36, 234, 77), 235, 25);
 	UpdateTitleCaptions();
-	auto* RoomCard = WidgetTree->ConstructWidget<UBorder>();
-	RoomCard->SetBrush(TBPaper::Brush(PaperTexture, TBPaper::Paper));
-	// 部屋をさがすの右側。ボタン（x 〜530）やアイコン（y 745〜）と重ならない。
-	Place(RoomCard, 880, 330, 560, 328);
-	RoomCard->SetPadding(FMargin(24));
-	auto* Column = WidgetTree->ConstructWidget<UVerticalBox>();
-	RoomCard->SetContent(Column);
-	Column->AddChildToVerticalBox(Label(TBText::Get(TEXT("Root.Title.Together")), 26, TBPaper::Teal, true));
-	Column->AddChildToVerticalBox(Label(TBText::Get(TEXT("Root.Title.Choose")), 17, TBPaper::Muted))
-	    ->SetPadding(FMargin(0, 8, 0, 0));
-	RoomList = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Rooms"));
-	FComboBoxStyle RoomStyle;
-	FComboButtonStyle RoomButton;
-	RoomButton.SetButtonStyle(TBPaper::CompactButtonStyle(true));
-	RoomButton.SetMenuBorderBrush(TBPaper::Brush(PaperTexture, TBPaper::Paper));
-	RoomButton.SetMenuBorderPadding(FMargin(12));
-	FSlateBrush Arrow = TBPaper::ImageBrush(TBPaper::Art(TEXT("Mark_ChevronDown")));
-	Arrow.ImageSize = FVector2D(18, 12);
-	RoomButton.SetDownArrowImage(Arrow);
-	RoomStyle.SetComboButtonStyle(RoomButton);
-	RoomList->SetWidgetStyle(RoomStyle);
-	RoomList->SetContentPadding(FMargin(14, 10));
-	FTableRowStyle RoomRow;
-	RoomRow.SetEvenRowBackgroundBrush(TBPaper::Brush(PaperTexture, TBPaper::Paper));
-	RoomRow.SetOddRowBackgroundBrush(TBPaper::Brush(PaperTexture, TBPaper::Cream));
-	RoomRow.SetEvenRowBackgroundHoveredBrush(TBPaper::Brush(PaperTexture, TBPaper::Gold));
-	RoomRow.SetOddRowBackgroundHoveredBrush(TBPaper::Brush(PaperTexture, TBPaper::Gold));
-	RoomRow.SetSelectorFocusedBrush(TBPaper::Brush(PaperTexture, TBPaper::Lavender));
-	RoomRow.SetActiveBrush(TBPaper::Brush(PaperTexture, TBPaper::Gold));
-	RoomRow.SetInactiveBrush(TBPaper::Brush(PaperTexture, TBPaper::Cream));
-	RoomList->SetItemStyle(RoomRow);
-	RoomList->OnGenerateWidgetEvent.BindDynamic(this, &ThisClass::RoomLabel);
-	Column->AddChildToVerticalBox(RoomList)->SetPadding(FMargin(0, 22, 0, 12));
-	RoomHintText = Label(FText::FromString(TEXT("")), 16, TBPaper::Muted);
-	Column->AddChildToVerticalBox(RoomHintText);
-	JoinButton = AddButton(TEXT("Join"), TBText::Get(TEXT("Root.Title.Join")), 910, 560, 500);
-	// 右のカードは、部屋をさがすときだけ出す。
-	RoomCardWidgets = {RoomCard, JoinButton};
-	SetRoomCardsShown(false);
 	StatusText = Label(FText::FromString(TEXT("")), 17, TBPaper::Paper);
 	StatusText->SetShadowColorAndOpacity(TBPaper::Ink);
 	StatusText->SetShadowOffset(FVector2D(1, 2));
 	Place(StatusText, 96, 855, 1100, 40);
 	HostButton->OnClicked.AddDynamic(this, &ThisClass::Host);
 	FindButton->OnClicked.AddDynamic(this, &ThisClass::Find);
-	JoinButton->OnClicked.AddDynamic(this, &ThisClass::Join);
 	QuitButton->OnClicked.AddDynamic(this, &ThisClass::Quit);
 	HelpButton->OnClicked.AddDynamic(this, &ThisClass::Help);
 	OptionsButton->OnClicked.AddDynamic(this, &ThisClass::OpenOptions);
-	RoomList->OnSelectionChanged.AddDynamic(this, &ThisClass::SelectionChanged);
 	TitleContent = Scale;
-	auto* Overlay = WidgetTree->ConstructWidget<UCanvasPanel>();
-	HelpOverlay = Overlay;
-	Fill(Overlay);
-	auto* Dim = WidgetTree->ConstructWidget<UImage>();
-	Dim->SetColorAndOpacity(FLinearColor(0.015f, .025f, .02f, .78f));
-	auto* DimSlot = Overlay->AddChildToCanvas(Dim);
-	DimSlot->SetAnchors(FAnchors(0, 0, 1, 1));
-	DimSlot->SetOffsets(FMargin(0));
-	auto* PopupScale = WidgetTree->ConstructWidget<UScaleBox>();
-	PopupScale->SetStretch(EStretch::ScaleToFit);
-	auto* PopupSlot = Overlay->AddChildToCanvas(PopupScale);
-	PopupSlot->SetAnchors(FAnchors(0, 0, 1, 1));
-	PopupSlot->SetOffsets(FMargin(0));
-	auto* PopupSize = WidgetTree->ConstructWidget<USizeBox>();
-	PopupSize->SetWidthOverride(1280);
-	PopupSize->SetHeightOverride(800);
-	PopupScale->SetContent(PopupSize);
-	Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
-	PopupSize->SetContent(Canvas);
+	auto NewPopup = [&]
+	{
+		auto* Overlay = WidgetTree->ConstructWidget<UCanvasPanel>();
+		Fill(Overlay);
+		auto FillPopup = [&](UWidget* Widget)
+		{
+			auto* Slot = Overlay->AddChildToCanvas(Widget);
+			Slot->SetAnchors(FAnchors(0, 0, 1, 1));
+			Slot->SetOffsets(FMargin(0));
+		};
+		auto* Dim = WidgetTree->ConstructWidget<UImage>();
+		Dim->SetColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.62f));
+		FillPopup(Dim);
+		auto* PopupScale = WidgetTree->ConstructWidget<UScaleBox>();
+		PopupScale->SetStretch(EStretch::ScaleToFit);
+		FillPopup(PopupScale);
+		auto* PopupSize = WidgetTree->ConstructWidget<USizeBox>();
+		PopupSize->SetWidthOverride(1280);
+		PopupSize->SetHeightOverride(800);
+		PopupScale->SetContent(PopupSize);
+		Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
+		PopupSize->SetContent(Canvas);
+		return Overlay;
+	};
 	auto Card = [&](float X, float Y, float W, float H, FLinearColor Color)
 	{
 		auto* Shadow = WidgetTree->ConstructWidget<UBorder>();
@@ -347,24 +328,65 @@ void UTBTitleMenu::BuildPaperLayout()
 		Art->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Place(Art, X, Y, W, H);
 	};
+	auto Sign = [&](const TCHAR* Name, const TCHAR* Key, float X, float Y, float Width, FLinearColor Tint)
+	{
+		auto* Button = AddButton(Name, TBText::Get(Key), X, Y, Width);
+		Button->SetStyle(TBPaper::SignButtonStyle(Tint));
+		auto* Caption = CastChecked<UTextBlock>(Button->GetContent());
+		Caption->RemoveFromParent();
+		TBPaper::FitSignCaption(*WidgetTree, *Button, *Caption);
+		return Button;
+	};
+	FinderOverlay = NewPopup();
+	Card(206, 122, 868, 556, TBPaper::Paper);
+	Place(Label(TBText::Get(TEXT("Root.Title.Find")), 32, TBPaper::Ink, true), 254, 155, 760, 56);
+	RoomHintText = Label(FText::GetEmpty(), 19, TBPaper::Muted);
+	Place(RoomHintText, 256, 228, 760, 66);
+	RoomList = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("Rooms"));
+	RoomList->SetScrollbarThickness(FVector2D(6, 6));
+	Place(RoomList, 252, 304, 778, 244);
+	BackFromFinderButton = Sign(TEXT("BackFromFinder"), TEXT("Root.Common.Back"), 248, 577, 172, TBPaper::Paper);
+	RefreshRoomsButton = Sign(TEXT("RefreshRooms"), TEXT("Root.Title.Refresh"), 537, 577, 176, TBPaper::Teal);
+	JoinButton = Sign(TEXT("Join"), TEXT("Root.Title.Join"), 728, 577, 298, TBPaper::Gold);
+	BackFromFinderButton->OnClicked.AddDynamic(this, &ThisClass::CloseFinder);
+	RefreshRoomsButton->OnClicked.AddDynamic(this, &ThisClass::Find);
+	JoinButton->OnClicked.AddDynamic(this, &ThisClass::Join);
+	SetRoomCardsShown(false);
+
+	HelpOverlay = NewPopup();
 	Card(130, 36, 1020, 730, TBPaper::Paper);
-	Icon(TEXT("Tape_Cream"), 563, 20, 154, 38);
-	Place(Label(TBText::Get(TEXT("Root.Title.Help")), 34, TBPaper::Ink, true), 180, 72, 750, 56);
-	Place(Label(TBText::Get(TEXT("Root.Help.Lead")), 20, TBPaper::Muted), 180, 130, 860, 42);
-	Card(176, 194, 440, 258, TBPaper::Cream);
-	Card(640, 194, 464, 258, TBPaper::Lavender);
-	Icon(TEXT("Icon_Battery"), 196, 206, 56, 56);
-	Place(Label(TBText::Get(TEXT("Root.Common.Toy")), 27, TBPaper::Accent, true), 264, 216, 300, 45);
-	HelpToyText = Label(FText::FromString(TEXT("")), 19, TBPaper::Ink);
-	Place(HelpToyText, 204, 276, 380, 166);
-	Icon(TEXT("Icon_PlayerRatio"), 660, 206, 56, 56);
-	Place(Label(TBText::Get(TEXT("Root.Common.Human")), 27, TBPaper::HumanBlue, true), 728, 216, 330, 45);
-	HelpHumanText = Label(FText::FromString(TEXT("")), 19, TBPaper::Ink);
-	Place(HelpHumanText, 668, 276, 404, 166);
-	Place(Label(TBText::Get(TEXT("Root.Help.Controls")), 23, TBPaper::Ink, true), 180, 478, 840, 40);
-	HelpControlsText = Label(FText::FromString(TEXT("")), 18, TBPaper::Ink);
-	Place(HelpControlsText, 184, 526, 890, 130);
-	CloseHelpButton = AddButton(TEXT("CloseHelp"), TBText::Get(TEXT("Root.Help.Close")), 465, 680, 350);
+	Place(Label(TBText::Get(TEXT("Root.Title.Help")), 34, TBPaper::Ink, true), 180, 68, 890, 56);
+	Card(176, 136, 448, 258, TBPaper::Cream);
+	Card(640, 136, 464, 258, FMath::Lerp(TBPaper::Paper, TBPaper::Teal, .32f));
+	Icon(TEXT("Icon_Battery"), 200, 151, 51, 51);
+	Place(Label(TBText::Get(TEXT("Root.Common.Toy")), 27, TBPaper::Ink, true), 262, 154, 340, 48);
+	HelpToyText = Label(FText::GetEmpty(), 18, TBPaper::Ink);
+	Place(HelpToyText, 204, 219, 397, 160);
+	Icon(TEXT("Icon_PlayerRatio"), 663, 151, 51, 51);
+	Place(Label(TBText::Get(TEXT("Root.Common.Human")), 27, TBPaper::Ink, true), 726, 154, 348, 48);
+	HelpHumanText = Label(FText::GetEmpty(), 18, TBPaper::Ink);
+	Place(HelpHumanText, 668, 219, 411, 160);
+	Place(Label(TBText::Get(TEXT("Root.Help.Controls")), 23, TBPaper::Ink, true), 180, 418, 890, 40);
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(HelpBindings); ++Index)
+	{
+		const float X = 184 + (Index % 3) * 310, Y = 475 + (Index / 3) * 43;
+		auto* Keycap = WidgetTree->ConstructWidget<UBorder>();
+		Keycap->SetBrush(FSlateRoundedBoxBrush(TBPaper::Paper, 5.f, TBPaper::Muted, 1.5f));
+		Keycap->SetPadding(FMargin(5, 3));
+		Keycap->SetHorizontalAlignment(HAlign_Center);
+		Keycap->SetVerticalAlignment(VAlign_Center);
+		auto* Fit = WidgetTree->ConstructWidget<UScaleBox>();
+		Fit->SetStretch(EStretch::ScaleToFit);
+		Fit->SetStretchDirection(EStretchDirection::DownOnly);
+		auto* Key = Label(FText::GetEmpty(), 17, TBPaper::Ink);
+		Key->SetAutoWrapText(false);
+		HelpKeyLabels.Add(Key);
+		Fit->SetContent(Key);
+		Keycap->SetContent(Fit);
+		Place(Keycap, X, Y, 98, 33);
+		Place(Label(TBText::Get(HelpBindings[Index].LabelKey), 16, TBPaper::Ink), X + 108, Y + 2, 196, 39);
+	}
+	CloseHelpButton = Sign(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 742, 676, 354, TBPaper::Gold);
 	CloseHelpButton->OnClicked.AddDynamic(this, &ThisClass::CloseHelp);
 	HelpOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	RefreshHelpText();
@@ -375,36 +397,28 @@ void UTBTitleMenu::Quit()
 	UKismetSystemLibrary::QuitGame(this, GetOwningPlayer(), EQuitPreference::Quit, false);
 }
 
-UWidget* UTBTitleMenu::RoomLabel(FString Item)
-{
-	auto* Label = WidgetTree->ConstructWidget<UTextBlock>();
-	Label->SetText(FText::FromString(Item));
-	Label->SetFont(FSlateFontInfo(PaperFont, 17));
-	Label->SetColorAndOpacity(TBPaper::Ink);
-	Label->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-	return Label;
-}
-
 void UTBTitleMenu::RefreshHelpText()
 {
 	const auto* PC = GetOwningPlayer();
-	const FString Move = TB::MoveKeysLabel(PC), Jump = TB::KeyLabel(PC, TB::Keys::Jump);
 	const FString Interact = TB::KeyLabel(PC, TB::Keys::HumanInteract), ToyInteract = TB::KeyLabel(PC, TB::Keys::ToyInteract);
 	const FString Drop = TB::KeyLabel(PC, TB::Keys::HumanDrop);
 	HelpToyText->SetText(FText::Format(TBText::Get(TEXT("Root.Help.Toy")),
 	    FText::FromString(TB::KeyLabel(PC, TB::Keys::ToyPush)), FText::FromString(ToyInteract)));
 	HelpHumanText->SetText(FText::Format(TBText::Get(TEXT("Root.Help.Human")),
 	    FText::FromString(Interact), FText::FromString(Interact), FText::FromString(Drop)));
-	HelpControlsText->SetText(FText::Format(TBText::Get(TEXT("Root.Help.Keys")),
-	    FText::FromString(Move), FText::FromString(Jump), FText::FromString(TB::KeyLabel(PC, TB::Keys::ToySprint)),
-	    FText::FromString(TB::KeyLabel(PC, TB::Keys::HumanCrouch)), FText::FromString(Interact), FText::FromString(ToyInteract),
-	    FText::FromString(Drop), FText::FromString(TB::KeyLabel(PC, TB::Keys::ToyTaunt)), FText::FromString(TB::KeyLabel(PC, TB::Keys::ToyPush))));
+	for (int32 Index = 0; Index < HelpKeyLabels.Num(); ++Index)
+	{
+		const FName Mapping = HelpBindings[Index].Mapping;
+		const FText Key = Mapping.IsNone() ? TBText::Get(TEXT("Root.Help.Mouse"))
+		    : FText::FromString(Mapping == TB::Keys::MoveForward ? TB::MoveKeysLabel(PC) : TB::KeyLabel(PC, Mapping));
+		HelpKeyLabels[Index]->SetText(Key);
+	}
 }
 
 void UTBTitleMenu::Help()
 {
 	RefreshHelpText();
-	TitleContent->SetIsEnabled(false);
+	TitleContent->SetVisibility(ESlateVisibility::Collapsed);
 	HelpOverlay->SetVisibility(ESlateVisibility::Visible);
 	CloseHelpButton->SetKeyboardFocus();
 }
@@ -412,7 +426,7 @@ void UTBTitleMenu::Help()
 void UTBTitleMenu::CloseHelp()
 {
 	HelpOverlay->SetVisibility(ESlateVisibility::Collapsed);
-	TitleContent->SetIsEnabled(true);
+	TitleContent->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	HelpButton->SetKeyboardFocus();
 }
 
@@ -428,6 +442,11 @@ FReply UTBTitleMenu::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKe
 	if (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible && KeyEvent.GetKey() == EKeys::Escape)
 	{
 		CloseHelp();
+		return FReply::Handled();
+	}
+	if (bRoomCardsShown && KeyEvent.GetKey() == EKeys::Escape)
+	{
+		CloseFinder();
 		return FReply::Handled();
 	}
 	return Super::NativeOnPreviewKeyDown(Geometry, KeyEvent);

@@ -43,20 +43,22 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTex
 	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
 	Place(Divider, 8, 49, 784, 1);
 	auto* KeyPlate = WidgetTree->ConstructWidget<UBorder>();
-	KeyPlate->SetBrush(FSlateRoundedBoxBrush(TBPaper::Paper, 8.f, TBPaper::Outline, 2.5f));
+	KeyPlate->SetBrush(TBPaper::SlicedArtwork(TBPaper::Art(TEXT("Frame_StageSelect")),
+	    FVector2D(196, 42), FMargin(.08f, .29f)));
 	KeyPlate->SetVisibility(ESlateVisibility::HitTestInvisible);
 	Place(KeyPlate, 240, 4, 360, 42);
-	Place(Text(Label, 19), 8, 10, 224, 36);
+	Place(Text(Label, 19), 8, 6, 224, 36);
 	KeyText = Text(FText::GetEmpty(), 19);
 	KeyText->SetJustification(ETextJustify::Center);
-	Place(KeyText, 240, 10, 360, 36);
+	Place(KeyText, 240, 6, 360, 36);
 	auto* ResetButton = WidgetTree->ConstructWidget<UButton>();
-	ResetButton->SetStyle(TBPaper::CompactButtonStyle(true));
+	const FSlateBrush ButtonPaper = TBPaper::ImageBrush(Paper);
+	ResetButton->SetStyle(TBPaper::ArtButtonStyle(ButtonPaper));
 	ResetButton->SetContent(Text(TBText::Get(TEXT("Keys.Reset")), 16));
 	Place(ResetButton, 612, 3, 84, 44);
 	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetClicked);
 	ChangeButton = WidgetTree->ConstructWidget<UButton>();
-	ChangeButton->SetStyle(TBPaper::CompactButtonStyle());
+	ChangeButton->SetStyle(TBPaper::ArtButtonStyle(ButtonPaper, TBPaper::Gold));
 	ChangeButton->SetContent(Text(TBText::Get(TEXT("Keys.Change")), 16));
 	Place(ChangeButton, 716, 3, 84, 44);
 	ChangeButton->OnClicked.AddDynamic(this, &ThisClass::Clicked);

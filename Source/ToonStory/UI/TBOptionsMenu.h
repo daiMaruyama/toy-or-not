@@ -131,6 +131,11 @@ private:
 	UFUNCTION()
 	void ShowLanguage();
 	UFUNCTION()
+	void SelectJapanese();
+	UFUNCTION()
+	void SelectEnglish();
+	void SelectLanguage(const TCHAR* Code);
+	UFUNCTION()
 	void ResetPage();
 	UFUNCTION()
 	void KeepVideoMode();
@@ -159,6 +164,10 @@ private:
 	TArray<TObjectPtr<UTBKeyRow>> KeyRows;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UButton>> Tabs;
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> JapaneseButton;
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> EnglishButton;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTBOptionRow>> Rows;
 	UPROPERTY(Transient)

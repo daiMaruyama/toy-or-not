@@ -6,13 +6,42 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
+#include "FileMediaSource.h"
+#include "Fonts/FontMeasure.h"
 #include "Fonts/SlateFontInfo.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Misc/Paths.h"
 #include "Rendering/DrawElements.h"
+#include "Rendering/SlateRenderer.h"
 #include "Styling/CoreStyle.h"
 
-void STBLoadingScreen::Construct(const FArguments&)
+void STBLoadingScreen::Construct(const FArguments& InArgs)
 {
 	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
+	Backdrop = InArgs._Backdrop;
+	Poster.Reset(InArgs._Poster);
+	PosterBrush.SetResourceObject(Poster.Get());
+	if (Backdrop == ETBLoadingBackdrop::ViewportMovie)
+	{
+		Player.Reset(NewObject<UMediaPlayer>());
+		Film.Reset(NewObject<UMediaTexture>());
+		Film->NewStyleOutput = true;
+		Film->SetMediaPlayer(Player.Get());
+		Film->UpdateResource();
+		FilmBrush.SetResourceObject(Film.Get());
+		auto* Source = NewObject<UFileMediaSource>(Player.Get());
+		Source->SetFilePath(FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("Movies") /
+		                                                      (FString(MovieName()) + TEXT(".mp4"))));
+		FMediaPlayerOptions Options;
+		Options.PlayOnOpen = EMediaPlayerOptionBooleanOverride::Disabled;
+		Options.Loop = EMediaPlayerOptionBooleanOverride::Enabled;
+		Player->OpenSourceWithOptions(Source, Options);
+		SetMovieVisible(true);
+	}
+	Font.Reset(TBPaper::Font(GetTransientPackage()));
+	Restart();
+	SetVisibility(EVisibility::HitTestInvisible);
+	if (Backdrop != ETBLoadingBackdrop::Illustrations) return;
 	// ロード中に消されないよう、絵とフォントはここで読み込んで持っておく。
 	for (const auto& Path : Settings->Toys)
 	{
@@ -25,12 +54,42 @@ void STBLoadingScreen::Construct(const FArguments&)
 			Brushes.Add(Brush);
 		}
 	}
-	Font.Reset(TBPaper::Font(GetTransientPackage()));
 	Random.Initialize(int32(FPlatformTime::Cycles()));
 	// 始まった瞬間から、おもちゃがもう顔を出している。途中で切れても不自然にならないように。
 	Started = FPlatformTime::Seconds() - Settings->PeekSeconds * .4;
-	Restart();
-	SetVisibility(EVisibility::HitTestInvisible);
+}
+
+STBLoadingScreen::~STBLoadingScreen()
+{
+	if (Player.IsValid()) Player->Close();
+}
+
+void STBLoadingScreen::SetMovieVisible(bool bVisible, double MovieStartedAt)
+{
+	bStartMovieWhenReady = bVisible;
+	ResumeMovieFrom = MovieStartedAt;
+	if (!bVisible && Player.IsValid() && Player->IsPlaying()) Player->Pause();
+}
+
+void STBLoadingScreen::Tick(const FGeometry&, double, float)
+{
+	if (!bStartMovieWhenReady || !Player.IsValid() || !Player->IsReady()) return;
+	if (ResumeMovieFrom > 0.)
+	{
+		// Match the native stream's current position when map travel hands off to the game viewport.
+		const double Duration = Player->GetDuration().GetTotalSeconds();
+		if (Duration > 0.)
+			Player->Seek(FTimespan::FromSeconds(FMath::Fmod(FPlatformTime::Seconds() - ResumeMovieFrom, Duration)));
+		ResumeMovieFrom = 0.;
+	}
+	bStartMovieWhenReady = !Player->Play();
+}
+
+void STBLoadingScreen::SetStatus(const FText& Text)
+{
+	Status = Text;
+	if (Backdrop != ETBLoadingBackdrop::Illustrations && Font.IsValid())
+		StatusSize = FVector2f(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Status, FSlateFontInfo(Font.Get(), 18)));
 }
 
 bool STBLoadingScreen::IsToyHidden() const
@@ -44,9 +103,10 @@ bool STBLoadingScreen::IsToyHidden() const
 
 void STBLoadingScreen::SetExit(float Value)
 {
-	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	const float Old = Exit;
 	Exit = FMath::Clamp(Value, 0.f, 1.f);
+	if (Backdrop != ETBLoadingBackdrop::Illustrations) return;
+	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	if (Exit <= 0.f) ToyEndsAt = -1.0;
 	else if (Old <= 0.f)
 		ToyEndsAt = ToyStopElapsed(FPlatformTime::Seconds() - Started, Settings->PeekSeconds, Settings->RunSeconds, Settings->HiddenSeconds);
@@ -90,6 +150,38 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	// Let Slate derive the radius from each element's height, including tiny dots and shadows.
 	static const FSlateRoundedBoxBrush Pill(FLinearColor::White);
 	const float S = FMath::Min(W / 1280.f, H / 720.f);
+	if (Backdrop != ETBLoadingBackdrop::Illustrations)
+	{
+		// During a blocking map load the native movie viewport paints underneath this widget.
+		// The game viewport displays the matching still until the first frame has decoded.
+		if (Backdrop == ETBLoadingBackdrop::ViewportMovie || bShowNativePoster.Load())
+		{
+			FSlateDrawElement::MakeBox(Out, Layer++, Geometry.ToPaintGeometry(), White, ESlateDrawEffect::None,
+			                           FLinearColor::FromSRGBColor(FColor(35, 30, 24)));
+			const FSlateBrush* Frame = Poster.IsValid() ? &PosterBrush : nullptr;
+			if (Film.IsValid() && Film->GetWidth() > 2 && Film->GetHeight() > 2) Frame = &FilmBrush;
+			if (Frame)
+			{
+				const FVector2f FilmSize(1280 * S, 720 * S);
+				FSlateDrawElement::MakeBox(Out, Layer++, Geometry.ToPaintGeometry(FilmSize, FSlateLayoutTransform((Size - FilmSize) * .5f)),
+				                           Frame, ESlateDrawEffect::None, FLinearColor::White);
+			}
+		}
+		if (!Status.IsEmpty() && Font.IsValid())
+		{
+			const FVector2f GradientSize(W, 86 * S);
+			FSlateDrawElement::MakeGradient(Out, Layer++, Geometry.ToPaintGeometry(GradientSize,
+			    FSlateLayoutTransform(FVector2f(0, H - GradientSize.Y))),
+			    {FSlateGradientStop(FVector2D(0, 0), FLinearColor::Transparent),
+			     FSlateGradientStop(FVector2D(0, GradientSize.Y), FLinearColor(.023f, .012f, .005f, .66f))}, Orient_Horizontal);
+			const FVector2f Label(W - W * .032f - StatusSize.X * S, H - (21.f + StatusSize.Y) * S);
+			FSlateDrawElement::MakeText(Out, Layer++, Geometry.ToPaintGeometry(StatusSize, FSlateLayoutTransform(S, Label)),
+			                            Status, FSlateFontInfo(Font.Get(), 18), ESlateDrawEffect::None,
+			                            FLinearColor::FromSRGBColor(FColor(255, 246, 223)));
+		}
+		Curtain(Layer);
+		return Layer;
+	}
 	auto Box = [&](const FSlateBrush* Brush, float X, float Y, float BW, float BH, FLinearColor Color)
 	{
 		FSlateDrawElement::MakeBox(Out, Layer, Geometry.ToPaintGeometry(FVector2f(BW, BH), FSlateLayoutTransform(FVector2f(X, Y))),
