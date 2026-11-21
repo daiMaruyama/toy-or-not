@@ -4,79 +4,99 @@
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ComboBoxString.h"
+#include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "TBPaperStyle.h"
 
-namespace
-{
-	constexpr float TrackWidth = 336.f;
-}
-
 void UTBOptionRow::Build(const FText& Label, UFont* HeadingFont, UFont* NumericFont, bool bBar)
 {
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
-	Size->SetWidthOverride(696);
 	Size->SetHeightOverride(53);
 	WidgetTree->RootWidget = Size;
 	auto* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Size->SetContent(Canvas);
-	auto Place = [&](UWidget* Widget, float X, float Y, float W, float H)
+	auto Place = [&](UWidget* Widget, float X, float Y, float W, float H, FAnchors Anchors = FAnchors(0, 0))
 	{
 		auto* Slot = Canvas->AddChildToCanvas(Widget);
-		Slot->SetPosition(FVector2D(X, Y));
-		Slot->SetSize(FVector2D(W, H));
+		Slot->SetAnchors(Anchors);
+		Slot->SetOffsets(FMargin(X, Y, W, H));
 	};
 	auto* Divider = WidgetTree->ConstructWidget<UBorder>();
-	Divider->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(209, 179, 139)), 0.f));
+	Divider->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(190, 182, 156)), 0.f));
 	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Divider, 0, 52, 696, 1);
+	const FAnchors Stretch(0, 0, 1, 0);
+	const FAnchors Right(1, 0);
+	Place(Divider, 0, 52, 6, 1, Stretch);
 	auto* Name = WidgetTree->ConstructWidget<UTextBlock>();
 	Name->SetText(Label);
 	Name->SetFont(FSlateFontInfo(HeadingFont, 11));
 	Name->SetColorAndOpacity(TBPaper::Ink);
-	Place(Name, 6, 15, 264, 29);
+	Place(Name, 6, 15, bBar ? 180 : 264, 29);
 	if (bBar)
 	{
 		const FLinearColor Edge = FLinearColor::FromSRGBColor(FColor(72, 43, 26));
-		auto* Track = WidgetTree->ConstructWidget<UBorder>();
-		Track->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(226, 199, 155)), 4.f, Edge, 1.f));
-		Track->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Place(Track, 280, 22, TrackWidth, 8);
-		TrackFill = WidgetTree->ConstructWidget<UBorder>();
-		TrackFill->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(67, 152, 141)), 3.f));
+		auto StepButton = [&](const TCHAR* Glyph, float X, FAnchors Anchors)
+		{
+			auto* Button = WidgetTree->ConstructWidget<UButton>();
+			Button->SetStyle(TBPaper::PrintButtonStyle(TBPaper::PrintCream));
+			auto* Text = WidgetTree->ConstructWidget<UTextBlock>();
+			Text->SetFont(FSlateFontInfo(NumericFont, 14));
+			Text->SetText(FText::AsCultureInvariant(Glyph));
+			Text->SetColorAndOpacity(TBPaper::PrintInk);
+			auto* Slot = CastChecked<UButtonSlot>(Button->SetContent(Text));
+			Slot->SetHorizontalAlignment(HAlign_Center);
+			Slot->SetVerticalAlignment(VAlign_Center);
+			Slot->SetPadding(FMargin(0));
+			Place(Button, X, 11, 30, 30, Anchors);
+			return Button;
+		};
+		MinusButton = StepButton(TEXT("−"), 193, FAnchors(0, 0));
+		PlusButton = StepButton(TEXT("+"), -36, Right);
+		MinusButton->OnClicked.AddDynamic(this, &ThisClass::Decrease);
+		PlusButton->OnClicked.AddDynamic(this, &ThisClass::Increase);
+		TrackFill = WidgetTree->ConstructWidget<UProgressBar>();
+		FProgressBarStyle TrackStyle;
+		TrackStyle.SetBackgroundImage(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(226, 199, 155)), 4.f, Edge, 1.f));
+		TrackStyle.SetFillImage(FSlateRoundedBoxBrush(TBPaper::PrintSea, 3.f));
+		TrackFill->SetWidgetStyle(TrackStyle);
+		TrackFill->SetBarFillStyle(EProgressBarFillStyle::Scale);
+		TrackFill->SetBorderPadding(FVector2D(1, 1));
+		TrackFill->SetFillColorAndOpacity(FLinearColor::White);
 		TrackFill->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Place(TrackFill, 281, 23, 0, 6);
+		Place(TrackFill, 235, 23, 111, 6, Stretch);
 
 		Slider = WidgetTree->ConstructWidget<USlider>();
 		Slider->MouseUsesStep = true;
 		Slider->SetIndentHandle(false);
 		FSliderStyle Style = Slider->GetWidgetStyle();
 		Style.SetNormalBarImage(FSlateNoResource()).SetHoveredBarImage(FSlateNoResource());
-		Style.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::Gold, 9.f, Edge, 2.f, FVector2D(20, 20)));
+		Style.SetNormalThumbImage(FSlateRoundedBoxBrush(TBPaper::PrintSea, 8.f, TBPaper::PrintInk, 1.f, FVector2D(14, 14)));
 		Style.SetHoveredThumbImage(FSlateRoundedBoxBrush(TBPaper::Cream, 9.f, Edge, 2.f, FVector2D(20, 20)));
 		Slider->SetWidgetStyle(Style);
 		Slider->SetSliderHandleColor(FLinearColor::White);
 		Slider->OnValueChanged.AddDynamic(this, &ThisClass::SliderMoved);
 		Slider->OnMouseCaptureBegin.AddDynamic(this, &ThisClass::SliderGrabbed);
 		Slider->OnMouseCaptureEnd.AddDynamic(this, &ThisClass::SliderReleased);
-		Place(Slider, 270, 7, TrackWidth + 20, 38);
+		Place(Slider, 225, 7, 101, 38, Stretch);
 
 		ValueText = WidgetTree->ConstructWidget<UTextBlock>();
-		ValueText->SetFont(FSlateFontInfo(NumericFont, 14));
+		ValueText->SetFont(FSlateFontInfo(HeadingFont, 10));
 		ValueText->SetColorAndOpacity(TBPaper::Ink);
 		ValueText->SetJustification(ETextJustify::Right);
-		Place(ValueText, 630, 12, 61, 32);
+		Place(ValueText, -104, 15, 59, 30, Right);
 		return;
 	}
 
 	ChoiceFont = HeadingFont;
 	Picker = WidgetTree->ConstructWidget<UComboBoxString>();
-	const FLinearColor ChoiceEdge = FLinearColor::FromSRGBColor(FColor(133, 100, 68));
+	const FLinearColor ChoiceEdge = FLinearColor::FromSRGBColor(FColor(86, 108, 96));
 	const FSlateRoundedBoxBrush Face(FLinearColor::FromSRGBColor(FColor(255, 249, 233)), 5.f, ChoiceEdge, 1.5f);
 	FButtonStyle Button = TBPaper::CompactButtonStyle();
 	Button.SetNormal(Face).SetHovered(FSlateRoundedBoxBrush(TBPaper::Cream, 5.f, ChoiceEdge, 1.5f));
@@ -98,7 +118,7 @@ void UTBOptionRow::Build(const FText& Label, UFont* HeadingFont, UFont* NumericF
 	Picker->SetMaxListHeight(280);
 	Picker->OnGenerateWidgetEvent.BindDynamic(this, &ThisClass::ChoiceText);
 	Picker->OnSelectionChanged.AddDynamic(this, &ThisClass::SelectChoice);
-	Place(Picker, 280, 8, 411, 36);
+	Place(Picker, 280, 8, 6, 36, Stretch);
 }
 
 UWidget* UTBOptionRow::ChoiceText(FString Choice)
@@ -161,8 +181,21 @@ void UTBOptionRow::RefreshText()
 	if (ValueText && Value) ValueText->SetText(FText::FromString(Value()));
 	if (TrackFill && Fill)
 	{
-		CastChecked<UCanvasPanelSlot>(TrackFill->Slot)->SetSize(FVector2D((TrackWidth - 2.f) * FMath::Clamp(Fill(), 0.f, 1.f), 6));
+		const float Fraction = FMath::Clamp(Fill(), 0.f, 1.f);
+		MinusButton->SetIsEnabled(Fraction > KINDA_SMALL_NUMBER);
+		PlusButton->SetIsEnabled(Fraction < 1.f - KINDA_SMALL_NUMBER);
+		TrackFill->SetPercent(Fraction);
 	}
+}
+
+void UTBOptionRow::Decrease()
+{
+	if (Fill) SliderMoved(FMath::Clamp(Fill() - SliderStep, 0.f, 1.f));
+}
+
+void UTBOptionRow::Increase()
+{
+	if (Fill) SliderMoved(FMath::Clamp(Fill() + SliderStep, 0.f, 1.f));
 }
 
 void UTBOptionRow::SliderMoved(float Fraction)

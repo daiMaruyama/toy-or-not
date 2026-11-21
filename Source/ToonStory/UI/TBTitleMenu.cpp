@@ -7,6 +7,7 @@
 #include "Core/TBSession.h"
 #include "Core/TBTitleStory.h"
 #include "Components/Button.h"
+#include "Components/Border.h"
 #include "Components/CheckBox.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
@@ -39,6 +40,20 @@ void UTBTitleMenu::NativeOnInitialized()
 		BlackoutSlot->SetAnchors(FAnchors(0, 0, 1, 1));
 		BlackoutSlot->SetOffsets(FMargin(0));
 		Blackout = Black;
+		auto* Hint = WidgetTree->ConstructWidget<UBorder>();
+		Hint->SetBrush(FSlateRoundedBoxBrush(TBPaper::PrintInk.CopyWithNewOpacity(.72f), 1.f, TBPaper::PrintCream.CopyWithNewOpacity(.8f), 1.f));
+		Hint->SetPadding(FMargin(13, 4));
+		auto* Caption = WidgetTree->ConstructWidget<UTextBlock>();
+		Caption->SetText(TBText::Get(TEXT("Root.Title.Skip")));
+		Caption->SetFont(FSlateFontInfo(PaperFont, 13));
+		Caption->SetColorAndOpacity(TBPaper::PrintCream);
+		Hint->SetContent(Caption);
+		auto* HintSlot = Root->AddChildToCanvas(Hint);
+		HintSlot->SetAnchors(FAnchors(.976f, .966f));
+		HintSlot->SetAlignment(FVector2D(1,1));
+		HintSlot->SetAutoSize(true);
+		Hint->SetVisibility(ESlateVisibility::Collapsed);
+		StorySkipHint = Hint;
 	}
 }
 
@@ -69,7 +84,8 @@ namespace
 {
 	const FName StoryTag(TEXT("TitleStory"));
 	const FName LoopTag(TEXT("TitleLoop"));
-	constexpr float MenuFadeSeconds = 0.8f;
+	constexpr float MenuFadeSeconds = .96f;
+	constexpr double StoryMenuLeadSeconds = 1.8;
 	constexpr float BlackoutSeconds = 0.5f;
 	// メニューを放っておくと寸劇を流す。
 	constexpr float StoryIdleSeconds = 45.f;
@@ -85,20 +101,6 @@ namespace
 		}
 		return nullptr;
 	}
-}
-
-void UTBTitleMenu::UpdateBursts()
-{
-	auto Show = [](UImage* Burst, const UButton* Button)
-	{
-		if (Burst && Button)
-		{
-			Burst->SetVisibility(Button->IsHovered() ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-		}
-	};
-	Show(HostBurst, HostButton);
-	Show(FindBurst, FindButton);
-	Show(HelpBurst, HelpButton);
 }
 
 float UTBTitleMenu::GetMenuOpacity() const
@@ -119,6 +121,8 @@ void UTBTitleMenu::EnterStory()
 	if (!Actor) return;
 	if (auto* Memory = GetGameInstance()->GetSubsystem<UTBTitleStory>()) Memory->bShown = true;
 	State = EState::Story;
+	bOpeningOverlap = false;
+	StorySkipHint->SetVisibility(ESlateVisibility::HitTestInvisible);
 	if (ALevelSequenceActor* Loop = FindSequence(this, LoopTag)) Loop->GetSequencePlayer()->Stop();
 	MenuLayer->SetVisibility(ESlateVisibility::Collapsed);
 	SetRoomCardsShown(false);
@@ -170,6 +174,11 @@ void UTBTitleMenu::SkipStory()
 void UTBTitleMenu::StoryFinished()
 {
 	if (State == EState::Story) EnterMenu();
+	else if (bOpeningOverlap)
+	{
+		bOpeningOverlap = false;
+		StartLoop();
+	}
 }
 
 void UTBTitleMenu::StartLoop()
@@ -189,7 +198,7 @@ void UTBTitleMenu::NoteInput()
 bool UTBTitleMenu::IsBusyInMenu() const
 {
 	// 部屋を探している・入ろうとしている途中、ヘルプやオプションを読んでいる途中に、寸劇で割り込まない。
-	return bRoomCardsShown || (Session && Session->IsBusy()) || (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible) ||
+	return bRoomCardsShown || (QuitOverlay && QuitOverlay->GetVisibility() == ESlateVisibility::Visible) || (Session && Session->IsBusy()) || (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible) ||
 	       (Options.IsValid() && Options->IsInViewport());
 }
 
@@ -211,16 +220,19 @@ void UTBTitleMenu::UpdateIdle(float DeltaTime)
 	}
 }
 
-void UTBTitleMenu::EnterMenu()
+void UTBTitleMenu::EnterMenu(bool bBeforeStoryEnd)
 {
 	State = EState::Menu;
 	if (auto* Memory = GetGameInstance()->GetSubsystem<UTBTitleStory>()) Memory->bShown = true;
 	IdleSeconds = 0.f;
 	if (FSlateApplication::IsInitialized()) LastCursor = FSlateApplication::Get().GetCursorPos();
-	StartLoop();
+	StorySkipHint->SetVisibility(ESlateVisibility::Collapsed);
+	bOpeningOverlap = bBeforeStoryEnd;
+	if (!bBeforeStoryEnd) StartLoop();
 	if (ALevelSequenceActor* Loop = FindSequence(this, LoopTag)) Loop->GetSequencePlayer()->SetPlayRate(1.f);
 	MenuFade = 0.f;
 	MenuLayer->SetRenderOpacity(0.f);
+	TitlePrintSheet->SetRenderTranslation(FVector2D(-680.f, 0));
 	MenuLayer->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	if (Blackout && BlackoutFade <= 0.f) Blackout->SetVisibility(ESlateVisibility::Collapsed);
 	HostButton->SetKeyboardFocus();
@@ -265,10 +277,18 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 		RefreshHelpText();
 		Refresh();
 	}
+	if (State == EState::Story && StoryActor.IsValid())
+	{
+		const auto* Player = StoryActor->GetSequencePlayer();
+		const double Remaining = Player->GetEndTime().AsSeconds() - Player->GetCurrentTime().AsSeconds();
+		if (Player->IsPlaying() && Remaining <= StoryMenuLeadSeconds) EnterMenu(true);
+	}
 	if (State == EState::Menu && MenuFade < 1.f)
 	{
 		MenuFade = FMath::Min(1.f, MenuFade + DeltaTime / MenuFadeSeconds);
-		MenuLayer->SetRenderOpacity(MenuFade);
+		const float Eased = FMath::InterpEaseOut(0.f, 1.f, MenuFade, 3.f);
+		MenuLayer->SetRenderOpacity(Eased);
+		TitlePrintSheet->SetRenderTranslation(FVector2D(-680.f * (1.f - Eased), 0));
 	}
 	if (State == EState::Menu && MenuLayer->GetVisibility() == ESlateVisibility::Collapsed &&
 	    !(Options.IsValid() && Options->IsInViewport()))
@@ -288,18 +308,11 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 		LastCursor = CursorPosition;
 	}
 	UpdateIdle(DeltaTime);
-	UpdateBursts();
-	UpdateTitleCaptions();
-	for (UButton* Button : {HostButton.Get(), FindButton.Get(), HelpButton.Get(), OptionsButton.Get(), QuitButton.Get()})
+	for (UButton* Button : {HostButton.Get(), FindButton.Get(), HelpButton.Get()})
 	{
-		if (Button)
-		{
-			const float Target = !Button->GetIsEnabled() ? 0.f : Button->IsPressed() ? -7.f :
-			    Button->IsHovered() || Button->HasKeyboardFocus() ? -3.f : 0.f;
-			const float Y = FMath::FInterpTo(Button->GetRenderTransform().Translation.Y, Target, DeltaTime, 18.f);
-			Button->SetRenderTranslation(FVector2D(0, Y));
-			Button->SetRenderScale(FVector2D(1.f - Y * .002f));
-		}
+		const FVector2D Target = Button->IsPressed() ? FVector2D(5, 4) :
+		    Button->IsHovered() ? FVector2D(5, -1) : FVector2D::ZeroVector;
+		Button->SetRenderTranslation(Target);
 	}
 }
 
@@ -345,14 +358,14 @@ void UTBTitleMenu::Refresh()
 	RoomHintText->SetText(FText::FromString(TBPaper::Status(Session->Status)));
 	const bool bShowRooms = Ready && !Session->Rooms.IsEmpty();
 	auto* HintSlot = CastChecked<UCanvasPanelSlot>(RoomHintText->Slot);
-	HintSlot->SetPosition(bShowRooms ? FVector2D(550, 219) : FVector2D(340, 380));
-	HintSlot->SetSize(bShowRooms ? FVector2D(394, 48) : FVector2D(600, 62));
+	HintSlot->SetPosition(bShowRooms ? FVector2D(652, 251) : FVector2D(447, 352));
+	HintSlot->SetSize(bShowRooms ? FVector2D(174, 47) : FVector2D(385, 56));
 	RoomHintText->SetJustification(bShowRooms ? ETextJustify::Right : ETextJustify::Center);
 	RoomList->SetVisibility(bShowRooms ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	JoinButton->SetVisibility(bShowRooms ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	auto* RefreshSlot = CastChecked<UCanvasPanelSlot>(RefreshRoomsButton->Slot);
-	RefreshSlot->SetPosition(FVector2D(bShowRooms ? 682 : 842, 552));
-	RefreshRoomsButton->SetStyle(TBPaper::SignButtonStyle(bShowRooms ? TBPaper::Paper : TBPaper::Gold));
+	RefreshSlot->SetPosition(FVector2D(bShowRooms ? 573 : 719, 437));
+	CastChecked<UCanvasPanelSlot>(BackFromFinderButton->Slot)->SetPosition(FVector2D(bShowRooms ? 450 : 601, 437));
 	// 普段の案内は出さない。通信中やエラーなど、知らせることがあるときだけ出す。
 	const bool bIdle = Session->Status == TEXT("Create a room or find friends to begin.");
 	StatusText->SetText(bIdle ? FText::GetEmpty() : FText::FromString(TBPaper::Status(Session->Status)));

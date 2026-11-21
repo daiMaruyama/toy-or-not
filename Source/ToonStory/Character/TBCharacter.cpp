@@ -863,19 +863,21 @@ void ATBCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 	{
 		OutResult.FOV = FMath::Lerp(OutResult.FOV, Gaze.FieldOfView, FMath::SmoothStep(0.f, 1.f, GazeZoom));
 	}
-	// 凝視で止まったおもちゃの画面は、古い写真のようなセピアにする。止まった本人の視点だけが変わる。
-	// 止まったまま試合が終わっても、結果画面まではセピアを持ち越さない。
+	// 止まった本人の視点は淡いモノクロへ移る。試合が終われば通常色に戻す。
 	const auto* Match = TB::GS(GetWorld());
-	const bool bSepia = IsGazeFrozen() && Match && Match->Phase == ETBPhase::Playing;
-	FrozenSepia = TBRuleMath::AdvanceShade(FrozenSepia, bSepia ? 1.f : 0.f, DeltaTime, .2f, .4f);
-	if (FrozenSepia > 0.f)
+	const bool bFrozenView = IsGazeFrozen() && Match && Match->Phase == ETBPhase::Playing;
+	FrozenViewBlend = TBRuleMath::AdvanceShade(FrozenViewBlend, bFrozenView ? 1.f : 0.f, DeltaTime, .2f, .4f);
+	if (FrozenViewBlend > 0.f)
 	{
-		const float Saturation = FMath::Lerp(1.f, Gaze.FrozenSaturation, FrozenSepia);
+		const float Saturation = FMath::Lerp(1.f, Gaze.FrozenSaturation, FrozenViewBlend);
 		OutResult.PostProcessSettings.bOverride_ColorSaturation = true;
 		OutResult.PostProcessSettings.ColorSaturation = FVector4(Saturation, Saturation, Saturation, 1.f);
 		OutResult.PostProcessSettings.bOverride_SceneColorTint = true;
 		OutResult.PostProcessSettings.SceneColorTint =
-		    FMath::Lerp(FLinearColor::White, Gaze.FrozenTint, FrozenSepia);
+		    FMath::Lerp(FLinearColor::White, Gaze.FrozenTint, FrozenViewBlend);
+		OutResult.PostProcessSettings.bOverride_VignetteIntensity = true;
+		OutResult.PostProcessSettings.VignetteIntensity =
+		    FMath::Lerp(OutResult.PostProcessSettings.VignetteIntensity, .52f, FrozenViewBlend);
 	}
 	// 箱への収納など瞬間移動を伴う切替はつながず、壁越しに視点が流れるのを防ぐ。降ろす位置は1m程度。
 	const FVector ActorLocation = GetActorLocation();

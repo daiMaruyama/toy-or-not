@@ -15,10 +15,62 @@
 #include "Rendering/SlateRenderer.h"
 #include "Styling/CoreStyle.h"
 
+namespace
+{
+	// Paint one continuous piece of velvet so its folds travel with its stitched edge.
+	int32 PaintStageCurtain(FSlateWindowElementList& Out, const FGeometry& Geometry, int32 Layer, float Offset)
+	{
+		const FVector2f Size(Geometry.GetLocalSize());
+		const auto Cloth = Geometry.ToPaintGeometry(Size, FSlateLayoutTransform(FVector2f(Offset, 0)));
+		const auto Wine = FLinearColor::FromSRGBColor(FColor(74, 23, 32));
+		const auto Velvet = FLinearColor::FromSRGBColor(FColor(150, 44, 48));
+		const auto Lit = FLinearColor::FromSRGBColor(FColor(187, 66, 58));
+		const auto Braid = FLinearColor::FromSRGBColor(FColor(224, 172, 96));
+		constexpr int32 Folds = 14;
+		const float Pitch = Size.X / Folds;
+		TArray<FSlateGradientStop> Stops;
+		Stops.Reserve(Folds * 4 + 1);
+		for (int32 Fold = 0; Fold < Folds; ++Fold)
+		{
+			const float Seam = Pitch * Fold;
+			const float Crest = .34f + .06f * FMath::Sin(Fold * 1.7f);
+			Stops.Emplace(FVector2f(Seam, 0), Wine);
+			Stops.Emplace(FVector2f(Seam + Pitch * .12f, 0), Velvet);
+			Stops.Emplace(FVector2f(Seam + Pitch * Crest, 0), Lit);
+			Stops.Emplace(FVector2f(Seam + Pitch * .85f, 0), Wine);
+		}
+		Stops.Emplace(FVector2f(Size.X, 0), Wine);
+		FSlateDrawElement::MakeGradient(Out, Layer++, Cloth, MoveTemp(Stops), Orient_Vertical);
+		const FLinearColor Shade(.025f, .004f, .012f);
+		FSlateDrawElement::MakeGradient(Out, Layer++, Cloth,
+		    {FSlateGradientStop(FVector2f::ZeroVector, Shade.CopyWithNewOpacity(.40f)),
+		     FSlateGradientStop(FVector2f(0, Size.Y * .25f), Shade.CopyWithNewOpacity(0.f)),
+		     FSlateGradientStop(FVector2f(0, Size.Y * .82f), Shade.CopyWithNewOpacity(.04f)),
+		     FSlateGradientStop(Size, Shade.CopyWithNewOpacity(.32f))}, Orient_Horizontal);
+		TArray<FVector2f> Hem;
+		for (int32 Sample = 0; Sample <= Folds * 8; ++Sample)
+		{
+			const float U = float(Sample) / (Folds * 8);
+			Hem.Emplace(U * Size.X, Size.Y * (.959f - .004f * FMath::Cos(U * Folds * 2.f * PI)));
+		}
+		FSlateDrawElement::MakeLines(Out, Layer++, Cloth, MoveTemp(Hem), ESlateDrawEffect::None,
+		    Braid, true, FMath::Max(1.f, Size.Y * .0025f));
+		return Layer;
+	}
+}
+
+const TCHAR* STBLoadingScreen::MovieName(int32 Index)
+{
+	static const TCHAR* const Movies[] = {TEXT("ComicDuck"), TEXT("ComicDinosaur"), TEXT("ComicCar")};
+	static_assert(UE_ARRAY_COUNT(Movies) == EditionCount);
+	return Movies[FMath::Clamp(Index, 0, EditionCount - 1)];
+}
+
 void STBLoadingScreen::Construct(const FArguments& InArgs)
 {
 	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	Backdrop = InArgs._Backdrop;
+	Edition = InArgs._Edition;
 	Poster.Reset(InArgs._Poster);
 	PosterBrush.SetResourceObject(Poster.Get());
 	if (Backdrop == ETBLoadingBackdrop::ViewportMovie)
@@ -31,15 +83,16 @@ void STBLoadingScreen::Construct(const FArguments& InArgs)
 		FilmBrush.SetResourceObject(Film.Get());
 		auto* Source = NewObject<UFileMediaSource>(Player.Get());
 		Source->SetFilePath(FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("Movies") /
-		                                                      (FString(MovieName()) + TEXT(".mp4"))));
+		                                                      (FString(MovieName(Edition)) + TEXT(".mp4"))));
 		FMediaPlayerOptions Options;
 		Options.PlayOnOpen = EMediaPlayerOptionBooleanOverride::Disabled;
 		Options.Loop = EMediaPlayerOptionBooleanOverride::Enabled;
 		Player->OpenSourceWithOptions(Source, Options);
 		SetMovieVisible(true);
 	}
-	Font.Reset(TBPaper::Font(GetTransientPackage()));
+	Font.Reset(TBPaper::Font(GetTransientPackage(), Backdrop != ETBLoadingBackdrop::Illustrations));
 	Restart();
+	SetClipping(EWidgetClipping::ClipToBounds);
 	SetVisibility(EVisibility::HitTestInvisible);
 	if (Backdrop != ETBLoadingBackdrop::Illustrations) return;
 	// ロード中に消されないよう、絵とフォントはここで読み込んで持っておく。
@@ -96,7 +149,7 @@ void STBLoadingScreen::SetStatus(const FText& Text)
 {
 	Status = Text;
 	if (Backdrop != ETBLoadingBackdrop::Illustrations && Font.IsValid())
-		StatusSize = FVector2f(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Status, FSlateFontInfo(Font.Get(), 18)));
+		StatusSize = FVector2f(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Status, FSlateFontInfo(Font.Get(), 23)));
 }
 
 bool STBLoadingScreen::IsToyHidden() const
@@ -136,22 +189,33 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	const float W = Size.X, H = Size.Y;
 	if (W <= 0 || H <= 0 || Exit >= 1.f) return Layer;
 	const FSlateBrush* White = FCoreStyle::Get().GetBrush("WhiteBrush");
-	// 入るときは黒から明け、出るときはいったん真っ黒に落としてから、黒だけを薄くしてゲーム画面を見せる。
-	// ロード画面とゲーム画面が半透明で重ならないようにする。
+	// Full coverage at the midpoint hides the switch between the film and the world.
 	const float In = Settings->FadeInSeconds > 0.f
 	                     ? FMath::Clamp(float(FPlatformTime::Seconds() - ShownAt) / Settings->FadeInSeconds, 0.f, 1.f)
 	                     : 1.f;
-	const float Black = FMath::Max(1.f - In, Exit < .5f ? Exit * 2.f : (1.f - Exit) * 2.f);
-	auto Curtain = [&](int32 At)
+	auto Rectangle = [&](int32 At, float X, float Y, float Width, float Height, FLinearColor Color)
 	{
-		if (Black > 0.f)
-			FSlateDrawElement::MakeBox(Out, At, Geometry.ToPaintGeometry(), White, ESlateDrawEffect::None,
-			                           FLinearColor(0, 0, 0, Black));
+		if (Width <= 0 || Height <= 0) return;
+		FSlateDrawElement::MakeBox(Out, At, Geometry.ToPaintGeometry(FVector2f(Width, Height),
+			FSlateLayoutTransform(FVector2f(X, Y))), White, ESlateDrawEffect::None, Color);
+	};
+	if (Backdrop == ETBLoadingBackdrop::ViewportMovie && Exit <= 0.f && In < .5f)
+	{
+		return PaintStageCurtain(Out, Geometry, Layer, W * (FMath::SmoothStep(0.f, .5f, In) - 1.f));
+	}
+	auto Curtain = [&](int32 At) -> int32
+	{
+		if (Exit > 0.f && Exit < .5f)
+			return PaintStageCurtain(Out, Geometry, At, W * (FMath::SmoothStep(0.f, .5f, Exit) - 1.f));
+		if (Exit >= .5f)
+			return PaintStageCurtain(Out, Geometry, At, W * FMath::SmoothStep(.5f, 1.f, Exit));
+		if (In < 1.f)
+			return PaintStageCurtain(Out, Geometry, At, W * FMath::SmoothStep(.5f, 1.f, In));
+		return At;
 	};
 	if (Exit >= .5f)
 	{
-		Curtain(Layer);
-		return Layer;
+		return Curtain(Layer);
 	}
 	static const FSlateRoundedBoxBrush Rounded(FLinearColor::White, 8.f);
 	// Let Slate derive the radius from each element's height, including tiny dots and shadows.
@@ -176,18 +240,30 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 		}
 		if (!Status.IsEmpty() && Font.IsValid())
 		{
-			const FVector2f GradientSize(W, 86 * S);
-			FSlateDrawElement::MakeGradient(Out, Layer++, Geometry.ToPaintGeometry(GradientSize,
-			    FSlateLayoutTransform(FVector2f(0, H - GradientSize.Y))),
-			    {FSlateGradientStop(FVector2D(0, 0), FLinearColor::Transparent),
-			     FSlateGradientStop(FVector2D(0, GradientSize.Y), FLinearColor(.023f, .012f, .005f, .66f))}, Orient_Horizontal);
-			const FVector2f Label(W - W * .032f - StatusSize.X * S, H - (21.f + StatusSize.Y) * S);
-			FSlateDrawElement::MakeText(Out, Layer++, Geometry.ToPaintGeometry(StatusSize, FSlateLayoutTransform(S, Label)),
-			                            Status, FSlateFontInfo(Font.Get(), 18), ESlateDrawEffect::None,
-			                            FLinearColor::FromSRGBColor(FColor(255, 246, 223)));
+			const float CaptionW = (StatusSize.X + 82.f) * S, CaptionH = 53.f * S;
+			const float X = Edition == 1 ? (W - 1280 * S) * .5f + 59.f * S : (W + 1280 * S) * .5f - 59.f * S - CaptionW;
+			const float Y = (H + 720 * S) * .5f - 56.f * S - CaptionH;
+			const auto Ink = FLinearColor::FromSRGBColor(FColor(30, 52, 57));
+			const FColor Stock[] = {FColor(251, 211, 124), FColor(160, 210, 186), FColor(255, 175, 129)};
+			Rectangle(Layer++, X + 3*S, Y + 4*S, CaptionW, CaptionH, Ink);
+			Rectangle(Layer++, X, Y, CaptionW, CaptionH, Ink);
+			Rectangle(Layer++, X + 2*S, Y + 2*S, CaptionW - 4*S, CaptionH - 4*S,
+				FLinearColor::FromSRGBColor(Stock[Edition]));
+			FSlateDrawElement::MakeText(Out, Layer++, Geometry.ToPaintGeometry(StatusSize,
+				FSlateLayoutTransform(S, FVector2f(X + 14*S, Y + (CaptionH - StatusSize.Y * S) * .5f))),
+				Status, FSlateFontInfo(Font.Get(), 23), ESlateDrawEffect::None, Ink);
+			const float Start = X + CaptionW - 53*S;
+			Rectangle(Layer++, Start, Y + 13*S, S, 27*S, Ink.CopyWithNewOpacity(.5f));
+			for (int32 Dot = 0; Dot < 3; ++Dot)
+			{
+				const float Beat = .68f + .32f * FMath::Cos(float(FMath::Fmod(FPlatformTime::Seconds() - ShownAt, 1.65)) * 3.81f - Dot * .75f);
+				const FVector2f Pos(Start + (10 + 11*Dot)*S, Y + (24 - 2*Beat)*S);
+				FSlateDrawElement::MakeBox(Out, Layer, Geometry.ToPaintGeometry(FVector2f(6*S, 6*S),
+					FSlateLayoutTransform(Pos)), &Pill, ESlateDrawEffect::None, Ink.CopyWithNewOpacity(Beat));
+			}
+			++Layer;
 		}
-		Curtain(Layer);
-		return Layer;
+		return Curtain(Layer);
 	}
 	auto Box = [&](const FSlateBrush* Brush, float X, float Y, float BW, float BH, FLinearColor Color)
 	{
@@ -331,6 +407,5 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 		                                FSlateLayoutTransform(FVector2f(StatusX + 24 * S, StatusY + 10 * S))),
 		                            Status, Info, ESlateDrawEffect::None, TBPaper::Ink);
 	}
-	Curtain(++Layer);
-	return Layer;
+	return Curtain(++Layer);
 }

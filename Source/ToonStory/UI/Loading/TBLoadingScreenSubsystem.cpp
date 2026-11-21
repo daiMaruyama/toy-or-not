@@ -9,8 +9,6 @@
 #include "Core/TBGameState.h"
 #include "Core/TBLobbySettings.h"
 #include "Core/TBPlayerState.h"
-#include "Core/TBSession.h"
-#include "UI/TBPaperStyle.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
@@ -18,10 +16,8 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Async/Async.h"
-#include "GameMapsSettings.h"
 #include "ImageUtils.h"
 #include "Misc/App.h"
-#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "MoviePlayer.h"
@@ -32,6 +28,17 @@ bool UTBLoadingScreenSubsystem::IsCovering(const UGameInstance* Instance)
 {
 	const auto* Loading = UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(Instance);
 	return Loading && Loading->IsCoveringViewport();
+}
+
+bool UTBLoadingScreenSubsystem::IsClosingOverDeparture(const UWorld* World)
+{
+	if (!World) return false;
+	const auto* Loading = UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(World->GetGameInstance());
+	if (!Loading || !Loading->bTravelSeamless || !Loading->Overlay || Loading->TravelFromWorld.Get() != World) return false;
+	const auto* State = World->GetGameState<ATBGameState>();
+	if (!State || (State->Phase != ETBPhase::Lobby && State->Phase != ETBPhase::Results && State->Phase != ETBPhase::Aborted))
+		return false;
+	return FPlatformTime::Seconds() - Loading->TravelShownAt < GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds * .5f;
 }
 
 // FURLはマップ名がないとき既定のマップ（タイトル）を返すため使わない。
@@ -61,18 +68,13 @@ void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, E
 	TravelDestMap = MapNameFromURL(PendingURL);
 	TravelFromWorld = GetGameInstance()->GetWorld();
 	bTravelSeamless = bSeamless;
-	if (bSeamless)
+	ExitBeganAt = 0.;
+	if (TravelShownAt <= 0.) TravelShownAt = FPlatformTime::Seconds();
+	ShowOverlay();
+	if (Screen)
 	{
-		// On a listen server this is sent before the engine begins tearing down the lobby or arena.
-		TravelShownAt = FPlatformTime::Seconds();
-		ShowOverlay();
-		if (Screen)
-		{
-			const bool bBack = IsReturningLabel(TravelDestMap, bReturning);
-			Screen->SetStatus(TBText::Get(bBack ? TEXT("Root.Loading.Lobby") : TEXT("Root.Loading.Prepare")));
-			Screen->SetExit(0.f);
-			LabelReturning = bBack ? 1 : 0;
-		}
+		Screen->SetStatus(TBText::Get(TEXT("Root.Loading.Prepare")));
+		Screen->SetExit(0.f);
 	}
 }
 
@@ -84,14 +86,19 @@ bool UTBLoadingScreenSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 void UTBLoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	FilmPosters.SetNum(STBLoadingScreen::EditionCount);
 	if (FApp::CanEverRender() && FModuleManager::Get().LoadModule(TEXT("ImageWrapper")))
 	{
-		const FString PosterPath = FPaths::ProjectContentDir() / TEXT("Movies/ToyDancePoster.jpg");
-		PendingPoster = Async(EAsyncExecution::ThreadPool, [PosterPath]() -> TSharedPtr<FImage>
+		for (int32 Index = 0; Index < STBLoadingScreen::EditionCount; ++Index)
 		{
-			TSharedPtr<FImage> Image = MakeShared<FImage>();
-			return FImageUtils::LoadImage(*PosterPath, *Image) ? Image : nullptr;
-		});
+			const FString Path = FPaths::ProjectContentDir() / TEXT("Movies") /
+				(FString(STBLoadingScreen::MovieName(Index)) + TEXT("Poster.jpg"));
+			PendingPosters.Add(Async(EAsyncExecution::ThreadPool, [Path]() -> TSharedPtr<FImage>
+			{
+				TSharedPtr<FImage> Image = MakeShared<FImage>();
+				return FImageUtils::LoadImage(*Path, *Image) ? Image : nullptr;
+			}));
+		}
 	}
 	PreClientTravelHandle = GetGameInstance()->OnNotifyPreClientTravel().AddUObject(this, &ThisClass::NotePreClientTravel);
 	PreLoadHandle = FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &ThisClass::PreLoadMap);
@@ -117,19 +124,31 @@ void UTBLoadingScreenSubsystem::Deinitialize()
 	RemoveOverlay();
 	Screen.Reset();
 	MovieScreen.Reset();
-	if (PendingPoster.IsValid()) PendingPoster.Wait();
+	for (auto& Future : PendingPosters)
+		if (Future.IsValid()) Future.Wait();
 	Super::Deinitialize();
 }
 
-void UTBLoadingScreenSubsystem::FinishPosterIfReady()
+void UTBLoadingScreenSubsystem::FinishPostersIfReady()
 {
-	if (!PendingPoster.IsValid() || !PendingPoster.IsReady()) return;
-	const TSharedPtr<FImage> Image = PendingPoster.Consume();
-	if (!Image) return;
-	// UObjects and the viewport brush belong to the game thread. The concurrent native widget
-	// keeps the poster snapshot it was constructed with until MoviePlayer finishes.
-	FilmPoster = FImageUtils::CreateTexture2DFromImage(*Image);
-	if (Screen) Screen->SetViewportPoster(FilmPoster);
+	for (int32 Index = 0; Index < PendingPosters.Num(); ++Index)
+	{
+		auto& Future = PendingPosters[Index];
+		if (!Future.IsValid() || !Future.IsReady()) continue;
+		if (const auto Image = Future.Consume())
+		{
+			FilmPosters[Index] = FImageUtils::CreateTexture2DFromImage(*Image);
+			if (Index == FilmEdition && Screen) Screen->SetViewportPoster(FilmPosters[Index]);
+		}
+	}
+}
+
+void UTBLoadingScreenSubsystem::SelectFilmForTravel()
+{
+	if (bFilmSelected) return;
+	FilmEdition = (FilmEdition + 1) % STBLoadingScreen::EditionCount;
+	bFilmSelected = true;
+	Screen.Reset();
 }
 
 // マップを丸ごと読み直す直前。読み込みの間はゲームの処理が止まるので、MoviePlayer に描かせる。
@@ -137,16 +156,14 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FWorldContext& Context, const F
 {
 	const UWorld* World = GetGameInstance()->GetWorld();
 	if (!bHadWorld || Context.OwningGameInstance != GetGameInstance() || (World && World->IsInSeamlessTravel())) return;
+	const bool bStartedInViewport = Overlay.IsValid();
 	RemoveOverlay();
-	FinishPosterIfReady();
-	// 部屋の操作中ならその状態を、そうでなければ行き先から決める（部屋をつくった直後は操作が終わっている）。
-	const auto* Session = GetGameInstance()->GetSubsystem<UTBSession>();
-	const bool bToTitle = FPackageName::GetShortName(MapName) == FPackageName::GetShortName(UGameMapsSettings::GetGameDefaultMap());
-	const FText Status = FText::FromString(Session && Session->IsBusy() ? TBPaper::Status(Session->Status)
-	                                         : bToTitle                   ? FString(TBText::Literal(TEXT("Root.Loading.Title")))
-	                                                                      : FString(TBText::Literal(TEXT("Root.Status.Joining"))));
+	FinishPostersIfReady();
+	SelectFilmForTravel();
+	const FText Status = TBText::Get(TEXT("Root.Loading.Prepare"));
 	bHardLoad = true;
-	TravelShownAt = LoadedAt = FPlatformTime::Seconds();
+	LoadedAt = FPlatformTime::Seconds();
+	if (TravelShownAt <= 0.) TravelShownAt = LoadedAt;
 	// PIE viewports share one editor process. Keep each transition in the owning viewport.
 	if (GIsEditor || !IsMoviePlayerEnabled())
 	{
@@ -155,11 +172,12 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FWorldContext& Context, const F
 		if (Screen) Screen->SetStatus(Status);
 		return;
 	}
-	MovieScreen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::NativeMovie).Poster(FilmPoster);
+	MovieScreen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::NativeMovie).Edition(FilmEdition).Poster(FilmPosters[FilmEdition]);
+	if (bStartedInViewport && Screen) MovieScreen->ContinueFrom(*Screen);
 	MovieScreen->SetStatus(Status);
 	FLoadingScreenAttributes Attributes;
 	Attributes.WidgetLoadingScreen = MovieScreen;
-	Attributes.MoviePaths.Add(STBLoadingScreen::MovieName());
+	Attributes.MoviePaths.Add(STBLoadingScreen::MovieName(FilmEdition));
 	Attributes.PlaybackType = MT_LoadingLoop;
 	Attributes.bAutoCompleteWhenLoadingCompletes = true;
 	Attributes.bMoviesAreSkippable = false;
@@ -207,9 +225,11 @@ void UTBLoadingScreenSubsystem::EndFailedTravel(UWorld* World)
 	if (World ? World->GetGameInstance() != GetGameInstance() : GetGameInstance()->GetWorld() != nullptr) return;
 	TravelDestMap.Reset();
 	StopMovie();
+	bFilmSelected = false;
 	bHardLoad = false;
 	bTravelSeamless = false;
 	TravelShownAt = 0.;
+	ExitBeganAt = 0.;
 	SwitchUntil = 0.;
 	RemoveOverlay();
 }
@@ -227,8 +247,9 @@ void UTBLoadingScreenSubsystem::ShowOverlay()
 	if (Overlay && OverlayViewport.Get() == Viewport && Overlay->IsParentValid()) return;
 	const bool bNew = !Overlay;
 	if (Overlay && OverlayViewport.IsValid()) OverlayViewport->RemoveViewportWidgetContent(Overlay.ToSharedRef());
+	SelectFilmForTravel();
 	if (!Screen)
-		Screen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::ViewportMovie).Poster(FilmPoster);
+		Screen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::ViewportMovie).Edition(FilmEdition).Poster(FilmPosters[FilmEdition]);
 	if (bNew)
 	{
 		Screen->Restart();
@@ -275,7 +296,7 @@ bool UTBLoadingScreenSubsystem::AppearancesReady(UWorld* World)
 
 void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 {
-	FinishPosterIfReady();
+	FinishPostersIfReady();
 	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	UWorld* World = GetGameInstance()->GetWorld();
 	const double Now = FPlatformTime::Seconds();
@@ -291,7 +312,7 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	if (const auto* State = World ? World->GetGameState<ATBGameState>() : nullptr)
 	{
 		const uint8 Phase = uint8(State->Phase);
-		if (PhaseWorld.Get() == World && Phase != LastPhase &&
+		if (TravelShownAt <= 0. && PhaseWorld.Get() == World && Phase != LastPhase &&
 		    (Phase == uint8(ETBPhase::Lobby) || LastPhase == uint8(ETBPhase::Lobby)))
 		{
 			SwitchUntil = FPlatformTime::Seconds() + Settings->MatchSwitchSeconds;
@@ -328,12 +349,12 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		if (SettleFrom <= 0) SettleFrom = Now;
 		if (Now - SettleFrom < Settings->SettleWaitSeconds && !AppearancesReady(World)) bCover = true;
 	}
-	// Enforce the floor on the viewport so networking, world setup and appearance settling
-	// continue. Never consume a toy's hiding head start or a human's entrance for the film.
-	if (bPlaying && !bCover) TravelShownAt = 0.;
-	const bool bMinimum = TravelShownAt > 0. && !bPlaying && Now - TravelShownAt < Settings->MinimumTravelSeconds;
+	// A fast GameState update must not cut the film. The server reserves the stage's
+	// presentation window before starting the hiding clock, including for a slow guest.
+	const bool bMinimum = TravelShownAt > 0. && Now - TravelShownAt < Settings->MinimumTravelSeconds;
 	if (bCover || bMinimum)
 	{
+		ExitBeganAt = 0.;
 		const bool bNew = !Overlay;
 		ShowOverlay();
 		if (!Screen) return;
@@ -342,7 +363,7 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		const bool bBack = IsReturningLabel(TravelDestMap, bReturning);
 		if (ShouldRewriteLabel(bNew, bHardLoad, LabelReturning, bBack))
 		{
-			Screen->SetStatus(FText::FromString(bBack ? TBText::Literal(TEXT("Root.Loading.Lobby")) : TBText::Literal(TEXT("Root.Loading.Prepare"))));
+			Screen->SetStatus(TBText::Get(TEXT("Root.Loading.Prepare")));
 			LabelReturning = bBack ? 1 : 0;
 			if (bNew) Screen->Restart();
 		}
@@ -351,13 +372,16 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	}
 	if (!Overlay || !Screen) return;
 	ShowOverlay();
-	// 読み込み直後の1フレームは、読み込みにかかった時間がまるごと入るので、一度に進めすぎない。
-	const float Step = FMath::Min(DeltaTime, 1.f / 30.f);
-	const float Exit = Settings->FadeOutSeconds > 0.f ? Screen->GetExit() + Step / Settings->FadeOutSeconds : 1.f;
+	// Start on the first ready frame. The same wall-time duration is used by the server
+	// to reserve the full toy hiding countdown after the last curtain pass.
+	if (ExitBeganAt <= 0.) ExitBeganAt = Now;
+	const float Exit = Settings->FadeOutSeconds > 0.f ? float(Now - ExitBeganAt) / Settings->FadeOutSeconds : 1.f;
 	Screen->SetExit(Exit);
 	if (Exit >= 1.f)
 	{
+		ExitBeganAt = 0.;
 		TravelShownAt = 0.;
+		bFilmSelected = false;
 		RemoveOverlay();
 	}
 }

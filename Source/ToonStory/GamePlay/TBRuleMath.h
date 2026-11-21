@@ -240,19 +240,6 @@ namespace TBRuleMath
 		return T * T;
 	}
 
-	// ママの吹き出しで覆うときの広がり具合（0〜1）。決着の後から広がり、覆いきる時刻で画面を埋め、抜けるまでに消える。
-	inline float ResultMomCover(float Elapsed, float Decisive, float Cover, float Reveal)
-	{
-		if (Elapsed < Decisive) return 0.f;
-		if (Elapsed < Cover)
-		{
-			const float T = Cover > Decisive ? float((Elapsed - Decisive) / (Cover - Decisive)) : 1.f;
-			return T * T * (3.f - 2.f * T);
-		}
-		if (Elapsed < Cover + Reveal) return Reveal > 0.f ? 1.f - float((Elapsed - Cover) / Reveal) : 0.f;
-		return 0.f;
-	}
-
 	// リザルトで映す勝者を選ぶ順。箱にしまわれた子は箱の中にいるので後に回す。次に自分、次に番号の小さい順。
 	inline bool ResultsViewBefore(bool BoxedA, bool MineA, int IdA, bool BoxedB, bool MineB, int IdB)
 	{

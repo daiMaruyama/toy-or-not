@@ -183,10 +183,6 @@ int main()
 	assert(ResultLidOpen(1.f, 3.2f, .4f) == 1);
 	assert(ResultLidOpen(3.0f, 3.2f, .4f) > 0 && ResultLidOpen(3.0f, 3.2f, .4f) < 1);
 	assert(ResultLidOpen(3.2f, 3.2f, .4f) == 0);
-	assert(ResultMomCover(.5f, .8f, 3.2f, .5f) == 0);
-	assert(Near(ResultMomCover(2.0f, .8f, 3.2f, .5f), .5f));
-	assert(ResultMomCover(3.2f, .8f, 3.2f, .5f) == 1);
-	assert(ResultMomCover(3.8f, .8f, 3.2f, .5f) == 0);
 	std::cout << "PASS: result presentation timing\n";
 	std::cout << "PASS: freeze, step camera, contact, rescue, timeout priority and boxing victory\n";
 	std::cout << "PASS: gaze cone, gaze state and gaze shade\n";

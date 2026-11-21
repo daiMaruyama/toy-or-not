@@ -74,17 +74,20 @@ namespace
 
 void ATBController::PreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bIsSeamlessTravel)
 {
+	Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
 	bPreparationTravelMask = true;
 	bPreparationTravelFailed = false;
-	bPreparationBlack = true;
 	NextEntranceFootstep = 0;
-	TBScreen::HoldBlack(this, true);
+	if (!UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld()))
+	{
+		bPreparationBlack = true;
+		TBScreen::HoldBlack(this, true);
+		SetViewTarget(this);
+	}
 	ReleaseVoicePlayback(GetWorld(), false, false);
-	SetViewTarget(this);
 	LobbyCamera.Reset();
 	bLobbyCameraSearched = false;
 	bLobbyCameraActive = false;
-	Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
 }
 
 void ATBController::ClientRoomClosed_Implementation()
@@ -107,9 +110,10 @@ void ATBController::PlayerTick(float DeltaTime)
 	const bool BlockingPanel = HUD && (HUD->IsChatBlocked() || HUD->IsStagePickerOpen());
 	const bool ShowMenu = State && (InLobby ? (BlockingPanel || IsChatOpen() || State->bTravelPending) :
 	    (State->Phase != ETBPhase::Playing && State->Phase != ETBPhase::Results) || IsChatOpen() || bLeaveMenuOpen || BlockingPanel);
-	UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
+	const bool bClosingCurtain = UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld());
+	if (!bClosingCurtain) UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
 	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()), InLobby);
-	UpdateScreenTransition();
+	if (!bClosingCurtain) UpdateScreenTransition();
 	UpdateResultView();
 	UpdateViewAspect();
 	SyncInputContexts();
@@ -817,6 +821,12 @@ void ATBController::UpdateChat()
 		if (ChatBox)
 		{
 			CloseChat();
+			if (UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld()))
+			{
+				// Keep the old lobby composition behind the travelling fabric, with input closed.
+				ChatBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+				return;
+			}
 			ChatBox->RemoveFromParent();
 			ChatBox = nullptr;
 		}
@@ -832,6 +842,7 @@ void ATBController::UpdateChat()
 		// オプション画面（50）より奥。
 		ChatBox->AddToViewport(40);
 	}
+	ChatBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	ChatBox->SetResultsLayout(TB::GS(GetWorld())->Phase != ETBPhase::Lobby);
 }
 
@@ -848,7 +859,7 @@ bool ATBController::InputKey(const FInputKeyEventArgs& Params)
 
 void ATBController::OpenChat()
 {
-	if (ChatBox && !ChatBox->IsOpen())
+	if (ChatBox && !ChatBox->IsOpen() && CanUseChat())
 	{
 		UpdateMenuInput(true);
 		ChatBox->SetOpen(true);

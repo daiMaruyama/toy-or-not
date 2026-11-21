@@ -195,6 +195,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ResetButton;
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> PageHeading;
+	UPROPERTY(Transient) TObjectPtr<UWidget> SelectedTabMark;
+	UPROPERTY(Transient)
 	TObjectPtr<UButton> CloseButton;
 	UPROPERTY(Transient)
 	TObjectPtr<UFont> PaperFont;

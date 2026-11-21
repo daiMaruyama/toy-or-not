@@ -2,6 +2,7 @@
 
 #pragma once
 #include "CoreMinimal.h"
+#include "Engine/Font.h"
 #include "Math/RandomStream.h"
 #include "MediaPlayer.h"
 #include "MediaTexture.h"
@@ -9,7 +10,6 @@
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SLeafWidget.h"
 
-class UFont;
 class UTexture2D;
 
 enum class ETBLoadingBackdrop { Illustrations, NativeMovie, ViewportMovie };
@@ -21,14 +21,16 @@ enum class ETBLoadingBackdrop { Illustrations, NativeMovie, ViewportMovie };
 class STBLoadingScreen : public SLeafWidget
 {
 public:
-	SLATE_BEGIN_ARGS(STBLoadingScreen) : _Backdrop(ETBLoadingBackdrop::Illustrations), _Poster(nullptr) {}
+	SLATE_BEGIN_ARGS(STBLoadingScreen) : _Backdrop(ETBLoadingBackdrop::Illustrations), _Poster(nullptr), _Edition(0) {}
 		SLATE_ARGUMENT(ETBLoadingBackdrop, Backdrop)
 		SLATE_ARGUMENT(UTexture2D*, Poster)
+		SLATE_ARGUMENT(int32, Edition)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
 	~STBLoadingScreen();
-	static const TCHAR* MovieName() { return TEXT("ToyDance"); }
+	static constexpr int32 EditionCount = 3;
+	static const TCHAR* MovieName(int32 Index = 0);
 	double GetShownAt() const { return ShownAt; }
 	void ShowNativePoster() { bShowNativePoster.Store(true); }
 	void SetViewportPoster(UTexture2D* Texture);
@@ -62,6 +64,7 @@ public:
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(1280, 720); }
 
 private:
+	int32 Edition = 0;
 	ETBLoadingBackdrop Backdrop = ETBLoadingBackdrop::Illustrations;
 	TAtomic<bool> bShowNativePoster{false};
 	bool bStartMovieWhenReady = false;

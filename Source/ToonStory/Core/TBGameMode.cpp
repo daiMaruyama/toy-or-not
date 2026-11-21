@@ -516,7 +516,7 @@ void ATBGameMode::SetRules(APlayerController* PlayerController, const FTBSetting
 }
 
 // 人数・Ready・マップ構成を確認してから陣営を割り当て、試合を開始する。
-void ATBGameMode::StartRound(APlayerController* PlayerController)
+void ATBGameMode::StartRound(APlayerController* PlayerController, float StageRevealSeconds)
 {
 	auto* MatchInfo = TB::GS(GetWorld());
 	auto* HostController = Cast<ATBController>(PlayerController);
@@ -869,7 +869,7 @@ void ATBGameMode::StartRound(APlayerController* PlayerController)
 	MatchInfo->HidePreparation.bHiding = true;
 	PreparationRound = PreparationViewAttempt;
 	MatchInfo->HidePreparation.Round = PreparationRound;
-	MatchInfo->HidePreparation.StartsAt = MatchInfo->GetServerWorldTimeSeconds();
+	MatchInfo->HidePreparation.StartsAt = MatchInfo->GetServerWorldTimeSeconds() + StageRevealSeconds;
 	MatchInfo->HidePreparation.EndsAt = MatchInfo->HidePreparation.StartsAt + TB::Rules().Match.HidePreparationSeconds;
 	MatchInfo->EndTime = 0;
 	MatchInfo->Phase = ETBPhase::Playing;
@@ -1423,7 +1423,7 @@ void ATBGameMode::Finish(ETBWinner Winner, const FString& Why, bool Abort)
 	}
 }
 
-// 車で脱出したら車、人間が勝って箱の部屋があればふた、それ以外はママの吹き出しで覆う。
+// 車で脱出したら車、人間が勝って箱の部屋があればふた。それ以外はすぐに結果を表示する。
 void ATBGameMode::BeginResultPresentation()
 {
 	auto* State = TB::GS(GetWorld());
@@ -1431,7 +1431,6 @@ void ATBGameMode::BeginResultPresentation()
 	ClearResultPresentation();
 	const auto& Feel = TB::PresentationData().Result;
 	State->ResultStartTime = State->GetServerWorldTimeSeconds();
-	State->ResultStyle = ETBResultStyle::Mom;
 	if (State->Winner == ETBWinner::Toys && State->bVehicleEscapeResult)
 	{
 		// 車が何台かあるときは、脱出した子が乗っている車を選ぶ。
@@ -1468,7 +1467,8 @@ void ATBGameMode::BeginResultPresentation()
 	}
 	bResultPlaced = false;
 	// 結果の画面を見られる時間は変えず、演出の分だけ延ばす。
-	State->EndTime = State->ResultStartTime + Feel.CoverSeconds + Feel.RevealSeconds + ResultDurationSeconds;
+	const float TransitionSeconds = State->ResultStyle == ETBResultStyle::None ? 0.f : Feel.CoverSeconds + Feel.RevealSeconds;
+	State->EndTime = State->ResultStartTime + TransitionSeconds + ResultDurationSeconds;
 	State->ForceNetUpdate();
 }
 

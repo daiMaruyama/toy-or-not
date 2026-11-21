@@ -44,14 +44,14 @@ enum class ETBWinner : uint8
 	Humans,
 	Toys
 };
-// リザルトへの切り替え演出。車で脱出、箱のふたが閉まる、ママの吹き出しで覆う。
+// リザルトへの切り替え演出。車で脱出、または箱のふたが閉まる。
 UENUM(BlueprintType)
 enum class ETBResultStyle : uint8
 {
 	None,
 	Car,
 	Lid,
-	Mom
+	Mom UMETA(Hidden) // Reserved for previously serialized values.
 };
 UENUM(BlueprintType)
 enum class ETBRemoteKey : uint8

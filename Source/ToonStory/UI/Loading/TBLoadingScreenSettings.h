@@ -45,18 +45,18 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "試合の切り替えで見せる時間", Units = "s", ClampMin = "0"))
 	float MatchSwitchSeconds = 1.5f;
-	/** 実際のマップ移動の開始から数える。試合の操作や陣営の登場が始まったら、そちらを優先する。 */
+	/** 移動中の最低上映時間。試合に入る際は最後の参加者が到着してから確保し、隠れる時間を守る。 */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "移動中の映像を見せる最短時間", Units = "s", ClampMin = "0"))
-	float MinimumTravelSeconds = 3.5f;
-	/** 出しはじめに、黒から明けるまで */
+	float MinimumTravelSeconds = 4.f;
+	/** 前のシーンから、幕が閉じて映像に開ききるまで */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "出るときの暗転", Units = "s", ClampMin = "0"))
-	float FadeInSeconds = .2f;
-	/** ロードが終わってから、いったん真っ黒に落とし、ゲーム画面が明けて見えきるまで */
+	float FadeInSeconds = 1.04f;
+	/** ロード画面に幕が閉じ、次のシーンへ開ききるまで */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "消えるときの暗転", Units = "s", ClampMin = "0"))
-	float FadeOutSeconds = .45f;
+	float FadeOutSeconds = 1.15f;
 	/** ロード後、自分のキャラが出てくるのを待つ上限。キャラのいない画面（タイトルなど）はこの時間で消える */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "キャラを待つ上限", Units = "s", ClampMin = "0"))

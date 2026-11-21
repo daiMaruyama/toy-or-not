@@ -19,16 +19,15 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UFon
 {
 	MappingName = InMappingName;
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
-	Size->SetWidthOverride(696);
 	Size->SetHeightOverride(44);
 	WidgetTree->RootWidget = Size;
 	auto* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Size->SetContent(Canvas);
-	auto Place = [&](UWidget* Widget, float X, float Y, float W, float H)
+	auto Place = [&](UWidget* Widget, float X, float Y, float W, float H, FAnchors Anchors = FAnchors(0, 0))
 	{
 		auto* Slot = Canvas->AddChildToCanvas(Widget);
-		Slot->SetPosition(FVector2D(X, Y));
-		Slot->SetSize(FVector2D(W, H));
+		Slot->SetAnchors(Anchors);
+		Slot->SetOffsets(FMargin(X, Y, W, H));
 	};
 	auto Text = [&](const FText& String, int32 FontSize)
 	{
@@ -42,7 +41,8 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UFon
 	auto* Divider = WidgetTree->ConstructWidget<UBorder>();
 	Divider->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(209, 179, 139)), 0.f));
 	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Divider, 0, 43, 696, 1);
+	const FAnchors Stretch(0, 0, 1, 0);
+	Place(Divider, 0, 43, 6, 1, Stretch);
 	Place(Text(Label, 12), 6, 10, 344, 29);
 
 	ChangeButton = WidgetTree->ConstructWidget<UButton>();
@@ -55,7 +55,7 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UFon
 	KeyText->SetJustification(ETextJustify::Center);
 	auto* KeySlot = CastChecked<UButtonSlot>(ChangeButton->SetContent(KeyText));
 	KeySlot->SetPadding(FMargin(4, 0));
-	Place(ChangeButton, 366, 5, 237, 33);
+	Place(ChangeButton, 366, 5, 94, 33, Stretch);
 	ChangeButton->OnClicked.AddDynamic(this, &ThisClass::Clicked);
 
 	ResetButton = WidgetTree->ConstructWidget<UButton>();
@@ -66,7 +66,7 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UFon
 	ResetText->SetJustification(ETextJustify::Center);
 	auto* ResetSlot = CastChecked<UButtonSlot>(ResetButton->SetContent(ResetText));
 	ResetSlot->SetPadding(FMargin(3, 0));
-	Place(ResetButton, 609, 5, 82, 33);
+	Place(ResetButton, -88, 5, 82, 33, FAnchors(1, 0));
 	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetClicked);
 }
 

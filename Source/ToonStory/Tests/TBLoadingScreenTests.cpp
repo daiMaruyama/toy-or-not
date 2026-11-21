@@ -196,22 +196,55 @@ namespace
 	class FLoadingFilmReview : public IAutomationLatentCommand
 	{
 	public:
-		FLoadingFilmReview(FAutomationTestBase* InTest, UGameViewportClient* InViewport)
-		    : Test(InTest), Viewport(InViewport), Deadline(FPlatformTime::Seconds() + 30.)
+		FLoadingFilmReview(FAutomationTestBase* InTest, UGameViewportClient* InViewport, int32 InEdition)
+		    : Test(InTest), Viewport(InViewport), Edition(InEdition)
 		{
-			Screen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::ViewportMovie);
+			}
+		void Start()
+		{
+			Deadline = FPlatformTime::Seconds() + 30.;
+			FString RequestedLanguage;
+			if (FParse::Value(FCommandLine::Get(), TEXT("UIReviewLanguage="), RequestedLanguage))
+			{
+				PreviousLanguage = TBText::GetLanguage();
+				Test->TestTrue(TEXT("The requested film caption language is available"), TBText::SetLanguage(RequestedLanguage));
+			}
+			Screen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::ViewportMovie).Edition(Edition);
 			Screen->SetStatus(TBText::Get(TEXT("Root.Loading.Prepare")));
 			Viewport->AddViewportWidgetContent(Screen.ToSharedRef(), 100000);
 		}
 		~FLoadingFilmReview() override
 		{
-			if (Viewport.IsValid()) Viewport->RemoveViewportWidgetContent(Screen.ToSharedRef());
+			if (Viewport.IsValid() && Screen) Viewport->RemoveViewportWidgetContent(Screen.ToSharedRef());
+			if (!PreviousLanguage.IsEmpty()) TBText::SetLanguage(PreviousLanguage);
 		}
 		bool Update() override
 		{
+			if (Viewport.IsValid() && !Screen) Start();
 			if (!Viewport.IsValid() || FPlatformTime::Seconds() > Deadline)
 			{
 				Test->AddError(TEXT("The loading film did not render two poses and loop within 30 seconds"));
+				return true;
+			}
+			if (bCaptureCurtain)
+			{
+				TArray<FColor> Pixels;
+				FIntVector Size(0);
+				if (!Test->TestTrue(TEXT("The transition curtain renders"), FSlateApplication::Get().TakeScreenshot(Screen.ToSharedRef(), Pixels, Size) && !Pixels.IsEmpty())) return true;
+				int32 RedSamples = 0, Samples = 0, Lightest = 0, Darkest = 255;
+				for (int32 X = Size.X / 8; X < Size.X / 2; X += 4)
+				{
+					const FColor Color = Pixels[Size.Y / 2 * Size.X + X];
+					RedSamples += Color.R > 1.7f * Color.G && Color.R > 1.4f * Color.B;
+					Darkest = FMath::Min(Darkest, int32(Color.R));
+					Lightest = FMath::Max(Lightest, int32(Color.R));
+					++Samples;
+				}
+				Test->TestTrue(TEXT("The closing curtain is red with visible cloth folds"), RedSamples > Samples * .95f && Lightest - Darkest > 35);
+				TArray64<uint8> PNG;
+				FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
+				const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/LoadingFilm") / TBText::GetLanguage();
+				Test->TestTrue(TEXT("Rendered stage curtain saved"), FFileHelper::SaveArrayToFile(PNG, *(Folder / TEXT("StageCurtain.png"))));
 				return true;
 			}
 			UMediaPlayer* Player = Screen->GetPlaybackForReview();
@@ -219,7 +252,8 @@ namespace
 			const double Now = Player->GetTime().GetTotalSeconds();
 			const bool bWrapped = Now + .5 < Previous;
 			Previous = Now;
-			if (Captured < 2 && Now >= (Captured == 0 ? .6 : 1.7))
+			const double FirstPose = GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds + .15;
+			if (Captured < 2 && Now >= (Captured == 0 ? FirstPose : FirstPose + 1.1))
 			{
 				TArray<FColor> Pixels;
 				FIntVector Size;
@@ -240,16 +274,21 @@ namespace
 						Changed += FMath::Abs(int32(Samples[I].R) - FirstSamples[I].R) > 12;
 					Test->TestTrue(TEXT("The visible toys change pose between decoded frames"), Changed > Samples.Num() / 100);
 				}
-				const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/LoadingFilm");
+				const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/LoadingFilm") / TBText::GetLanguage();
 				IFileManager::Get().MakeDirectory(*Folder, true);
 				TArray64<uint8> PNG;
 				FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
 				Test->TestTrue(TEXT("Rendered film frame saved"), FFileHelper::SaveArrayToFile(PNG,
-				    *(Folder / FString::Printf(TEXT("Pose%d.png"), ++Captured))));
+				    *(Folder / FString::Printf(TEXT("%s-Pose%d.png"), STBLoadingScreen::MovieName(Edition), ++Captured))));
 			}
 			if (Captured != 2 || !bWrapped) return false;
-			Test->TestTrue(TEXT("The real film loops at 4.8 seconds"), Player->IsLooping() &&
-			    FMath::IsNearlyEqual(Player->GetDuration().GetTotalSeconds(), 4.8, .1));
+			Test->TestTrue(TEXT("The comic film loops after the last panel"), Player->IsLooping() && Player->GetDuration().GetTotalSeconds() > 4.);
+			if (Edition == 0)
+			{
+				Screen->SetExit(.34f);
+				bCaptureCurtain = true;
+				return false;
+			}
 			return true;
 		}
 	private:
@@ -257,8 +296,11 @@ namespace
 		TWeakObjectPtr<UGameViewportClient> Viewport;
 		TSharedPtr<STBLoadingScreen> Screen;
 		TArray<FColor> FirstSamples;
-		double Deadline, Previous = 0.;
+		FString PreviousLanguage;
+		int32 Edition;
+		double Deadline = 0., Previous = 0.;
 		int32 Captured = 0;
+		bool bCaptureCurtain = false;
 	};
 
 	class FLoadingFilmTravelReview : public IAutomationLatentCommand
@@ -325,7 +367,10 @@ bool FTBLoadingFilm::RunTest(const FString&)
 	}
 	auto* Viewport = GEngine ? GEngine->GameViewport.Get() : nullptr;
 	if (!TestNotNull(TEXT("Rendered game viewport"), Viewport)) return false;
-	ADD_LATENT_AUTOMATION_COMMAND(FLoadingFilmReview(this, Viewport));
+	for (int32 Edition = 0; Edition < STBLoadingScreen::EditionCount; ++Edition)
+	{
+		ADD_LATENT_AUTOMATION_COMMAND(FLoadingFilmReview(this, Viewport, Edition));
+	}
 	ADD_LATENT_AUTOMATION_COMMAND(FLoadingFilmTravelReview(this));
 	return true;
 }

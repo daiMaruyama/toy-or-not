@@ -40,7 +40,7 @@ public:
 	bool bAllowInterference = false;
 	bool IsHost(const APlayerController* PlayerController) const;
 	void SetRules(APlayerController* PlayerController, const FTBSettings& Rules);
-	void StartRound(APlayerController* PlayerController);
+	void StartRound(APlayerController* PlayerController, float StageRevealSeconds = 0.f);
 	void ReturnToLobby(APlayerController* PlayerController);
 	void LobbyReturnFailed(const FString& Reason);
 	void CheckWin();

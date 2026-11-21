@@ -4,15 +4,13 @@
 #include "Audio/TBAudioSubsystem.h"
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
-#include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
-#include "Components/HorizontalBox.h"
-#include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/ScaleBox.h"
+#include "Components/ScaleBoxSlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -73,19 +71,15 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		Slot->SetAnchors(FAnchors(0, 0, 1, 1));
 		Slot->SetOffsets(FMargin(0));
 	};
-	auto* Blur = WidgetTree->ConstructWidget<UBackgroundBlur>();
-	Blur->SetBlurStrength(2.f);
-	Blur->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Fill(Blur);
 	auto* Dim = WidgetTree->ConstructWidget<UImage>();
-	Dim->SetColorAndOpacity(FLinearColor::FromSRGBColor(FColor(56, 45, 38)).CopyWithNewOpacity(.44f));
+	Dim->SetColorAndOpacity(FLinearColor::FromSRGBColor(FColor(246, 232, 199)));
 	Fill(Dim);
 	auto* Scale = WidgetTree->ConstructWidget<UScaleBox>();
 	Scale->SetStretch(EStretch::ScaleToFit);
 	Fill(Scale);
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
-	Size->SetWidthOverride(1440);
-	Size->SetHeightOverride(850);
+	Size->SetWidthOverride(1000);
+	Size->SetHeightOverride(562.5f);
 	Scale->SetContent(Size);
 	auto* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Size->SetContent(Canvas);
@@ -96,22 +90,22 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		Slot->SetSize(FVector2D(W, H));
 	};
 	auto Label = [this](const FText& Text, int32 FontSize, FLinearColor Color) { return MakeLabel(Text, FontSize, Color); };
-	auto AddButton = [&](UCanvasPanel* Panel, const FText& Text, float X, float Y, float W, FLinearColor Tint = TBPaper::Paper)
+	auto AddButton = [&](UCanvasPanel* Panel, const FText& Text, float X, float Y, float W, FLinearColor Tint = TBPaper::PrintCream, FName Name = NAME_None)
 	{
-		auto* Button = WidgetTree->ConstructWidget<UButton>();
-		Button->SetStyle(TBPaper::SignButtonStyle(Tint));
+		auto* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		Button->SetStyle(TBPaper::PrintButtonStyle(Tint));
 		auto* Caption = Label(Text, 11, TBPaper::Ink);
 		Caption->SetFont(FSlateFontInfo(HeadingFont, 11));
 		Caption->SetJustification(ETextJustify::Center);
 		TBPaper::FitSignCaption(*WidgetTree, *Button, *Caption);
-		Place(Panel, Button, X, Y, W, 40);
+		CastChecked<UButtonSlot>(Button->GetContent()->Slot)->SetPadding(FMargin(8,3));
+		Place(Panel, Button, X, Y, W, 34);
 		return Button;
 	};
-	const FLinearColor CardPaper = FLinearColor::FromSRGBColor(FColor(255, 240, 210));
-	const FLinearColor CardEdge = FLinearColor::FromSRGBColor(FColor(72, 43, 26));
-	const FLinearColor RuleColor = FLinearColor::FromSRGBColor(FColor(200, 168, 128));
-	const FLinearColor FooterColor = FLinearColor::FromSRGBColor(FColor(240, 220, 183));
-	const FSlateRoundedBoxBrush CardBrush(CardPaper, 14.f, CardEdge, 3.f);
+	const FLinearColor CardPaper = TBPaper::PrintCream;
+	const FLinearColor CardEdge = TBPaper::PrintInk;
+	const FLinearColor FooterColor = FLinearColor::FromSRGBColor(FColor(241, 229, 198));
+	const FSlateRoundedBoxBrush CardBrush(CardPaper, 1.f, CardEdge, 2.f);
 	auto PanelFace = [&](UCanvasPanel* Panel, const FSlateBrush& Brush, float X, float Y, float Width, float Height)
 	{
 		auto* Face = WidgetTree->ConstructWidget<UBorder>();
@@ -119,38 +113,43 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		Face->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Place(Panel, Face, X, Y, Width, Height);
 	};
-	PanelFace(Canvas, FSlateRoundedBoxBrush(TBPaper::Shadow, 14.f), 342, 152, 760, 560);
-	PanelFace(Canvas, FSlateRoundedBoxBrush(FooterColor, 14.f, CardEdge, 2.f), 340, 149, 760, 560);
-	PanelFace(Canvas, CardBrush, 340, 145, 760, 560);
-	PanelFace(Canvas, FSlateRoundedBoxBrush(FooterColor, FVector4(0, 0, 11, 11)), 343, 633, 754, 69);
-	PanelFace(Canvas, FSlateRoundedBoxBrush(RuleColor, 0.f), 343, 633, 754, 1);
-	auto* SettingsIcon = WidgetTree->ConstructWidget<UImage>();
-	SettingsIcon->SetBrushFromTexture(TBPaper::Art(TEXT("Icon_Settings")));
-	SettingsIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
-	SettingsIcon->SetRenderTransformAngle(-8.f);
-	Place(Canvas, SettingsIcon, 369, 167, 34, 34);
-	auto* Title = Label(TBText::Get(TEXT("Options.Title")), 21, TBPaper::Ink);
-	Title->SetFont(FSlateFontInfo(HeadingFont, 21));
-	// Let each translation determine where the header rule begins.
-	auto* Header = WidgetTree->ConstructWidget<UHorizontalBox>();
-	auto* TitleSlot = Header->AddChildToHorizontalBox(Title);
-	TitleSlot->SetVerticalAlignment(VAlign_Center);
-	auto* HeaderRule = WidgetTree->ConstructWidget<UBorder>();
-	HeaderRule->SetBrush(FSlateRoundedBoxBrush(RuleColor, 1.f));
-	auto* RuleHeight = WidgetTree->ConstructWidget<USizeBox>();
-	RuleHeight->SetHeightOverride(2);
-	RuleHeight->SetContent(HeaderRule);
-	auto* HeaderRuleSlot = Header->AddChildToHorizontalBox(RuleHeight);
-	HeaderRuleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-	HeaderRuleSlot->SetPadding(FMargin(16, 0, 0, 0));
-	HeaderRuleSlot->SetVerticalAlignment(VAlign_Center);
-	Place(Canvas, Header, 413, 163, 659, 45);
+	PanelFace(Canvas, FSlateRoundedBoxBrush(CardEdge, 1.f), 246, 92, 721, 451);
+	PanelFace(Canvas, CardBrush, 244, 89, 721, 451);
+	PanelFace(Canvas, FSlateRoundedBoxBrush(CardEdge, 0.f), 33, 70, 932, 2);
+	PanelFace(Canvas, FSlateRoundedBoxBrush(TBPaper::PrintSea, 0.f), 33, 20, 177, 39);
+	auto* Mast = WidgetTree->ConstructWidget<UBorder>();
+	Mast->SetBrush(FSlateRoundedBoxBrush(TBPaper::PrintSea, 0.f));
+	Mast->SetRenderShear(FVector2D(-16.f, 0));
+	Mast->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(Canvas, Mast, 190, 20, 48, 39);
+	auto* Title = Label(TBText::Get(TEXT("Options.Title")), 22, TBPaper::PrintCream);
+	Title->SetFont(FSlateFontInfo(HeadingFont, 22));
+	Place(Canvas, Title, 42, 17, 185, 46);
+	PanelFace(Canvas, FSlateRoundedBoxBrush(TBPaper::PrintSea, 0.f), 263, 133, 680, 1.5f);
+	PageHeading = Label(FText::GetEmpty(), 16, CardEdge);
+	PageHeading->SetFont(FSlateFontInfo(HeadingFont, 16));
+	Place(Canvas, PageHeading, 265, 97, 660, 32);
 	const TCHAR* TabKeys[] = {TEXT("Options.Audio"), TEXT("Options.Display"), TEXT("Options.Controls"), TEXT("Options.Language")};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(TabKeys); ++Index)
 	{
-		auto* Tab = AddButton(Canvas, TBText::Get(TabKeys[Index]), 369 + Index * 178, 226, 170);
+		const float Y = 89 + Index * 45.f;
+		PanelFace(Canvas, FSlateRoundedBoxBrush(CardEdge, 1.f), 35, Y+2, 193, 36);
+		auto* Tab = AddButton(Canvas, TBText::Get(TabKeys[Index]), 33, Y, 193, TBPaper::PrintCream,
+		    FName(*FString::Printf(TEXT("SettingsTab%d"), Index)));
+		CastChecked<UCanvasPanelSlot>(Tab->Slot)->SetSize(FVector2D(193,36));
+		auto* Caption = TBPaper::SignCaption(Tab);
+		CastChecked<UScaleBoxSlot>(Caption->Slot)->SetHorizontalAlignment(HAlign_Left);
+		CastChecked<UButtonSlot>(Tab->GetContent()->Slot)->SetPadding(FMargin(12, 3, 26, 3));
 		Tabs.Add(Tab);
 	}
+	auto* Marker = WidgetTree->ConstructWidget<UCanvasPanel>();
+	Marker->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(Canvas, Marker, 210, 104, 10, 10);
+	for (int32 I = 0; I < 5; ++I)
+	{
+		PanelFace(Marker, FSlateRoundedBoxBrush(TBPaper::PrintHoney, 0.f), I, I, 1.f, 9.f - 2*I);
+	}
+	SelectedTabMark = Marker;
 	Tabs[0]->OnClicked.AddDynamic(this, &ThisClass::ShowAudio);
 	Tabs[1]->OnClicked.AddDynamic(this, &ThisClass::ShowDisplay);
 	Tabs[2]->OnClicked.AddDynamic(this, &ThisClass::ShowControls);
@@ -173,13 +172,14 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 		BarStyle.SetVerticalBackgroundImage(FSlateRoundedBoxBrush(TBPaper::Outline.CopyWithNewOpacity(.08f), 3.f));
 		Scroll->SetWidgetBarStyle(BarStyle);
 		Scroll->AddChild(Box);
-		Place(Canvas, Scroll, 366, 278, 708, 343);
+		Place(Canvas, Scroll, 263, 143, 692, 322);
 		PageRoots.Add(Scroll);
 		if (Index == TBOptionsPage::Controls) ControlsScroll = Scroll;
 	}
-	ResetButton = AddButton(Canvas, TBText::Get(TEXT("Options.ResetAll")), 367, 647, 132);
+	PanelFace(Canvas, FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(191,175,131)), 0.f), 263, 486, 680, 1);
+	ResetButton = AddButton(Canvas, TBText::Get(TEXT("Options.ResetAll")), 824, 493, 118, TBPaper::PrintCream, TEXT("SettingsReset"));
 	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetPage);
-	CloseButton = AddButton(Canvas, TBText::Get(TEXT("Options.Close")), 965, 647, 107, TBPaper::Teal);
+	CloseButton = AddButton(Canvas, TBText::Get(TEXT("Options.Close")), 904, 26, 61, TBPaper::PrintCream, TEXT("SettingsClose"));
 	CloseButton->OnClicked.AddDynamic(this, &ThisClass::Close);
 
 	TBOptionsPages::BuildAudio(*this, Settings);
@@ -193,14 +193,14 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 	auto* LanguageHeading = Label(TBText::Get(TEXT("Options.DisplayLanguage")), 11, TBPaper::Ink);
 	LanguageHeading->SetFont(FSlateFontInfo(HeadingFont, 11));
 	Place(Languages, LanguageHeading, 6, 8, 420, 22);
-	JapaneseButton = AddButton(Languages, TBText::Get(TEXT("Language.Japanese")), 3, 38, 339);
-	EnglishButton = AddButton(Languages, TBText::Get(TEXT("Language.English")), 352, 38, 339);
+	JapaneseButton = AddButton(Languages, TBText::Get(TEXT("Language.Japanese")), 3, 38, 144);
+	EnglishButton = AddButton(Languages, TBText::Get(TEXT("Language.English")), 161, 38, 144);
 	JapaneseButton->OnClicked.AddDynamic(this, &ThisClass::SelectJapanese);
 	EnglishButton->OnClicked.AddDynamic(this, &ThisClass::SelectEnglish);
 	// The bundled display face has no check character. Draw the selection mark at UI resolution.
 	auto* Check = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("LanguageSelectionMark"));
 	Check->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Languages, Check, 131, 49, 15, 15);
+	Place(Languages, Check, 17, 49, 15, 15);
 	auto Stroke = [&](float X, float Y, float Length, float Angle)
 	{
 		auto* Line = WidgetTree->ConstructWidget<UBorder>();
@@ -214,7 +214,7 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 
 	// 解像度と画面モードを変えたあとの確認。
 	auto* Confirm = WidgetTree->ConstructWidget<UCanvasPanel>();
-	Place(Canvas, Confirm, 0, 0, 1440, 850);
+	Place(Canvas, Confirm, -220, -143.75f, 1440, 850);
 	auto* ConfirmDim = WidgetTree->ConstructWidget<UImage>();
 	ConfirmDim->SetColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.66f));
 	Place(Confirm, ConfirmDim, 0, 0, 1440, 850);
@@ -234,7 +234,7 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 
 	// キーの付け替えの板。暗い幕を押せる（Visible）にして、後ろの行やボタンを押せなくする。
 	auto* KeyLayer = WidgetTree->ConstructWidget<UCanvasPanel>();
-	Place(Canvas, KeyLayer, 0, 0, 1440, 850);
+	Place(Canvas, KeyLayer, -220, -143.75f, 1440, 850);
 	auto* KeyDim = WidgetTree->ConstructWidget<UImage>();
 	KeyDim->SetColorAndOpacity(TBPaper::Ink.CopyWithNewOpacity(.66f));
 	KeyDim->SetVisibility(ESlateVisibility::Visible);
@@ -263,7 +263,7 @@ void UTBOptionsMenu::Build(UTBGameUserSettings& Settings)
 UTBOptionRow* UTBOptionsMenu::AddRow(int32 PageIndex, const FText& Label, bool bBar)
 {
 	auto* Row = CreateWidget<UTBOptionRow>(this);
-	Row->Build(Label, HeadingFont, NumericFont, bBar);
+	Row->Build(Label, PaperFont, NumericFont, bBar);
 	// 変えたあとの音量・設定で鳴らす。ほかの行の表示も変わることがあるので、全部の行を更新する。
 	Row->Changed = [this]
 	{
@@ -279,7 +279,6 @@ void UTBOptionsMenu::AddNote(int32 PageIndex, const FText& Text)
 {
 	auto* Note = MakeLabel(Text, 11, TBPaper::Muted);
 	Note->SetAutoWrapText(true);
-	Note->SetWrapTextAt(672);
 	Pages[PageIndex]->AddChildToVerticalBox(Note)->SetPadding(FMargin(8, 10, 8, 8));
 }
 
@@ -317,10 +316,16 @@ void UTBOptionsMenu::ShowPage(int32 Index)
 	for (int32 Other = 0; Other < PageRoots.Num(); ++Other)
 	{
 		PageRoots[Other]->SetVisibility(Other == Page ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		Tabs[Other]->SetStyle(TBPaper::SignButtonStyle(Other == Page ? TBPaper::Gold : TBPaper::Paper));
-		Tabs[Other]->SetRenderTransformAngle(Other == Page ? -.9f : 0.f);
-		Tabs[Other]->SetRenderTranslation(FVector2D(0, Other == Page ? -2.f : 0.f));
+		const bool Selected = Other == Page;
+		FButtonStyle TabFace = TBPaper::PrintButtonStyle(Selected ? TBPaper::PrintSea : TBPaper::PrintCream);
+		if (Selected) TabFace.SetHovered(FSlateRoundedBoxBrush(TBPaper::PrintSea, 1.f, TBPaper::PrintInk, 2.f));
+		Tabs[Other]->SetStyle(TabFace);
+		auto* Text = TBPaper::SignCaption(Tabs[Other]);
+		Text->SetColorAndOpacity(Selected ? TBPaper::PrintCream : TBPaper::PrintInk);
+		if (Selected) PageHeading->SetText(Text->GetText());
 	}
+	SelectedTabMark->SetRenderTranslation(FVector2D(0, Page * 45.f));
+	ResetButton->SetVisibility(Page == TBOptionsPage::Language ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	if (Page == TBOptionsPage::Controls && ControlsScroll)
 	{
 		ControlsScroll->ScrollToStart();
@@ -328,9 +333,9 @@ void UTBOptionsMenu::ShowPage(int32 Index)
 	if (Page == TBOptionsPage::Language)
 	{
 		const bool bEnglish = TBText::GetLanguage() == TEXT("en");
-		JapaneseButton->SetStyle(TBPaper::SignButtonStyle(bEnglish ? TBPaper::Paper : TBPaper::Teal));
-		EnglishButton->SetStyle(TBPaper::SignButtonStyle(bEnglish ? TBPaper::Teal : TBPaper::Paper));
-		LanguageCheck->SetRenderTranslation(FVector2D(bEnglish ? 349.f : 0.f, 0));
+		JapaneseButton->SetStyle(TBPaper::PrintButtonStyle(bEnglish ? TBPaper::PrintCream : TBPaper::PrintAqua));
+		EnglishButton->SetStyle(TBPaper::PrintButtonStyle(bEnglish ? TBPaper::PrintAqua : TBPaper::PrintCream));
+		LanguageCheck->SetRenderTranslation(FVector2D(bEnglish ? 158.f : 0.f, 0));
 	}
 	RefreshRows();
 }

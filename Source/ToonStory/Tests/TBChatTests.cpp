@@ -201,7 +201,12 @@ bool FTBChatClosedEntryTest::RunTest(const FString& Parameters)
 	}
 	const auto* Caption = Cast<UTextBlock>(Entry->GetContent());
 	if (TestNotNull(TEXT("Chat entry caption"), Caption))
-		TestEqual(TEXT("The entry explains its keyboard shortcut"), Caption->GetText().ToString(), TBText::String(TEXT("Root.Chat.Open")));
+	{
+		TestEqual(TEXT("Lobby entry explains how to start typing"), Caption->GetText().ToString(), TBText::String(TEXT("Root.Chat.EnterPrompt")));
+		Box->SetResultsLayout(true);
+		TestEqual(TEXT("Collapsed results chat shows its shortcut"), Caption->GetText().ToString(), TBText::String(TEXT("Root.Chat.Open")));
+		Box->SetResultsLayout(false);
+	}
 	// 独立したログを使い、実際の部屋の履歴には触らない。
 	auto* Log = NewObject<UTBChatLog>(World->GetGameInstance());
 	Log->Add(TEXT("A"), TEXT("expired"), false);

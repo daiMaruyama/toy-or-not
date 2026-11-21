@@ -75,7 +75,7 @@ bool FTBHousePartyTest::RunTest(const FString&)
  for(auto* PC:Guests) TestTrue(TEXT("Losers cannot move"),PC->GetPawn<ATBCharacter>()->IsMovementLocked());
  // 結果の画面は10秒。決着からの演出の分だけ延びる。
  const auto& Feel=TB::PresentationData().Result;
- TestTrue(TEXT("Ten-second celebration after the presentation"),FMath::IsNearlyEqual(State->EndTime-State->GetServerWorldTimeSeconds(),10.+Feel.CoverSeconds+Feel.RevealSeconds,.1));
+ TestTrue(TEXT("Ten-second celebration after the presentation"),FMath::IsNearlyEqual(State->EndTime-State->GetServerWorldTimeSeconds(),10.+(State->ResultStyle==ETBResultStyle::None ? 0.f : Feel.CoverSeconds+Feel.RevealSeconds),.1));
  return !HasAnyErrors();
 }
 

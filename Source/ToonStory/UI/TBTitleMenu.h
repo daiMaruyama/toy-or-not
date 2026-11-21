@@ -19,7 +19,7 @@ class TOONSTORY_API UTBTitleMenu : public UUserWidget
 public:
 	enum class EState : uint8
 	{
-		Story, // 寸劇を全画面で流す。メニューは隠す
+		Story, // 寸劇の終わり際にメニューを重ねる
 		Menu,  // メニューをフェードで出す。後ろでは部屋の様子がループする
 	};
 	EState GetState() const
@@ -83,18 +83,8 @@ protected:
 
 private:
 	void BuildPaperLayout();
-	void UpdateTitleCaptions();
-	struct FTitleCaption
-	{
-		TWeakObjectPtr<UButton> Button;
-		TWeakObjectPtr<class UImage> Patch;
-		TWeakObjectPtr<UWidget> Layer;
-		FString Key, Original;
-	};
-	TArray<FTitleCaption> TitleCaptions;
-	// 乗せているボタンの集中線だけを出す。
-	void UpdateBursts();
-	void EnterMenu();
+	void EnterMenu(bool bBeforeStoryEnd = false);
+	bool bOpeningOverlap = false;
 	// 寸劇を流さずメニューへ入るとき、寸劇を最後のコマの状態にする。
 	void SettleStory();
 	void StartLoop();
@@ -116,6 +106,8 @@ private:
 	TWeakObjectPtr<class ALevelSequenceActor> StoryActor;
 	UPROPERTY(Transient) TObjectPtr<UWidget> Blackout;
 	UPROPERTY(Transient) TObjectPtr<UWidget> MenuLayer;
+	UPROPERTY(Transient) TObjectPtr<UWidget> TitlePrintSheet;
+	UPROPERTY(Transient) TObjectPtr<UWidget> StorySkipHint;
 	UPROPERTY(Transient) TObjectPtr<UWidget> FinderOverlay;
 	UPROPERTY(Transient) TObjectPtr<UTBSession> Session;
 	UPROPERTY(Transient) TObjectPtr<UButton> JoinButton;
@@ -133,21 +125,22 @@ private:
 	UFUNCTION() void Join();
 	UFUNCTION()
 	void Quit();
+	UFUNCTION() void AskQuit();
+	UFUNCTION() void CancelQuit();
+	UPROPERTY(Transient) TObjectPtr<UWidget> QuitOverlay;
+	UPROPERTY(Transient) TObjectPtr<UButton> CancelQuitButton;
 	UFUNCTION()
 	void Help();
 	UFUNCTION() void CloseHelp();
 	UFUNCTION() void ShowToyHelp();
 	UFUNCTION() void ShowHumanHelp();
-	// キー名は割り当てで変わるので、開くたびに作り直す。
+	// 陣営を切り替えたら、その漫画と遊び方を一緒に更新する。
 	void RefreshHelpText();
 	bool bHumanHelp = false;
 	UPROPERTY(Transient) TObjectPtr<UButton> HelpToyTab;
 	UPROPERTY(Transient) TObjectPtr<UButton> HelpHumanTab;
-	UPROPERTY(Transient) TObjectPtr<class UImage> HelpRoleIcon;
+	UPROPERTY(Transient) TObjectPtr<class UImage> HelpComic;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpGoal;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpDescription;
-	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpKeyLabels;
-	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpActions;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitleContent;
 	UPROPERTY(Transient) TObjectPtr<UWidget> HelpOverlay;
 	UPROPERTY(Transient) TObjectPtr<UButton> CloseHelpButton;

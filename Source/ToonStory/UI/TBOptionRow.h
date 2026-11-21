@@ -6,8 +6,9 @@
 #include "Types/SlateEnums.h"
 #include "TBOptionRow.generated.h"
 
-class UBorder;
+class UProgressBar;
 class UComboBoxString;
+class UButton;
 class UFont;
 class USlider;
 class UTextBlock;
@@ -42,6 +43,10 @@ private:
 	void SelectChoice(FString Choice, ESelectInfo::Type Source);
 	UFUNCTION()
 	void SliderMoved(float Fraction);
+	UFUNCTION() void Decrease();
+	UFUNCTION() void Increase();
+	UPROPERTY(Transient) TObjectPtr<UButton> MinusButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> PlusButton;
 	UFUNCTION()
 	void SliderGrabbed();
 	UFUNCTION()
@@ -54,7 +59,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UFont> ChoiceFont;
 	UPROPERTY(Transient)
-	TObjectPtr<UBorder> TrackFill;
+	TObjectPtr<UProgressBar> TrackFill;
 	UPROPERTY(Transient)
 	TObjectPtr<USlider> Slider;
 	UPROPERTY(Transient)

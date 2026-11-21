@@ -11,8 +11,12 @@
 #include "Character/TBCharacter.h"
 #include "Character/TBMovement.h"
 #include "Components/Button.h"
+#include "Components/ComboBoxString.h"
 #include "Components/Image.h"
+#include "Components/ScrollBox.h"
+#include "Components/Slider.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 #include "Components/SceneComponent.h"
 #include "Core/TBController.h"
 #include "Core/TBChat.h"
@@ -74,7 +78,7 @@ namespace
 	{
 	public:
 		FUIReview(FAutomationTestBase* InTest, UWorld* InWorld, bool bInTitle)
-		    : Test(InTest), World(InWorld), bTitle(bInTitle), Deadline(FPlatformTime::Seconds() + 180)
+		    : Test(InTest), World(InWorld), bTitle(bInTitle), Deadline(FPlatformTime::Seconds() + CaptureTimeout)
 		{
 			OldLanguage = TBText::GetLanguage();
 			bRosterOnly = !bTitle && FParse::Param(FCommandLine::Get(), TEXT("UIReviewRosterOnly"));
@@ -193,7 +197,7 @@ namespace
 		{
 			if (!World.IsValid() || FPlatformTime::Seconds() > Deadline)
 			{
-				Test->AddError(TEXT("UI review lost its world or exceeded 180 seconds."));
+				Test->AddError(FString::Printf(TEXT("UI review lost its world or timed out on capture %d (%s)."), Step, *Name));
 				return true;
 			}
 			if (State.IsValid() && (State->bTravelPending || World->IsInSeamlessTravel()))
@@ -250,14 +254,39 @@ namespace
 				{
 					const auto* Goal = Cast<UTextBlock>(Title->WidgetTree->FindWidget(TEXT("HelpGoal")));
 					const TCHAR* Expected = Step == 1 ? TEXT("Root.Help.ToyGoal") : TEXT("Root.Help.HumanGoal");
+					const auto* Sheet = Cast<UImage>(Title->WidgetTree->FindWidget(TEXT("HelpComic")));
+					const auto* Art = Sheet ? Cast<UTexture2D>(Sheet->GetBrush().GetResourceObject()) : nullptr;
+					const auto* Credit = Cast<UTextBlock>(Title->WidgetTree->FindWidget(TEXT("HelpCredit")));
+					if (!Test->TestNotNull(TEXT("Role page has the player's comic"), Art) ||
+					    !Test->TestEqual(TEXT("Tab selects the correct portrait sheet"), Art->GetName(),
+					        FString(Step == 1 ? TEXT("T_UI_GuideToy") : TEXT("T_UI_GuideHuman"))) ||
+					    !Test->TestTrue(TEXT("The complete comic fits with its original proportions"),
+					        FMath::IsNearlyEqual(Sheet->GetCachedGeometry().GetLocalSize().X /
+					            FMath::Max(1., double(Sheet->GetCachedGeometry().GetLocalSize().Y)),
+					            double(Art->GetSizeX()) / Art->GetSizeY(), .012)) ||
+					    !Test->TestNotNull(TEXT("Role page has an editable credit"), Credit) ||
+					    !Test->TestEqual(TEXT("Role page has its localized credit"), Credit->GetText().ToString(),
+					        TBText::String(TEXT("Root.Help.BudgetNote")))) return true;
 					if (!Test->TestNotNull(TEXT("Role page has an objective"), Goal) ||
 					    !Test->TestEqual(TEXT("Selected role shows its localized objective"),
 					        Goal->GetText().ToString(), TBText::String(Expected))) return true;
 				}
-				if (bTitle && Step == 3 && !CheckOptionSigns()) return true;
-				if (!bTitle && Step == 0 &&
-				    (!Test->TestNotNull(TEXT("Lobby has its own players button"), HUD->GetHitBoxWithName(TEXT("Players"))) ||
-				     !Test->TestNotNull(TEXT("Lobby has its own leave button"), HUD->GetHitBoxWithName(TEXT("Leave"))))) return true;
+				if (bTitle && Step == 3 && !CheckOptionButtons()) return true;
+				if (bTitle && (Step == 3 || Step == 11 || Step == 12) && !CheckSettingsScrollWidth()) return true;
+				if (!bTitle && (Step == 0 || Step == 1 || Step == 2 || Step == 23))
+				{
+					const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+					const double Scale = FMath::Min(Size.X / 1440., Size.Y / 810.);
+					const FVector2D Origin = (FVector2D(Size) - FVector2D(1440, 810) * Scale) * .5;
+					auto AtHeaderPosition = [&](FName Id, double CenterX)
+					{
+						const auto* Hit = HUD->GetHitBoxWithName(Id);
+						return Hit && Hit->Contains(Origin + FVector2D(CenterX, 45) * Scale);
+					};
+					if (!Test->TestTrue(TEXT("Lobby and stage keep Settings, Players and Leave in the same positions"),
+					        AtHeaderPosition(TEXT("OpenOptions"), 1135) && AtHeaderPosition(TEXT("Players"), 1230) &&
+					        AtHeaderPosition(TEXT("Leave"), 1349))) return true;
+				}
 				if (!bTitle && Step == 47)
 				{
 					if (!Test->TestNotNull(TEXT("Exit confirmation offers cancel"), HUD->GetHitBoxWithName(TEXT("CancelLeave"))) ||
@@ -270,18 +299,18 @@ namespace
 				if (!bTitle && Step == 14)
 				{
 					const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
-					const double Scale = FMath::Min(Size.X / 1280., Size.Y / 800.);
-					const FVector2D Origin = FVector2D(Size) * .5 - FVector2D(360, 344) * Scale;
+					const double Scale = FMath::Min(Size.X / 1600., Size.Y / 900.);
+					const FVector2D Origin = FVector2D(Size) * .5 - FVector2D(384, 246.5) * Scale;
 					const auto Covers = [&](FName Id, FVector2D Center)
 					{
 						const FHUDHitBox* Hit = HUD->GetHitBoxWithName(Id);
 						return Hit && Hit->Contains(Origin + Center * Scale);
 					};
 					if (!Test->TestTrue(TEXT("Reset, resume and players respond on their three hanging cards"),
-					        Covers(TEXT("Unstuck"), {136, 374}) && Covers(TEXT("Resume"), {352, 374}) &&
-					        Covers(TEXT("Players"), {568, 374})) ||
-					    !Test->TestTrue(TEXT("Settings and leave respond on the two lower tiles"),
-					        Covers(TEXT("OpenOptions"), {448, 595}) && Covers(TEXT("Leave"), {590, 595}))) return true;
+					        Covers(TEXT("Unstuck"), {150, 280}) && Covers(TEXT("Resume"), {384, 280}) &&
+					        Covers(TEXT("Players"), {618, 280})) ||
+					    !Test->TestTrue(TEXT("Settings and leave respond in the pause footer"),
+					        Covers(TEXT("OpenOptions"), {548, 447}) && Covers(TEXT("Leave"), {675, 447}))) return true;
 				}
 				if (!bTitle && (Step == 1 || Step == 2 || Step == 23))
 				{
@@ -338,8 +367,10 @@ namespace
 				        State->Phase == ETBPhase::Results && PC->IsResultShown() && Body.IsValid() &&
 				        Body->IsCelebrating() && Body->IsHuman() == (Step == 45))) return true;
 				const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
-				const FString Folder = FPaths::ProjectSavedDir() /
-				    (bCompactHintsOnly ? TEXT("UIRefresh/CompactHints") : TEXT("UIRefresh/ScreenshotsV2")) / TBText::GetLanguage() /
+				FString CaptureRoot;
+				if (!FParse::Value(FCommandLine::Get(), TEXT("UIReviewOutput="), CaptureRoot))
+					CaptureRoot = FPaths::ProjectSavedDir() / (bCompactHintsOnly ? TEXT("UIRefresh/CompactHints") : TEXT("UIRefresh/ScreenshotsV2"));
+				const FString Folder = CaptureRoot / TBText::GetLanguage() /
 				    FString::Printf(TEXT("%dx%d"), Size.X, Size.Y);
 				IFileManager::Get().MakeDirectory(*Folder, true);
 				Path = Folder / (Name + TEXT(".png"));
@@ -372,10 +403,13 @@ namespace
 			else if (bRosterOnly && Step == 19) return true;
 			bEntered = false;
 			bRequested = false;
+			Deadline = FPlatformTime::Seconds() + CaptureTimeout;
 			return false;
 		}
 
 	private:
+		// Each screenshot has its own deadline so a long series can run at native display resolution.
+		static constexpr double CaptureTimeout = 60.;
 		float StorageFraction() const { return Step == 40 ? 0.f : Step == 41 ? .5f : .95f; }
 
 		void RestoreStorage()
@@ -625,36 +659,62 @@ namespace
 			return true;
 		}
 
-		bool CheckOptionSigns()
+		bool CheckOptionButtons()
 		{
-			int32 VisibleSigns = 0;
-			bool bValid = true;
-			Options->WidgetTree->ForEachWidget([&](UWidget* Widget)
+			bool Valid = true;
+			for (const TCHAR* ButtonName : {TEXT("SettingsTab0"), TEXT("SettingsTab1"), TEXT("SettingsTab2"),
+			    TEXT("SettingsTab3"), TEXT("SettingsReset"), TEXT("SettingsClose")})
 			{
-				auto* Button = Cast<UButton>(Widget);
-				if (!Button || !Button->GetStyle().Normal.GetResourceName().ToString().EndsWith(TEXT("/Sign.svg"))) return;
+				auto* Button = Cast<UButton>(Options->WidgetTree->FindWidget(ButtonName));
+				if (!Test->TestNotNull(ButtonName, Button)) return false;
 				const auto& Frame = Button->GetCachedGeometry();
-				if (Frame.GetLocalSize().GetMin() <= 0) return;
-				++VisibleSigns;
-				bValid &= Test->TestTrue(TEXT("Printed outlines are rendered whole"),
-				    Button->GetStyle().Normal.DrawAs == ESlateBrushDrawType::Image);
-				bool bFoundCaption = false;
+				Valid &= Test->TestTrue(TEXT("Settings controls have a visible inked face"),
+				    Frame.GetLocalSize().GetMin() >= 30 && Button->GetStyle().Normal.DrawAs == ESlateBrushDrawType::RoundedBox);
+				bool bMeasured = false;
 				UWidgetTree::ForEachWidgetAndChildrenUntil(Button, [&](UWidget* Child)
 				{
 					const auto* Caption = Cast<UTextBlock>(Child);
 					if (!Caption) return true;
-					bFoundCaption = true;
-					const auto& TextGeometry = Caption->GetCachedGeometry();
-					const FVector2D TL = Frame.AbsoluteToLocal(TextGeometry.LocalToAbsolute(FVector2D::ZeroVector));
-					const FVector2D BR = Frame.AbsoluteToLocal(TextGeometry.LocalToAbsolute(TextGeometry.GetLocalSize()));
-					bValid &= Test->TestTrue(*FString::Printf(TEXT("Caption stays inside its inked face: %s"),
-					    *Caption->GetText().ToString()), TextGeometry.GetLocalSize().GetMin() > 0 &&
-					    TL.X >= 3 && TL.Y >= 2 && BR.X <= Frame.GetLocalSize().X - 3 && BR.Y <= Frame.GetLocalSize().Y - 2);
+					const auto& Text = Caption->GetCachedGeometry();
+					const FVector2D TL = Frame.AbsoluteToLocal(Text.LocalToAbsolute(FVector2D::ZeroVector));
+					const FVector2D BR = Frame.AbsoluteToLocal(Text.LocalToAbsolute(Text.GetLocalSize()));
+					bMeasured = !Caption->GetText().IsEmpty() && Text.GetLocalSize().GetMin() > 0 &&
+					    TL.X >= 2 && TL.Y >= 1 && BR.X <= Frame.GetLocalSize().X - 2 && BR.Y <= Frame.GetLocalSize().Y - 1;
 					return false;
 				});
-				bValid &= Test->TestTrue(TEXT("Printed button contains editable text"), bFoundCaption);
+				Valid &= Test->TestTrue(TEXT("Editable settings label stays inside its button"), bMeasured);
+			}
+			return Valid;
+		}
+
+		bool CheckSettingsScrollWidth()
+		{
+			bool Valid = true;
+			int32 MeasuredControls = 0;
+			Options->WidgetTree->ForEachWidget([&](UWidget* Widget)
+			{
+				auto* Scroll = Cast<UScrollBox>(Widget);
+				if (!Scroll || Scroll->GetVisibility() != ESlateVisibility::Visible) return;
+				auto* List = Cast<UVerticalBox>(Scroll->GetChildAt(0));
+				if (!List) return;
+				const auto& Content = List->GetCachedGeometry();
+				for (UWidget* Child : List->GetAllChildren())
+				{
+					auto* Row = Cast<UUserWidget>(Child);
+					if (!Row) continue;
+					Row->WidgetTree->ForEachWidget([&](UWidget* Control)
+					{
+						if (!Control->IsA<UButton>() && !Control->IsA<UComboBoxString>() && !Control->IsA<USlider>()) return;
+						const auto& Geometry = Control->GetCachedGeometry();
+						if (Geometry.GetLocalSize().GetMin() <= 0) return;
+						const auto Corner = Content.AbsoluteToLocal(Geometry.LocalToAbsolute(Geometry.GetLocalSize()));
+						Valid &= Test->TestTrue(*FString::Printf(TEXT("Scroll content leaves right padding for %s"), *Control->GetName()),
+						    Corner.X <= Content.GetLocalSize().X - 4.f);
+						++MeasuredControls;
+					});
+				}
 			});
-			return Test->TestTrue(TEXT("Measured the four tabs and both footer buttons"), VisibleSigns >= 6) && bValid;
+			return Test->TestTrue(TEXT("Measured settings row controls"), MeasuredControls > 0) && Valid;
 		}
 
 		bool PrepareTitleReview()
@@ -675,10 +735,7 @@ namespace
 					return true;
 				});
 			}
-			for (const TCHAR* Art : {TEXT("TitleLogo"), TEXT("Button_HostRoom_Normal"),
-			    TEXT("Button_HostRoom_Hover"), TEXT("Button_HostRoom_Pressed"), TEXT("Button_FindRoom_Normal"),
-			    TEXT("Button_FindRoom_Hover"), TEXT("Button_FindRoom_Pressed"), TEXT("Button_HowToPlay_Normal"),
-			    TEXT("Button_HowToPlay_Hover"), TEXT("Button_HowToPlay_Pressed"), TEXT("Frame_Settings"),
+			for (const TCHAR* Art : {TEXT("TitleSteamMark"), TEXT("TitleComicCover"), TEXT("Frame_Settings"),
 			    TEXT("Icon_Hourglass"), TEXT("Icon_BatteryPickup"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")})
 			{
 				auto* Texture = TBPaper::Art(Art);
@@ -732,24 +789,18 @@ namespace
 			    !Test->TestTrue(TEXT("UMG title control is hovered"), TitleVisualButton->IsHovered()) ||
 			    !Test->TestEqual(TEXT("UMG title control reports the captured pressed state"),
 			        TitleVisualButton->IsPressed(), bTitlePressed)) return false;
-			if (TBText::GetLanguage() == TEXT("en"))
+			const TCHAR* Key = TitleVisualButton->GetFName() == FName(TEXT("HostButton")) ? TEXT("Root.Title.Host") :
+			    TitleVisualButton->GetFName() == FName(TEXT("FindButton")) ? TEXT("Root.Title.Find") : TEXT("Root.Title.Help");
+			bool bMatches = false;
+			UWidgetTree::ForEachWidgetAndChildrenUntil(TitleVisualButton.Get(), [&](UWidget* Widget)
 			{
-				const auto& Style = TitleVisualButton->GetStyle();
-				UObject* Expected = (bTitlePressed ? Style.Pressed : Style.Hovered).GetResourceObject();
-				int32 Patches = 0;
-				bool bMatches = true;
-				UWidgetTree::ForEachWidgetAndChildrenUntil(TitleVisualButton.Get(), [&](UWidget* Widget)
-				{
-					if (const auto* Patch = Cast<UImage>(Widget))
-					{
-						++Patches;
-						bMatches &= Patch->GetBrush().GetResourceObject() == Expected;
-					}
-					return true;
-				});
-				return Test->TestTrue(TEXT("Translated caption patch follows the actual button state"), Patches > 0 && bMatches);
-			}
-			return true;
+				if (const auto* Caption = Cast<UTextBlock>(Widget)) bMatches = Caption->GetText().EqualTo(TBText::Get(Key));
+				return !bMatches;
+			});
+			const auto& Style = TitleVisualButton->GetStyle();
+			return Test->TestTrue(TEXT("Pressed and hovered ink colors differ"),
+			           Style.Pressed.TintColor != Style.Hovered.TintColor) &&
+			       Test->TestTrue(TEXT("Cover button keeps the localized caption through mouse states"), bMatches);
 		}
 
 		bool EnterTitle()

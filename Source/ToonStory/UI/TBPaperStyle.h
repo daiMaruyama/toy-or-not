@@ -11,6 +11,23 @@
 
 namespace TBPaper
 {
+	inline const FLinearColor PrintInk = FLinearColor::FromSRGBColor(FColor(29, 53, 56));
+	inline const FLinearColor PrintSea = FLinearColor::FromSRGBColor(FColor(34, 84, 89));
+	inline const FLinearColor PrintCream = FLinearColor::FromSRGBColor(FColor(255, 246, 223));
+	inline const FLinearColor PrintHoney = FLinearColor::FromSRGBColor(FColor(255, 206, 89));
+	inline const FLinearColor PrintAqua = FLinearColor::FromSRGBColor(FColor(150, 214, 199));
+	inline const FLinearColor PrintStock = FLinearColor::FromSRGBColor(FColor(246, 232, 197));
+	inline const FLinearColor PrintQuiet = FLinearColor::FromSRGBColor(FColor(102, 105, 91));
+	inline FButtonStyle PrintButtonStyle(FLinearColor Face)
+	{
+		FButtonStyle Style;
+		Style.SetNormal(FSlateRoundedBoxBrush(Face, 1.f, PrintInk, 2.f));
+		Style.SetHovered(FSlateRoundedBoxBrush(PrintAqua, 1.f, PrintInk, 2.f));
+		Style.SetPressed(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(238, 120, 94)), 1.f, PrintInk, 2.f));
+		Style.SetDisabled(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(221, 215, 194)), 1.f, PrintInk.CopyWithNewOpacity(.55f), 1.f));
+		Style.SetNormalPadding(FMargin(8, 2)).SetPressedPadding(FMargin(9, 3, 7, 1));
+		return Style;
+	}
 	inline const FLinearColor Ink = FLinearColor::FromSRGBColor(FColor(53, 24, 5));
 	inline const FLinearColor Accent = FLinearColor::FromSRGBColor(FColor(177, 64, 46));
 	inline const FLinearColor Cream = FLinearColor::FromSRGBColor(FColor(248, 223, 179));

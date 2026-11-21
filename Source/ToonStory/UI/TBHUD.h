@@ -74,10 +74,11 @@ private:
 	void DrawText(const FString& Text, FLinearColor Color, float X, float Y, UFont* Font = nullptr, float Scale = 1.f,
 	              bool ScalePosition = false, bool Outlined = false);
 	void DrawResults(const class ATBGameState& MatchState);
-	void DrawResultCover(const class ATBGameState& MatchState);
-	void DrawMomBubble(const class ATBGameState& MatchState, float CenterX, float CenterY, float Width, float Height, float Alpha);
 	void DrawMatch(const class ATBGameState& MatchState, class ATBController& Controller);
 	void DrawLobby();
+	void DrawRoomPanel(float X, float Y, float W, float H, float Unit, FLinearColor Fill);
+	void DrawRoomButton(FName Id, const FString& Caption, float X, float Y, float W, float H, float Unit,
+	                    FLinearColor Fill, bool Enabled = true, bool Interactive = true, float TextScale = .92f);
 	void DrawDebugHUD();
 	// 凝視の演出。おもちゃには脈打つ周辺の影、人間にはズームに連動する影。本人の画面にだけ出す。
 	void DrawGazeEffects(class ATBController& Controller);

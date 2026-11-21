@@ -48,6 +48,12 @@ public class ToonStory : ModuleRules
 		if (Target.ProjectFile != null)
 		{
 			RuntimeDependencies.Add("$(ProjectDir)/Content/UI/PaperClub/Sign.svg", StagedFileType.NonUFS);
+			// The media decoder and its first-frame fallback both open loose files.
+			foreach (string Edition in new[] { "ComicDuck", "ComicDinosaur", "ComicCar" })
+			{
+				RuntimeDependencies.Add("$(ProjectDir)/Content/Movies/" + Edition + ".mp4", StagedFileType.NonUFS);
+				RuntimeDependencies.Add("$(ProjectDir)/Content/Movies/" + Edition + "Poster.jpg", StagedFileType.NonUFS);
+			}
 			string UILocalization = System.IO.Path.Combine(Target.ProjectFile.Directory.FullName, "Content", "Localization", "UI");
 			if (System.IO.Directory.Exists(UILocalization))
 				foreach (string File in System.IO.Directory.GetFiles(UILocalization, "*.csv"))

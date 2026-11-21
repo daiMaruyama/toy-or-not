@@ -66,7 +66,10 @@ void ATBHUD::DrawGazeEffects(ATBController& Controller)
 	}
 	bWasCaught = Caught;
 	// おもちゃ: 文字を出さず、周辺の影の二拍の収縮で緊張を伝える。
-	GazeShadow = TBRuleMath::AdvanceShade(GazeShadow, TBRuleMath::GazeShadowTarget(State), DeltaSeconds,
+	// The caught toy's camera takes over with a neutral vignette. Let the warm
+	// two-beat shadow fade as the scene loses colour, including at the corners.
+	const float TargetShadow = State == EGazeState::Frozen ? 0.f : TBRuleMath::GazeShadowTarget(State);
+	GazeShadow = TBRuleMath::AdvanceShade(GazeShadow, TargetShadow, DeltaSeconds,
 	                                      Gazed ? .12f : .5f, .4f);
 	if (GazeShadow > 0.f)
 	{

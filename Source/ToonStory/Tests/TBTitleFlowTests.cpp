@@ -13,6 +13,8 @@
 #include "UI/TBTitleMenu.h"
 #include "UI/TBHUD.h"
 #include "UI/Loading/TBLoadingScreenSubsystem.h"
+#include "UI/Loading/TBLoadingScreenSettings.h"
+#include "Data/TBRuleData.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
@@ -135,17 +137,25 @@ namespace
 					break;
 				case 23:
 					if (!Host || !HUD || !Host->CanUseLobbyShortcuts()) return false;
+					StageRequestedAt = FPlatformTime::Seconds();
 					HUD->NotifyHitBoxClick(TEXT("Start"));
 					Step = 20;
 					break;
 				case 20:
 					// Start in the lobby travels to the selected stage before starting the match.
+					if (bCovered && TBLobbySettings::StageIndex(World) != INDEX_NONE && State && State->bTravelPending)
+						bSawFilmOnArrivingStage = true;
 					if (bCovered || World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
 						return false;
 					if (!Test->TestEqual(TEXT("Start action begins match"), State->Phase, ETBPhase::Playing))
 					{
 						return true;
 					}
+					Test->TestTrue(TEXT("The stage film remains over the loaded map while participants prepare"), bSawFilmOnArrivingStage);
+					Test->TestTrue(TEXT("Beginning play preserves the minimum stage film duration"),
+					    FPlatformTime::Seconds() - StageRequestedAt >= GetDefault<UTBLoadingScreenSettings>()->MinimumTravelSeconds);
+					Test->TestTrue(TEXT("The toys retain their hiding time when the stage curtain opens"),
+					    State->IsPreparing() && State->HideRemaining() >= TB::Rules().Match.HidePreparationSeconds - 1.);
 					// Seamless travel may replace controllers; retain the participant, not the old controller.
 					if (auto* Player = GI->GetLocalPlayerByIndex(1))
 						Second = Cast<ATBController>(Player->GetPlayerController(World));
@@ -347,6 +357,8 @@ namespace
 		TWeakObjectPtr<UGameInstance> GI;
 		TWeakObjectPtr<ATBController> Second;
 		double Deadline;
+		double StageRequestedAt = 0.;
+		bool bSawFilmOnArrivingStage = false;
 		int32 Step = 0;
 		bool bCheckedCoveredLobby = false;
 	};
