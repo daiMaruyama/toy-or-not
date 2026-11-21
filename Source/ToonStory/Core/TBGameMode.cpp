@@ -95,6 +95,7 @@ ATBGameMode::ATBGameMode()
 void ATBGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	ATBDummyToy::PrepareStageDolls(GetWorld());
 	if (bBuildTestArena)
 	{
 		BuildArena();

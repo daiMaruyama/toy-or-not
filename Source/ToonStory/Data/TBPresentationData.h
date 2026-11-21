@@ -107,7 +107,7 @@ struct FTBPickupFeel
 	float HighlightDistance = 600.f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "電池",
 	          meta = (DisplayName = "縁取りの強さ", ClampMin = "0", ClampMax = "1"))
-	float HighlightStrength = .4f;
+	float HighlightStrength = .28f;
 };
 
 /** 箱のふた・部屋の光、テレビ、リモコン、収集物の演出 */

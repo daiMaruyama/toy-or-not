@@ -259,7 +259,7 @@ bool FTBBatteryHighlightTest::RunTest(const FString&)
 	const FVector Forward = FVector::ForwardVector;
 	const auto& Feel = TB::PresentationData().Pickup;
 	const float CenterWeight = Battery->HighlightWeight(Observer, Eye, Forward);
-	TestTrue(TEXT("Visible battery lights for a toy looking at it, with a weaker maximum"), CenterWeight > 0.f && CenterWeight <= .5f);
+	TestTrue(TEXT("Visible battery has a subtle rim at the center of toy vision"), CenterWeight > 0.f && CenterWeight <= .28f);
 	Player->Team = ETBTeam::Human;
 	TestEqual(TEXT("Human observer receives no collectible highlight"), Battery->HighlightWeight(Observer, Eye, Forward), 0.f);
 	Player->Team = ETBTeam::Toy;

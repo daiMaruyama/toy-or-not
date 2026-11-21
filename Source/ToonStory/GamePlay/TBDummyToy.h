@@ -43,11 +43,15 @@ public:
 	bool PickUp(ATBCharacter* Human);
 	void PutDown();
 	void ResetPlacement(bool bRandomizeAppearance = false);
+	static void PrepareStageDolls(UWorld* World);
 
 private:
 	void ChooseRandomToy();
 	void Fall(float DeltaSeconds);
 	float FallSpeed = 0;
+	UPROPERTY(ReplicatedUsing = OnRep_Placement)
+	bool bLyingAtRest = false;
+	bool bRestPoseDirty = true;
 	FTBGripCache GripCache;
 	int32 SettleFrames = 12;
 	FTransform InitialTransform;

@@ -831,6 +831,14 @@ bool FTBEmoteTest::RunTest(const FString&)
 					++Mapped; PoseFrames(Part, 2);
 					const auto& Rest = RestPoses.FindChecked(Part);
 					const auto& Moving = Part->GetComponentSpaceTransforms();
+					if (Part->GetSkeletalMeshAsset()->GetName() == TEXT("SK_TeddyBear") &&
+					    (Kind == ETBEmoteKind::Wave || Kind == ETBEmoteKind::Surprise))
+					{
+						const int32 Paw = Part->GetBoneIndex(TEXT("arm_R"));
+						if (!TestTrue(TEXT("Teddy has its right paw"), Rest.IsValidIndex(Paw) && Moving.IsValidIndex(Paw))) return false;
+						const FVector Travel = Moving[Paw].GetLocation() - Rest[Paw].GetLocation();
+						TestTrue(TEXT("Teddy raises its paw within reach of the sewn shoulder"), Travel.Z > .1 && Travel.Size() < 5.);
+					}
 					bool Changed = false;
 					for (int32 Bone = 1; Bone < FMath::Min(Rest.Num(), Moving.Num()); ++Bone)
 						Changed |= Moving[Bone].GetRotation().AngularDistance(Rest[Bone].GetRotation()) > .001;
@@ -1162,8 +1170,10 @@ bool FTBToyFallTest::RunTest(const FString&)
 		const FString VisualName = Toy->ToyCatalogue[Index]->GetName();
 		const bool Supine = VisualName.Contains(TEXT("TinRobot")) || VisualName.Contains(TEXT("ArmyMan")) || VisualName.Contains(TEXT("Nutcracker"));
 		const bool Nutcracker = VisualName.Contains(TEXT("Nutcracker"));
-		const FRotator ExpectedRotation = Supine ? FRotator(Nutcracker ? 75 : 90, 0, 0) : FRotator(0, 0, 90);
-		TestTrue(TEXT("Biped figures face up; other toys lie sideways"), Toy->ToyVisual->GetRelativeRotation().Equals(ExpectedRotation, .01));
+		const bool Teddy = VisualName.Contains(TEXT("TeddyBear"));
+		const FRotator ExpectedRotation = Teddy ? FRotator(-90, 0, 0) : Supine ? FRotator(Nutcracker ? 75 : 90, 0, 0) : FRotator(0, 0, 90);
+		TestTrue(TEXT("Toy rests in its model-specific orientation"), Toy->ToyVisual->GetRelativeRotation().Equals(ExpectedRotation, .01));
+		if (Teddy) TestTrue(TEXT("Teddy faces the floor"), Toy->ToyVisual->GetForwardVector().Z < -.99);
 		if (Supine) TestTrue(TEXT("Supine visual forward points away from the floor"), Toy->ToyVisual->GetForwardVector().Z > .96);
 		Proxy->SelectedToyIndex = Index; Proxy->RefreshToyPresentation(); ReplicateStance(true, false);
 		TestTrue(TEXT("Replicated held stance uses the same orientation without resizing the proxy"),

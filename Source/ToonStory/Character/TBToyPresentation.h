@@ -14,6 +14,7 @@ struct FTBEmoteBone
 {
 	FName Name;
 	FQuat Rotation = FQuat::Identity;
+	FVector BoneSpacePivot = FVector::ZeroVector;
 };
 struct FTBEmotePose
 {
@@ -52,7 +53,7 @@ namespace TBToyPresentation
 	// タイトルのおもちゃのように、シーケンスで動かす見た目にもエモートを出せるようにする。
 	void UseLookPose(AActor* Visual);
 	void Animate(AActor* Visual, float Speed, bool Frozen);
-	// Biped figures lie face-up; the remaining toy shapes lie on their side.
+	// Use each toy's resting orientation for both players and stage dolls.
 	FRotator FallRotation(AActor* Visual, float Angle);
 	void Ground(UChildActorComponent* Visual, float FloorZ);
 	void GroundFallen(UChildActorComponent* Visual, float FloorZ, FTBFallenSupportCache& Cache);
