@@ -230,6 +230,7 @@ void ATBHUD::DrawLobby()
 		DrawNotice(640, 1144, 100);
 		return;
 	}
+	Text(TEXT("TOON STORY"), 28, 22, 2.3f, TBPaper::Cream);
 	Text(TEXT("おもちゃたちの、ひみつの時間。"), 30, 70, 1.0f, TBPaper::Cream);
 	Button(TEXT("CloseSettings"), TEXT("設定を閉じる"), 946, 34, 226);
 	Panel(28, 106, 1144, 2, Accent);
