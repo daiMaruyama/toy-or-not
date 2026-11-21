@@ -9,6 +9,9 @@
 #include "Animation/AnimSequence.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Engine/SkeletalMesh.h"
 #include "Misc/PackageName.h"
 #include "Animation/AnimInstanceProxy.h"
@@ -477,6 +480,23 @@ void TBToyPresentation::Animate(AActor* Visual, float Speed, bool Frozen)
 	}
 }
 
+FRotator TBToyPresentation::FallRotation(AActor* Visual, float Angle)
+{
+	if (Visual)
+		for (const auto* Part : TInlineComponentArray<USkeletalMeshComponent*>(Visual))
+		{
+			const auto* Mesh = Part->GetSkeletalMeshAsset();
+			if (Part->LeaderPoseComponent.IsValid() || !Mesh) continue;
+			const FName Name = Mesh->GetFName();
+			// The rigid nutcracker's rifle projects behind its back. A 15-degree incline
+			// rests its heels and rifle on the floor without burying either surface.
+			if (Name == TEXT("SK_Nutcracker")) return FRotator(Angle * (75.f / 90.f), 0, 0);
+			if (Name == TEXT("SK_ReconSoldier") || Name == TEXT("SK_TinRobot"))
+				return FRotator(Angle, 0, 0);
+		}
+	return FRotator(0, 0, Angle);
+}
+
 void TBToyPresentation::Ground(UChildActorComponent* Visual, float FloorZ)
 {
 	if (!Visual || !Visual->GetChildActor())
@@ -516,6 +536,67 @@ void TBToyPresentation::Ground(UChildActorComponent* Visual, float FloorZ)
 		Visual->AddWorldOffset(FVector(0, 0, Correction));
 		break;
 	}
+}
+
+void TBToyPresentation::GroundFallen(UChildActorComponent* Visual, float FloorZ, FTBFallenSupportCache& Cache)
+{
+	if (!Visual || !Visual->GetChildActor()) return;
+	bool bRebuild = Cache.Visual.Get() != Visual->GetChildActor();
+	for (const auto& Pair : Cache.Meshes)
+		bRebuild |= !Pair.Key.IsValid() || Pair.Key->GetSkeletalMeshAsset() != Pair.Value.Get();
+	if (bRebuild)
+	{
+		Cache = {};
+		Cache.Visual = Visual->GetChildActor();
+		const FTransform ToWorld = Visual->GetComponentTransform();
+		for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Visual->GetChildActor()))
+		{
+			if (!Part->IsVisible()) continue;
+			if (auto* Mesh = Cast<USkeletalMeshComponent>(Part))
+			{
+				// Fur follows the body; its inflated render box is not a supporting surface.
+				if (Mesh->LeaderPoseComponent.IsValid() || !Mesh->GetSkeletalMeshAsset()) continue;
+				Cache.Meshes.Add({Mesh, Mesh->GetSkeletalMeshAsset()});
+				const auto* Data = Mesh->GetSkeletalMeshRenderData();
+				const auto* Weights = Mesh->GetSkinWeightBuffer(0);
+				if (Data && Data->LODRenderData.IsValidIndex(0) && Weights &&
+				    Weights->GetDataVertexBuffer()->GetWeightData() &&
+				    Data->LODRenderData[0].StaticVertexBuffers.PositionVertexBuffer.GetVertexData())
+				{
+					// Freeze the idle pose before this call. This is CPU math on retained LOD0
+					// data, once per stance: no GPU readback or render-state recreation.
+					TArray<FMatrix44f> Matrices;
+					Mesh->CacheRefToLocalMatrices(Matrices);
+					TArray<FVector3f> Positions;
+					Mesh->ComputeSkinnedPositions(Mesh, Positions, Matrices, Data->LODRenderData[0], *Weights);
+					const FTransform PartToVisual = Mesh->GetComponentTransform().GetRelativeTransform(ToWorld);
+					for (const FVector3f& Point : Positions)
+						Cache.Points.Add(PartToVisual.TransformPosition(FVector(Point)));
+					if (!Positions.IsEmpty()) { ++Cache.SkinnedParts; continue; }
+				}
+				Cache.bMissingCPUData = true;
+			}
+			else if (!Part->IsA<UStaticMeshComponent>()) continue;
+			// Static car (or an unsupported future mesh without CPU data): keep a safe
+			// geometric fallback. The catalogue's skeletal toys must never use it.
+			const FBox Box = Part->CalcBounds(FTransform::Identity).GetBox();
+			const FTransform PartToVisual = Part->GetComponentTransform().GetRelativeTransform(ToWorld);
+			for (int32 Corner = 0; Corner < 8; ++Corner)
+				Cache.Points.Add(PartToVisual.TransformPosition(FVector(
+				    Corner & 1 ? Box.Max.X : Box.Min.X, Corner & 2 ? Box.Max.Y : Box.Min.Y,
+				    Corner & 4 ? Box.Max.Z : Box.Min.Z)));
+		}
+	}
+	if (Cache.Points.IsEmpty()) return;
+	const FTransform ToWorld = Visual->GetComponentTransform();
+	if (bRebuild || !Cache.Rotation.Equals(ToWorld.GetRotation()) || !Cache.Scale.Equals(ToWorld.GetScale3D()))
+	{
+		Cache.Rotation = ToWorld.GetRotation(); Cache.Scale = ToWorld.GetScale3D();
+		Cache.BottomOffset = MAX_flt;
+		for (const FVector& Point : Cache.Points)
+			Cache.BottomOffset = FMath::Min(Cache.BottomOffset, float(ToWorld.TransformVector(Point).Z));
+	}
+	Visual->AddWorldOffset(FVector(0, 0, FloorZ - ToWorld.GetLocation().Z - Cache.BottomOffset));
 }
 
 void TBToyPresentation::Grip(UChildActorComponent* Visual, const FVector& HandPosition, FTBGripCache& Cache)

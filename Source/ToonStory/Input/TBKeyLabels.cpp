@@ -36,7 +36,7 @@ namespace
 const TArray<FName>& TB::Keys::All()
 {
 	static const TArray<FName> Names = {MoveForward, MoveBack, MoveLeft, MoveRight, Jump, EmoteWave, EmoteCheer, EmoteDance, EmoteSurprise, EmoteHairDisappear, HumanCrouch, HumanInteract,
-	                                    HumanDrop, HumanGaze, ToySprint, ToyInteract, ToyPush, ToyTaunt, LobbyReady, LobbyStart, ResultsNext};
+	                                    HumanDrop, HumanGaze, ToyFall, ToySprint, ToyInteract, ToyPush, ToyTaunt, LobbyReady, LobbyStart, ResultsNext};
 	return Names;
 }
 
@@ -62,7 +62,8 @@ const TArray<TB::FKeySection>& TB::KeySections()
 	      {Keys::HumanDrop, TBText::String(TEXT("Keys.Action.Human_Drop"))},
 	      {Keys::HumanGaze, TBText::String(TEXT("Keys.Action.Human_Gaze"))}}},
 	    {TBText::String(TEXT("Keys.Toy")),
-	     {{Keys::ToySprint, TBText::String(TEXT("Keys.Action.Toy_Sprint"))},
+	     {{Keys::ToyFall, TBText::String(TEXT("Keys.Action.Toy_Fall"))},
+	      {Keys::ToySprint, TBText::String(TEXT("Keys.Action.Toy_Sprint"))},
 	      {Keys::ToyInteract, TBText::String(TEXT("Keys.Action.Toy_Interact"))},
 	      {Keys::ToyPush, TBText::String(TEXT("Keys.Action.Toy_Push"))},
 	      {Keys::ToyTaunt, TBText::String(TEXT("Keys.Action.Toy_Taunt"))}}},

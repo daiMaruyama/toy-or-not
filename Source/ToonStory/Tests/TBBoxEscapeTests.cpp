@@ -286,15 +286,39 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	SupportB->GetOwner()->SetActorLocation(Room.TransformPosition(FVector(400, 100, 116)));
 	auto* Blocker = World->SpawnActor<AActor>(); Actors.Add(Blocker);
 	auto* Collision = NewObject<UBoxComponent>(Blocker); Blocker->SetRootComponent(Collision);
-	Collision->SetBoxExtent(FVector(100)); Collision->SetCollisionProfileName(TEXT("BlockAll")); Collision->RegisterComponent();
+	Collision->SetBoxExtent(FVector(8)); Collision->SetCollisionProfileName(TEXT("BlockAll")); Collision->RegisterComponent();
 	Blocker->SetActorLocation(ExitLocation);
+	Collision->SetMobility(EComponentMobility::Static);
+	TestFalse(TEXT("A fixed obstruction still invalidates the authored exit"), Course->Validate(Error));
+	Collision->SetMobility(EComponentMobility::Movable);
+	Collision->ComponentTags.Add(TEXT("TBPushable"));
+	TestFalse(TEXT("A tagged but non-simulating obstruction still invalidates the exit"), Course->Validate(Error));
+	Collision->ComponentTags.Remove(TEXT("TBPushable"));
+	Collision->SetEnableGravity(false); Collision->SetSimulatePhysics(true);
+	if (!TestTrue(TEXT("Exit blocker has a live simulated body"), Collision->IsSimulatingPhysics())) return false;
+	TestFalse(TEXT("An untagged physics obstruction still invalidates the exit"), Course->Validate(Error));
+	Collision->ComponentTags.Add(TEXT("TBPushable"));
+	TestTrue(TEXT("A temporary pushable obstruction does not invalidate the authored exit"), Course->Validate(Error));
+	// Ignoring temporary occupancy must not accept the prop itself as the permanent floor.
+	const FVector UnsupportedExit = ExitLocation + FVector(0, 0, 500);
+	Exit->SetActorLocation(UnsupportedExit);
+	Blocker->SetActorLocation(UnsupportedExit - FVector(0, 0, Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10),
+	    false, nullptr, ETeleportType::TeleportPhysics);
+	Collision->ComponentTags.Remove(TEXT("TBPushable"));
+	TestTrue(TEXT("Raised fixture has physical support from the prop alone"), Course->Validate(Error));
+	Collision->ComponentTags.Add(TEXT("TBPushable"));
+	TestFalse(TEXT("A pushable prop cannot substitute for the required permanent exit floor"), Course->Validate(Error));
+	Exit->SetActorLocation(ExitLocation);
+	Blocker->SetActorLocation(ExitLocation, false, nullptr, ETeleportType::TeleportPhysics);
 	Place(Landing, MOVE_Walking, false);
 	TestTrue(TEXT("Second actual walking floor resolves the other allowed support"), Toy->GetCharacterMovement()->CurrentFloor.HitResult.GetComponent() == SupportB);
 	Place(Finish, MOVE_Falling);
-	TestEqual(TEXT("A blocked exit keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
-	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("The same pushable still blocks real escape and keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Blocker->SetActorLocation(ExitLocation + FVector(100, 0, 0), false, nullptr, ETeleportType::TeleportPhysics);
 	Course->Tick(0);
-	TestEqual(TEXT("An unblocked exit releases while still above the jump finish line"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	TestEqual(TEXT("Moving the pushable away releases while still above the jump finish line"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	TestTrue(TEXT("Escape reaches the cleared exit with the prop collision still enabled"),
+	    Toy->GetActorLocation().Equals(ExitLocation, 1.f) && Collision->IsQueryCollisionEnabled());
 	if (!Store(TEXT("Another capture succeeds"), Toy)) return false;
 	Place(FVector(200, 0, 20));
 	State->EndTime = State->GetServerWorldTimeSeconds() - .01;

@@ -3,6 +3,8 @@
 #include "Tests/TBTestMatch.h"
 #include "Core/TBController.h"
 #include "Core/TBGameState.h"
+#include "Core/TBGameMode.h"
+#include "UI/TBHUD.h"
 #include "Core/TBPlayerState.h"
 #include "Character/TBCharacter.h"
 #include "Character/TBMovement.h"
@@ -21,14 +23,20 @@ namespace
 	constexpr int32 PressToyFrame = 13;
 	constexpr int32 CheckToyFrame = 17;
 	constexpr int32 ReleaseCheckToyFrame = 21;
+	constexpr int32 PressToyFlushFrame = 22;
+	constexpr int32 FlushToyFrame = 26;
+	constexpr int32 CheckFlushToyFrame = 30;
+	constexpr int32 PressToyMenuFrame = 31;
+	constexpr int32 OpenToyMenuFrame = 35;
+	constexpr int32 CheckToyMenuFrame = 39;
 	// 押したまま陣営が変わるケース。
-	constexpr int32 BackToHumanFrame = 22;
-	constexpr int32 PressHeldCrouchFrame = 24;
-	constexpr int32 SwitchHeldCrouchFrame = 28;
-	constexpr int32 CheckHeldCrouchFrame = 32;
-	constexpr int32 PressHeldSprintFrame = 34;
-	constexpr int32 SwitchHeldSprintFrame = 38;
-	constexpr int32 CheckHeldSprintFrame = 42;
+	constexpr int32 BackToHumanFrame = 43;
+	constexpr int32 PressHeldCrouchFrame = 45;
+	constexpr int32 SwitchHeldCrouchFrame = 49;
+	constexpr int32 CheckHeldCrouchFrame = 53;
+	constexpr int32 PressHeldSprintFrame = 55;
+	constexpr int32 SwitchHeldSprintFrame = 59;
+	constexpr int32 CheckHeldSprintFrame = 63;
 
 	void SendRoleKey(ATBController* PC, const FKey& Key, EInputEvent Event)
 	{
@@ -62,11 +70,29 @@ namespace
 			{
 				// 元の状態を控えてから、人間・試合中にする。
 				bStarted = true;
+				PausedGameMode = PC->GetWorld()->GetAuthGameMode();
+				if (PausedGameMode.IsValid())
+				{
+					OriginalGameModeTick = PausedGameMode->IsActorTickEnabled();
+					PausedGameMode->SetActorTickEnabled(false);
+				}
+				if (auto* HUD = Cast<ATBHUD>(PC->GetHUD()); HUD && HUD->IsStagePickerOpen())
+				{
+					OriginalStagePicker = true;
+					const auto Phase = State->Phase; State->Phase = ETBPhase::Lobby;
+					HUD->NotifyHitBoxClick(TEXT("CancelStage")); State->Phase = Phase;
+				}
 				OriginalTeam = Body->TBPS()->Team;
+				OriginalToyState = Body->TBPS()->ToyState;
+				OriginalFrozen = Body->TBPS()->bFrozen;
+				OriginalMenu = PC->IsLeaveMenuOpen();
+				if (OriginalMenu) PC->ToggleLeaveMenu();
+				Body->TBPS()->ToyState = ETBToyState::Free;
+				Body->TBPS()->bFrozen = false;
 				Body->TBPS()->Team = ETBTeam::Human;
 				PC->SyncInputContexts();
 			}
-			// 人がいない試合はGameModeがすぐ終わらせるので、毎フレーム試合中へ戻す。抜けるときは元のフェーズへ戻る。
+			// 入力とメニューフォーカスを検査する間は自動勝敗判定を止め、終了時に元へ戻す。
 			if (!Playing.IsSet()) Playing.Emplace(*State);
 			Playing->Hold();
 			switch (Frame)
@@ -93,14 +119,21 @@ namespace
 				PC->SyncInputContexts();
 				break;
 			case PressToyFrame:
+				// Changing the existing human pawn to a toy reduces its capsule. Wait for the actual
+				// floor contact before sending input; falling intentionally cannot begin in the air.
+				if (GroundWaitStarted < 0) GroundWaitStarted = Body->GetWorld()->GetTimeSeconds();
+				if (!Movement->IsMovingOnGround() && Body->GetWorld()->GetTimeSeconds() - GroundWaitStarted < 3.) return false;
+				if (!Movement->IsMovingOnGround()) Test->AddInfo(FString::Printf(TEXT("Toy input floor: location=%s mode=%d physicsLocked=%d frozen=%d elapsed=%.3f"),
+				    *Body->GetActorLocation().ToString(), int32(Movement->MovementMode), Body->IsPhysicsLocked(), Body->IsGazeFrozen(),
+				    Body->GetWorld()->GetTimeSeconds() - GroundWaitStarted));
+				Test->TestTrue(TEXT("Toy input fixture has settled onto the floor"), Movement->IsMovingOnGround());
 				SendRoleKey(PC.Get(), EKeys::LeftControl, IE_Pressed);
 				SendRoleKey(PC.Get(), EKeys::LeftShift, IE_Pressed);
 				SendRoleKey(PC.Get(), EKeys::RightMouseButton, IE_Pressed);
 				break;
 			case CheckToyFrame:
 				Test->TestTrue(TEXT("Toy: left Shift requests sprint"), Movement->bWantsToSprint);
-				// CrouchPressedのIsHumanゲートでも通るので、IMCが無いことの確認としては弱い。
-				Test->TestFalse(TEXT("Toy: left Ctrl does not request crouch"), Movement->bWantsToCrouch);
+				Test->TestTrue(TEXT("Toy: left Ctrl requests the fallen pose"), Movement->bWantsToCrouch);
 				Test->TestFalse(TEXT("Toy: right click does not request gaze"), Movement->bWantsToGaze);
 				SendRoleKey(PC.Get(), EKeys::LeftControl, IE_Released);
 				SendRoleKey(PC.Get(), EKeys::LeftShift, IE_Released);
@@ -108,6 +141,30 @@ namespace
 				break;
 			case ReleaseCheckToyFrame:
 				Test->TestFalse(TEXT("Toy: releasing left Shift ends sprint"), Movement->bWantsToSprint);
+				Test->TestFalse(TEXT("Toy: releasing Ctrl ends the held fall"), Movement->bWantsToCrouch);
+				break;
+			case PressToyFlushFrame:
+				SendRoleKey(PC.Get(), EKeys::LeftControl, IE_Pressed);
+				break;
+			case FlushToyFrame:
+				Test->TestTrue(TEXT("Toy: held fall active before input focus flush"), Movement->bWantsToCrouch);
+				PC->PlayerInput->FlushPressedKeys();
+				break;
+			case CheckFlushToyFrame:
+				Test->TestFalse(TEXT("Toy: flushing pressed keys cancels the held fall"), Movement->bWantsToCrouch);
+				break;
+			case PressToyMenuFrame:
+				SendRoleKey(PC.Get(), EKeys::LeftControl, IE_Pressed);
+				break;
+			case OpenToyMenuFrame:
+				Test->TestTrue(TEXT("Toy: held fall active before menu focus"), Movement->bWantsToCrouch);
+				PC->ToggleLeaveMenu();
+				break;
+			case CheckToyMenuFrame:
+				Test->TestTrue(TEXT("Toy: menu takes gameplay input focus"), PC->IsLeaveMenuOpen() && PC->IsMoveInputIgnored());
+				Test->TestFalse(TEXT("Toy: menu focus releases the held fall without needing key-up"), Movement->bWantsToCrouch);
+				SendRoleKey(PC.Get(), EKeys::LeftControl, IE_Released);
+				if (PC->IsLeaveMenuOpen()) PC->ToggleLeaveMenu();
 				break;
 			case BackToHumanFrame:
 				Body->TBPS()->Team = ETBTeam::Human;
@@ -160,15 +217,35 @@ namespace
 			SendRoleKey(PC.Get(), EKeys::RightMouseButton, IE_Released);
 			if (auto* Body = Cast<ATBCharacter>(PC->GetPawn()); Body && bStarted)
 			{
+				Body->UnCrouch();
 				Body->TBPS()->Team = OriginalTeam;
+				Body->TBPS()->ToyState = OriginalToyState;
+				Body->TBPS()->bFrozen = OriginalFrozen;
+				Body->ApplyState();
 			}
+			if (bStarted && PC->IsLeaveMenuOpen() != OriginalMenu) PC->ToggleLeaveMenu();
 			Playing.Reset();
+			if (OriginalStagePicker)
+				if (auto* HUD = Cast<ATBHUD>(PC->GetHUD()))
+					if (auto* State = PC->GetWorld()->GetGameState<ATBGameState>())
+					{
+						const auto Phase = State->Phase; State->Phase = ETBPhase::Lobby;
+						HUD->NotifyHitBoxClick(TEXT("OpenSettings")); State->Phase = Phase;
+					}
+			if (PausedGameMode.IsValid()) PausedGameMode->SetActorTickEnabled(OriginalGameModeTick);
 			PC->SyncInputContexts();
 		}
 
 		TWeakObjectPtr<ATBController> PC;
 		FAutomationTestBase* Test;
 		int32 Frame = 0;
+		double GroundWaitStarted = -1;
+		ETBToyState OriginalToyState = ETBToyState::Free;
+		bool OriginalFrozen = false;
+		bool OriginalMenu = false;
+		bool OriginalStagePicker = false;
+		bool OriginalGameModeTick = false;
+		TWeakObjectPtr<AActor> PausedGameMode;
 		bool bStarted = false;
 		ETBTeam OriginalTeam = ETBTeam::None;
 		TOptional<TBTest::FPlayingScope> Playing;

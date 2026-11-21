@@ -10,6 +10,7 @@ bool UTBMomArrivalEvent::CanExecute_Implementation(UWorld* World) const
 {
 	if (!World || World->GetNetMode()==NM_Client || !TB::Playing(World) ||
 	    TB::GS(World)->IsPreparing() || !TB::Rules().Events.Mom.IsValid() ||
+	    !ATBMomArrivalZone::HasPassedOpeningDelay(World) ||
 	    !ATBMomArrivalZone::HasHumanPlayer(World) || ATBMomArrivalZone::FindActive(World)) return false;
 	for (TActorIterator<ATBMomArrivalZone> It(World);It;++It)
 		if (It->bEnabled && !It->IsActorBeingDestroyed()) return true;

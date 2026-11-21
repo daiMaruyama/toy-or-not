@@ -2,12 +2,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Level.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Components/StaticMeshComponent.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Character/TBCharacter.h"
+#include "Character/TBCharacterGeometry.h"
 #include "Character/TBMovement.h"
 #include "Core/TBPlayerState.h"
 #include "Tests/AutomationCommon.h"
@@ -25,6 +27,8 @@ bool FTBHouseInteractionTest::RunTest(const FString&)
 	UStaticMeshComponent* Probe = nullptr;
 	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
 	{
+		// The shared storage room is streamed alongside this stage but is not part of its prop setup.
+		if (!It->GetLevel()->GetOutermost()->GetName().EndsWith(TEXT("TB_StylizedHouse"))) continue;
 		auto* Part = It->GetStaticMeshComponent();
 		const UStaticMesh* Mesh = Part->GetStaticMesh();
 		if (!Mesh) continue;
@@ -60,7 +64,8 @@ bool FTBHouseInteractionTest::RunTest(const FString&)
 					Open |= !World->SweepSingleByChannel(Hit,
 					    Part->GetComponentTransform().TransformPosition(Centre - Axis * Distance),
 					    Part->GetComponentTransform().TransformPosition(Centre + Axis * Distance),
-					    FQuat::Identity, ECC_GameTraceChannel1, FCollisionShape::MakeCapsule(7.5f, 9.75f), Query);
+					    FQuat::Identity, ECC_GameTraceChannel1,
+					    FCollisionShape::MakeCapsule(TBCharacterGeometry::ToyRadius, TBCharacterGeometry::ToyHalfHeight), Query);
 				}
 				TestTrue(FString(TEXT("Toy capsule fits underneath chair: ")) + It->GetName(), Open);
 			}
@@ -68,8 +73,11 @@ bool FTBHouseInteractionTest::RunTest(const FString&)
 		if (Part->ComponentHasTag(TEXT("TBPushable")))
 		{
 			++Props;
+			TestEqual(TEXT("Authored mass overrides are preserved, including bowls with welded fruit"),
+				Part->BodyInstance.GetMassOverride(), Part->ComponentHasTag(TEXT("TBRuntimePushable")) ? 1.f : 2.f);
 			TestEqual(TEXT("Human capsule passes through small prop"), Part->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
-			TestEqual(TEXT("Toy capsule cannot stand on small prop"), Part->GetCollisionResponseToChannel(ECC_GameTraceChannel1), ECR_Ignore);
+			TestEqual(TEXT("Toy capsule collides with small prop"), Part->GetCollisionResponseToChannel(ECC_GameTraceChannel1), ECR_Block);
+			TestEqual(TEXT("Small prop cannot be used as a step"), Part->CanCharacterStepUpOn, ECB_No);
 			TestEqual(TEXT("Small prop does not retract camera"), Part->GetCollisionResponseToChannel(ECC_Camera), ECR_Ignore);
 			TestTrue(TEXT("Small prop actually simulates physics"), Part->IsSimulatingPhysics());
 			TestTrue(TEXT("Small prop movement replicates"), It->GetIsReplicated() && It->IsReplicatingMovement());
@@ -80,7 +88,7 @@ bool FTBHouseInteractionTest::RunTest(const FString&)
 	TestEqual(TEXT("All selected furniture components are configured"), Furniture, 27);
 	TestEqual(TEXT("All dining chairs checked"), Chairs, 7);
 	TestEqual(TEXT("Fridge checked"), Fridges, 1);
-	TestEqual(TEXT("All small props configured"), Props, 55);
+	TestEqual(TEXT("All authored and runtime small props configured"), Props, 117);
 	if (TestNotNull(TEXT("Radio physics probe exists"), Probe))
 	{
 		auto* Body = Cast<ATBCharacter>(World->GetFirstPlayerController()->GetPawn());

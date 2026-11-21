@@ -6,6 +6,7 @@
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Animation/BlendSpace.h"
 #include "Character/TBCharacter.h"
+#include "Character/TBMovement.h"
 #include "Character/TBHumanPose.h"
 #include "Character/TBToyCarVisual.h"
 #include "Character/TBToyCharacter.h"
@@ -19,6 +20,7 @@
 #include "Core/TBPlayerState.h"
 #include "Core/TBGameState.h"
 #include "Core/TBController.h"
+#include "UI/TBHUD.h"
 #include "Input/TBInputSettings.h"
 #include "Input/TBKeyLabels.h"
 #include "Input/TBKeyRemap.h"
@@ -617,21 +619,39 @@ bool FTBEmoteTest::RunTest(const FString&)
 		for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Assembly))
 			if (Part->GetFName() == TEXT("Hair")) Hair = Part;
 		if (!TestNotNull(TEXT("Scalp hair exists"), Hair)) return false;
+		TestTrue(TEXT("Scalp hair keeps shadow resources for first-person reflections"), Hair->bCastHiddenShadow);
 		for (bool OriginallyHidden : {false, true})
+		for (bool OriginallyShadowed : {false, true})
 		{
 			Hair->SetHiddenInGame(OriginallyHidden);
+			Hair->SetCastHiddenShadow(OriginallyShadowed);
 			if (!Start(ETBEmoteKind::HairDisappear)) return false;
 			Deliver(); Proxy->UpdateHairEmote();
 			TestTrue(TEXT("Peer hides scalp hair during emote"), Hair->bHiddenInGame);
+			TestFalse(TEXT("Disappearing scalp hair cannot leave a hidden shadow"), Hair->bCastHiddenShadow);
 			Deliver(1.01f); Proxy->UpdateHairEmote();
 			TestEqual(TEXT("Expiry restores previous hair visibility"), bool(Hair->bHiddenInGame), OriginallyHidden);
+			TestEqual(TEXT("Expiry restores previous hair shadow visibility"), bool(Hair->bCastHiddenShadow), OriginallyShadowed);
 			if (!Start(ETBEmoteKind::HairDisappear)) return false;
 			Deliver(); Proxy->UpdateHairEmote();
 			Source->CancelEmote(); Proxy->Emote = Source->Emote; Proxy->OnRep_Emote(); Proxy->UpdateHairEmote();
 			TestEqual(TEXT("Cancellation restores previous hair visibility"), bool(Hair->bHiddenInGame), OriginallyHidden);
+			TestEqual(TEXT("Cancellation restores previous hair shadow visibility"), bool(Hair->bCastHiddenShadow), OriginallyShadowed);
 		}
 		Hair->SetHiddenInGame(false);
+		Hair->SetCastHiddenShadow(true);
 	}
+	// Replacing the appearance during the emote must not retain the old groom state.
+	if (!Start(ETBEmoteKind::HairDisappear)) return false;
+	Deliver(); Proxy->UpdateHairEmote();
+	Player->HumanAppearance = GetDefault<UTBDataSettings>()->HumanAppearances[0];
+	Proxy->ApplyState();
+	Source->CancelEmote(); Proxy->Emote = Source->Emote; Proxy->OnRep_Emote(); Proxy->UpdateHairEmote();
+	for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Proxy->HumanVisual->GetChildActor()))
+		if (Part->GetFName() == TEXT("Hair"))
+			TestTrue(TEXT("Appearance replacement restores the new hair and its reflection support"),
+			    !Part->bHiddenInGame && Part->bCastHiddenShadow);
+	TestTrue(TEXT("Appearance replacement releases saved groom state"), Proxy->EmoteHairVisibility.IsEmpty());
 	// Lobby avatars use the human appearance before a match assigns a team.
 	State->Phase = ETBPhase::Lobby; Player->Team = ETBTeam::None;
 	Source->ApplyState(); Proxy->ApplyState(); Stand(Source); Stand(Proxy);
@@ -670,8 +690,18 @@ bool FTBEmoteTest::RunTest(const FString&)
 	TestFalse(TEXT("Standing again does not resume the dance"), Source->Emote.bActive);
 	Start(ETBEmoteKind::Wave); const double Cooldown = Source->Emote.NextAllowedAt;
 	TestFalse(TEXT("Invalid ID is rejected"), Source->TryEmote(static_cast<ETBEmoteKind>(255)));
-	TestFalse(TEXT("Active/cooldown request is rejected"), Source->TryEmote(ETBEmoteKind::Dance));
+	TestFalse(TEXT("Repeating the active gesture does not restart it"), Source->TryEmote(ETBEmoteKind::Wave));
 	TestEqual(TEXT("Rejected requests never extend cooldown"), Source->Emote.NextAllowedAt, Cooldown);
+	Deliver(); const auto ReplacedWave = Proxy->Emote;
+	TestTrue(TEXT("A different gesture replaces an active one immediately"), Source->TryEmote(ETBEmoteKind::Dance));
+	Deliver();
+	TestTrue(TEXT("Peer presents the replacement gesture"), Proxy->GetEmoteSample(Sample) && Sample.Kind == ETBEmoteKind::Dance);
+	Proxy->Emote = ReplacedWave; Proxy->OnRep_Emote();
+	TestFalse(TEXT("Delayed replaced gesture cannot reappear"), Proxy->GetEmoteSample(Sample));
+	Source->Emote.StartsAt = State->GetServerWorldTimeSeconds() - ATBCharacter::EmoteDuration(ETBEmoteKind::Dance);
+	Source->Emote.EndsAt = State->GetServerWorldTimeSeconds();
+	TestTrue(TEXT("The same gesture can start again at its exact end boundary"), Source->TryEmote(ETBEmoteKind::Dance));
+	TestEqual(TEXT("Natural expiry introduces no cooldown"), Source->Emote.NextAllowedAt, 0.0);
 	TestFalse(TEXT("A proxy cannot authoritatively start an emote"), Proxy->TryEmote(ETBEmoteKind::Wave));
 	Deliver(); Proxy->GetCharacterMovement()->Velocity = FVector(3, 0, 0);
 	Proxy->UpdateEmote();
@@ -830,6 +860,13 @@ bool FTBEmoteTest::RunTest(const FString&)
 	auto* LocalPS = LocalPC ? LocalPC->GetPlayerState<ATBPlayerState>() : nullptr;
 	if (!TestNotNull(TEXT("Local player for emote input routing"), LocalPS) ||
 	    !TestTrue(TEXT("Input fixture begins with menu/chat closed"), !LocalPC->IsChatOpen() && !LocalPC->IsLeaveMenuOpen())) return false;
+	auto* InputHUD = Cast<ATBHUD>(LocalPC->GetHUD());
+	const bool HadStagePicker = InputHUD && InputHUD->IsStagePickerOpen();
+	if (HadStagePicker)
+	{
+		const auto Phase = State->Phase; State->Phase = ETBPhase::Lobby;
+		InputHUD->NotifyHitBoxClick(TEXT("CancelStage")); State->Phase = Phase;
+	}
 	const TWeakObjectPtr<APawn> PreviousPawn = LocalPC->GetPawn();
 	const auto SavedTeam = LocalPS->Team; const auto SavedToyState = LocalPS->ToyState; const bool SavedFrozen = LocalPS->bFrozen;
 	const FRotator SavedView = LocalPC->GetControlRotation();
@@ -837,6 +874,11 @@ bool FTBEmoteTest::RunTest(const FString&)
 	ON_SCOPE_EXIT
 	{
 		if (IsValid(Input)) Input->DestroyComponent();
+		if (HadStagePicker && IsValid(InputHUD))
+		{
+			const auto Phase = State->Phase; State->Phase = ETBPhase::Lobby;
+			InputHUD->NotifyHitBoxClick(TEXT("OpenSettings")); State->Phase = Phase;
+		}
 		if (IsValid(Source)) Source->CancelEmote();
 		if (IsValid(LocalPC))
 		{
@@ -893,7 +935,14 @@ bool FTBEmoteTest::RunTest(const FString&)
 			continue;
 		}
 		if (!Dispatch()) return false;
-		if (!TestTrue(TEXT("Started action routes to its exact server-authorized emote kind"), Source->Emote.bActive && Source->Emote.Kind == Kinds[Index])) return false;
+		if (!TestTrue(TEXT("Started action routes to its exact server-authorized emote kind"), Source->Emote.bActive && Source->Emote.Kind == Kinds[Index]))
+		{
+			AddInfo(FString::Printf(TEXT("Emote input kind=%d eligible=%d request=%d crouched=%d wants=%d movement=%d cancelFrame=%llu frame=%llu hudStage=%d hudBlocked=%d"),
+			    int32(Kinds[Index]), Source->EmoteEligible(), Source->CanRequestEmote(), Source->bIsCrouched,
+			    Source->GetCharacterMovement()->bWantsToCrouch, int32(Source->GetCharacterMovement()->MovementMode),
+			    Source->LastEmoteCancelFrame, GFrameCounter, InputHUD && InputHUD->IsStagePickerOpen(), InputHUD && InputHUD->IsChatBlocked()));
+			return false;
+		}
 		const uint32 AcceptedRevision = Source->Emote.Revision;
 		const double AcceptedCooldown = Source->Emote.NextAllowedAt;
 		Dispatch();
@@ -1024,6 +1073,190 @@ bool FTBRetargetedCarryTest::RunTest(const FString&)
         }
     }
     return !HasAnyErrors();
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBToyFallTest, "ToonStory.NormalAnimation.ToyFall",
+    EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBToyFallTest::RunTest(const FString&)
+{
+	auto* World = AnimationTestWorld(); auto* State = World ? World->GetGameState<ATBGameState>() : nullptr;
+	if (!TestNotNull(TEXT("Standalone toy fall world"), State)) return false;
+	const auto OriginalPhase = State->Phase; const auto OriginalHide = State->HidePreparation;
+	const double OriginalEnd = State->EndTime;
+	const auto OriginalWinner = State->Winner; const bool OriginalVehicleResult = State->bVehicleEscapeResult;
+	TArray<AActor*> Fixtures;
+	ON_SCOPE_EXIT
+	{
+		for (auto* Actor : Fixtures) if (IsValid(Actor)) { Actor->SetRole(ROLE_Authority); Actor->Destroy(); }
+		State->Phase = OriginalPhase; State->HidePreparation = OriginalHide; State->EndTime = OriginalEnd;
+		State->Winner = OriginalWinner; State->bVehicleEscapeResult = OriginalVehicleResult;
+	};
+	State->Phase = ETBPhase::Playing; State->HidePreparation.bValid = true; State->HidePreparation.bHiding = false;
+	++State->HidePreparation.Round; State->EndTime = State->GetServerWorldTimeSeconds() + 600;
+	auto* Floor = World->SpawnActor<AActor>(); Fixtures.Add(Floor);
+	auto* Surface = NewObject<UBoxComponent>(Floor); Floor->SetRootComponent(Surface);
+	Surface->SetBoxExtent(FVector(400, 400, 5)); Surface->SetCollisionProfileName(TEXT("BlockAll")); Surface->RegisterComponent();
+	Floor->SetActorLocation(FVector(-20000, 0, 1900));
+	auto* Controller = World->SpawnActor<APlayerController>(); auto* Player = World->SpawnActor<ATBPlayerState>();
+	if (!Controller || !Player) return false;
+	Fixtures.Add(Controller); Fixtures.Add(Player);
+	if (auto* Initial = Controller->GetPlayerState<APlayerState>()) Fixtures.Add(Initial);
+	Controller->SetAsLocalPlayerController(); Controller->SetPlayerState(Player); Player->SetOwner(Controller);
+	State->AddPlayerState(Player); Player->Team = ETBTeam::Toy;
+	auto* ToyClass = LoadClass<ATBToyCharacter>(nullptr, TEXT("/Game/Characters/Toys/BP_ToyCharacter.BP_ToyCharacter_C"));
+	if (!TestNotNull(TEXT("Existing toy catalogue"), ToyClass)) return false;
+	FActorSpawnParameters Spawn; Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto* Toy = World->SpawnActor<ATBToyCharacter>(ToyClass, FVector(-20000, 0, 2000), FRotator::ZeroRotator, Spawn);
+	if (!TestNotNull(TEXT("Toy fall fixture"), Toy)) return false;
+	Fixtures.Add(Toy); Controller->Possess(Toy); Toy->ApplyState();
+	auto* Proxy = World->SpawnActor<ATBToyCharacter>(ToyClass, FVector(-20200, 0, 1916.9), FRotator::ZeroRotator, Spawn);
+	auto* ProxyPlayer = World->SpawnActor<ATBPlayerState>();
+	if (!TestNotNull(TEXT("Toy presentation proxy"), Proxy) || !ProxyPlayer) return false;
+	Fixtures.Add(Proxy); Fixtures.Add(ProxyPlayer); ProxyPlayer->Team = ETBTeam::Toy;
+	Proxy->SetPlayerState(ProxyPlayer); Proxy->ApplyState(); Proxy->SetRole(ROLE_SimulatedProxy);
+	Proxy->SetActorTickEnabled(false); Proxy->GetCharacterMovement()->SetComponentTickEnabled(false);
+	Proxy->SetActorEnableCollision(false);
+	auto ReplicateStance = [&](bool Crouched, bool Frozen)
+	{
+		ProxyPlayer->bFrozen = Frozen;
+		Proxy->SetIsCrouched(Crouched); Proxy->OnRep_IsCrouched(); Proxy->Tick(.2f);
+	};
+
+	Toy->SetActorTickEnabled(false); auto* Move = CastChecked<UTBMovement>(Toy->GetCharacterMovement()); Move->SetComponentTickEnabled(false);
+	const float Half = Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	Toy->SetActorLocation(FVector(-20000, 0, 1905 + Half + 2.15)); Move->SetMovementMode(MOVE_Walking);
+	Move->FindFloor(Toy->GetActorLocation(), Move->CurrentFloor, false);
+	auto ThawAndLand = [&]()
+	{
+		Toy->SetFrozen(false);
+		int32 Frames = 0;
+		do
+		{
+			Move->PerformMovement(.016f);
+			++Frames;
+		}
+		while (!Move->IsMovingOnGround() && Frames < 120);
+		AddInfo(FString::Printf(TEXT("Thaw fixture: %d movement steps, mode %d, floor %.3f"),
+		    Frames, int32(Move->MovementMode), Move->CurrentFloor.GetDistanceToFloor()));
+		TestTrue(TEXT("Thawed fixture settles before its next ground-only fall input"), Move->IsMovingOnGround());
+	};
+
+	// Start from standing with existing velocity, then deliver the first compressed input packet.
+	// This exercises the authority entry point, rather than pre-setting crouch in the fixture.
+	const FVector BeforeFirstFall = Toy->GetActorLocation();
+	Move->Velocity = FVector(80, 0, 0);
+	Move->MoveAutonomous(0.f, .016f, FSavedMove_Character::FLAG_WantsToCrouch | FSavedMove_Character::FLAG_JumpPressed,
+	    FVector(1000, 0, 0));
+	TestTrue(TEXT("First fall packet immediately rejects horizontal motion and simultaneous jump"),
+	    Toy->bIsCrouched && FVector::Dist2D(BeforeFirstFall, Toy->GetActorLocation()) < .01 &&
+	    Move->Velocity.Size2D() < .01 && Move->Velocity.Z <= 0 && !Toy->bPressedJump);
+	Toy->UnCrouch(); Move->UnCrouch(false);
+	for (int32 Index = 0; Index < Toy->ToyCatalogue.Num(); ++Index)
+	{
+		Toy->SelectedToyIndex = Index; Toy->RefreshToyPresentation();
+		Toy->CrouchPressed(); Move->PerformMovement(.016f); Toy->Tick(.2f);
+		TestTrue(TEXT("Holding Ctrl keeps the toy fallen"), Toy->IsToyFallen() && Move->bWantsToCrouch);
+		Toy->CrouchPressed(); Move->PerformMovement(.016f);
+		TestTrue(TEXT("Repeated Started never toggles a held fall off"), Toy->bIsCrouched && Move->bWantsToCrouch);
+		const FString VisualName = Toy->ToyCatalogue[Index]->GetName();
+		const bool Supine = VisualName.Contains(TEXT("TinRobot")) || VisualName.Contains(TEXT("ArmyMan")) || VisualName.Contains(TEXT("Nutcracker"));
+		const bool Nutcracker = VisualName.Contains(TEXT("Nutcracker"));
+		const FRotator ExpectedRotation = Supine ? FRotator(Nutcracker ? 75 : 90, 0, 0) : FRotator(0, 0, 90);
+		TestTrue(TEXT("Biped figures face up; other toys lie sideways"), Toy->ToyVisual->GetRelativeRotation().Equals(ExpectedRotation, .01));
+		if (Supine) TestTrue(TEXT("Supine visual forward points away from the floor"), Toy->ToyVisual->GetForwardVector().Z > .96);
+		Proxy->SelectedToyIndex = Index; Proxy->RefreshToyPresentation(); ReplicateStance(true, false);
+		TestTrue(TEXT("Replicated held stance uses the same orientation without resizing the proxy"),
+		    Proxy->IsToyFallen() && Proxy->ToyVisual->GetRelativeRotation().Equals(ExpectedRotation, .01) &&
+		    FMath::IsNearlyEqual(Proxy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), Half));
+		FTBFallenSupportCache Support;
+		TBToyPresentation::GroundFallen(Toy->ToyVisual, 1905.f, Support);
+		if (!Cast<ATBToyCarVisual>(Toy->ToyVisual->GetChildActor()))
+		{
+			TestTrue(TEXT("Every skeletal toy has real posed support vertices, not bounds fallback"),
+			    Support.SkinnedParts > 0 && !Support.bMissingCPUData && !Support.Points.IsEmpty());
+			for (const auto& Pair : Support.Meshes)
+				TestTrue(TEXT("Support LOD0 has CPU Access enabled for the next cook"),
+				    Pair.Value.IsValid() && Pair.Value->GetLODInfo(0) && Pair.Value->GetLODInfo(0)->bAllowCPUAccess);
+		}
+
+		if (Nutcracker && TestTrue(TEXT("Nutcracker has a posed supporting mesh"), !Support.Meshes.IsEmpty()))
+		{
+			const auto* Mesh = Support.Meshes[0].Key.Get();
+			if (TestNotNull(TEXT("Nutcracker support component"), Mesh))
+				TestTrue(TEXT("Nutcracker heels also reach the floor, not just the projecting rifle"),
+				    FMath::Max(Mesh->GetSocketLocation(TEXT("foot_L")).Z,
+				               Mesh->GetSocketLocation(TEXT("foot_R")).Z) - 1905. < 1.);
+		}
+
+		TestEqual(TEXT("Falling does not shrink the collision target"), Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), Half);
+		TestEqual(TEXT("Fallen movement speed is zero"), Move->GetMaxSpeed(), 0.f);
+		Toy->Forward(1); Toy->Right(1); Toy->JumpPressed();
+		TestTrue(TEXT("Fallen movement and jump inputs are discarded"), Toy->GetPendingMovementInputVector().IsNearlyZero() && !Toy->bPressedJump);
+		FTBEmoteSample Sample;
+		TestFalse(TEXT("Fallen toy cannot start an emote"), Toy->TryEmote(ETBEmoteKind::Wave));
+		const FVector Before = Toy->GetActorLocation();
+		Move->MoveAutonomous(0.f, .016f, FSavedMove_Character::FLAG_WantsToCrouch | FSavedMove_Character::FLAG_JumpPressed, FVector(1000, 0, 0));
+		TestTrue(TEXT("Server movement rejects fallen horizontal acceleration and jump"),
+		    FVector::Dist2D(Before, Toy->GetActorLocation()) < .01 && Move->Velocity.Size2D() < .01 && Move->Velocity.Z <= 0);
+		Controller->RotationInput = FRotator::ZeroRotator;
+		Toy->Yaw(1.f); Toy->Pitch(1.f);
+		TestTrue(TEXT("A fallen toy can look around before being frozen"),
+		    !FMath::IsNearlyZero(Controller->RotationInput.Yaw) && !FMath::IsNearlyZero(Controller->RotationInput.Pitch));
+		const FVector BeforeStanding = Toy->GetActorLocation();
+		Toy->CrouchReleased(); Move->PerformMovement(.016f); Toy->Tick(.2f);
+		TestFalse(TEXT("Releasing the held action stands up"), Toy->IsToyFallen() || Move->bWantsToCrouch);
+		TestTrue(TEXT("Standing never expands the toy to the human capsule or teleports it"),
+		    Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() == Half && Toy->GetActorLocation().Equals(BeforeStanding, .01));
+		TestTrue(TEXT("Standing restores orientation and movement"), Toy->ToyVisual->GetRelativeRotation().IsNearlyZero(.01) && Move->GetMaxSpeed() > 0);
+		ReplicateStance(false, false);
+		TestTrue(TEXT("Replicated release stands the proxy up"), !Proxy->IsToyFallen() && Proxy->ToyVisual->GetRelativeRotation().IsNearlyZero(.01));
+
+		Toy->CrouchPressed(); Move->PerformMovement(.016f); Toy->Tick(.2f);
+		Toy->SetFrozen(true);
+		Controller->RotationInput = FRotator::ZeroRotator; Toy->Yaw(1.f); Toy->Pitch(1.f);
+		TestTrue(TEXT("Gaze freezing stops both look axes even while fallen"), Controller->RotationInput.IsNearlyZero());
+		Move->MoveAutonomous(0.f, .016f, FSavedMove_Character::FLAG_WantsToCrouch | FSavedMove_Character::FLAG_JumpPressed, FVector(1000, 0, 0));
+		TestTrue(TEXT("Frozen authority retains a held fall and rejects jump"), Toy->bIsCrouched && Move->bWantsToCrouch && !Toy->bPressedJump);
+		Toy->CrouchReleased(); Move->MoveAutonomous(0.f, .016f, 0, FVector(1000, 0, 0));
+		TestTrue(TEXT("Release during freeze preserves the visible stance but clears the held request"),
+		    Toy->bIsCrouched && Toy->IsToyFallen() && !Move->bWantsToCrouch);
+		ReplicateStance(true, true);
+		TestTrue(TEXT("Proxy remains frozen in the server's fallen pose after owner release"), Proxy->IsToyFallen());
+		Toy->CrouchPressed();
+		Move->MoveAutonomous(0.f, .016f, FSavedMove_Character::FLAG_WantsToCrouch, FVector(1000, 0, 0));
+		TestFalse(TEXT("A frozen toy cannot restart a hold after releasing it"), Move->bWantsToCrouch);
+		ThawAndLand(); Toy->Tick(.2f);
+		TestTrue(TEXT("Thaw completes the pending release without another key press"),
+		    !Toy->bIsCrouched && !Move->bWantsToCrouch && !Toy->IsToyFallen() && Toy->ToyVisual->GetRelativeRotation().IsNearlyZero(.01));
+		// PlayerState's thaw can arrive after the Character's crouch replication.
+		ReplicateStance(false, true);
+		TestTrue(TEXT("Proxy accepts replicated release even before its frozen flag clears"), !Proxy->IsToyFallen());
+		ProxyPlayer->bFrozen = false;
+		Toy->SetFrozen(true);
+		Move->MoveAutonomous(0.f, .016f, FSavedMove_Character::FLAG_WantsToCrouch, FVector(1000, 0, 0));
+		TestFalse(TEXT("A frozen standing toy cannot start falling through compressed flags"), Toy->bIsCrouched || Move->bWantsToCrouch);
+		ThawAndLand();
+
+	}
+	Toy->CrouchPressed(); Move->Crouch(false);
+	State->Phase = ETBPhase::Results; State->Winner = ETBWinner::Toys; State->bVehicleEscapeResult = false;
+	Toy->ApplyState(); Toy->Tick(.2f);
+	TestTrue(TEXT("A fallen winner without a vehicle stands up and can celebrate in Results"),
+	    !Toy->bIsCrouched && !Move->bWantsToCrouch && !Toy->IsMovementLocked() &&
+	    Move->GetMaxSpeed() > 0 && Toy->EmoteGameplayEligible());
+	State->Phase = ETBPhase::Playing; State->Winner = OriginalWinner; State->bVehicleEscapeResult = OriginalVehicleResult;
+	Toy->ApplyState();
+	Toy->CrouchPressed(); Move->Crouch(false);
+	Player->ToyState = ETBToyState::Carried; Toy->ApplyState(); Toy->Tick(.2f);
+	TestFalse(TEXT("Being picked up clears the fallen stance"), Toy->IsToyFallen() || Toy->bIsCrouched || Move->bWantsToCrouch);
+	TestTrue(TEXT("Carried visual returns upright"), Toy->ToyVisual->GetRelativeRotation().IsNearlyZero(.01));
+	Player->ToyState = ETBToyState::Free; Player->Team = ETBTeam::Human; Toy->ApplyState(); Move->SetMovementMode(MOVE_Walking);
+	Toy->CrouchPressed(); Move->Crouch(false);
+	TestTrue(TEXT("Human crouch remains a held action"), Toy->bIsCrouched && !Toy->IsToyFallen());
+	Toy->CrouchReleased(); Move->UnCrouch(false);
+	TestFalse(TEXT("Releasing the human action stands up"), Toy->bIsCrouched);
+	return true;
 }
 
 #endif

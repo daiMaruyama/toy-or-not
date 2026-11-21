@@ -42,6 +42,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -563,6 +564,12 @@ void ATBGameMode::StartRound(APlayerController* PlayerController)
 			return;
 		}
 	}
+	TBLobbySettings::ResolveStageForStart(GetWorld());
+	ON_SCOPE_EXIT
+	{
+		if (!MatchInfo->bTravelPending && MatchInfo->Phase != ETBPhase::Playing)
+			TBLobbySettings::ResetStageResolution(GetWorld());
+	};
 	if (TBLobbySettings::ShouldTravelToStage(GetWorld()))
 	{
 		if (!TBLobbySettings::Travel(this, true) && HostController)
@@ -859,6 +866,7 @@ void ATBGameMode::StartRound(APlayerController* PlayerController)
 	DrawLooks(NPCPlacements);
 	MatchInfo->Collected = 0;
 	MatchInfo->bEscapePhase = false;
+	MatchInfo->Ignition = {};
 	MatchInfo->bVehicleEscapeResult = false;
 	MatchInfo->EscapedPlayers.Reset();
 	ClearResultPresentation();
@@ -1045,6 +1053,7 @@ void ATBGameMode::ReturnFinishedMatchToLobby()
 	ResetStageInteractions();
 	State->Collected = 0;
 	State->bEscapePhase = false;
+	State->Ignition = {};
 	State->bVehicleEscapeResult = false;
 	State->EscapedPlayers.Reset();
 	ClearResultPresentation();
@@ -1053,6 +1062,7 @@ void ATBGameMode::ReturnFinishedMatchToLobby()
 	State->Winner = ETBWinner::None;
 	State->Reason.Reset();
 	State->Phase = ETBPhase::Lobby;
+	TBLobbySettings::ResetStageResolution(GetWorld());
 	SyncLobbyCounts();
 	State->ForceNetUpdate();
 	SpawnCursor = 0;
@@ -1291,11 +1301,22 @@ void ATBGameMode::Tick(float DeltaSeconds)
 		return;
 	}
 	if (AdvanceHidePreparation()) return;
+	if (auto* Match = TB::GS(GetWorld()); Match->IsIgniting())
+	{
+		const double Elapsed = Match->GetServerWorldTimeSeconds() - Match->Ignition.StartsAt;
+		if (Elapsed >= FTBEscapeIgnition::Duration)
+		{
+			Match->EndTime += Elapsed;
+			Match->bEscapePhase = true;
+			Match->ForceNetUpdate();
+		}
+		return;
+	}
 	for (TActorIterator<ATBMomArrivalZone> It(GetWorld());It;++It) It->Advance(DeltaSeconds);
 	if (!TB::Playing(GetWorld())) return;
 	EvaluateGaze(DeltaSeconds);
 	CheckWin();
-	EventDirector->Advance(DeltaSeconds);
+	if (!TB::GS(GetWorld())->IsIgniting()) EventDirector->Advance(DeltaSeconds);
 }
 
 // Returns true while preparation (or its cancellation) consumes this server tick.
@@ -1333,6 +1354,7 @@ bool ATBGameMode::AdvanceHidePreparation()
 	}
 	if (State->GetServerWorldTimeSeconds() < State->HidePreparation.EndsAt) return true;
 	State->HidePreparation.bHiding = false;
+	State->HidePreparation.EndsAt = State->GetServerWorldTimeSeconds();
 	if (RoundEntrance.IsValid()) RoundEntrance->SetPreparing(false);
 	State->EndTime = State->GetServerWorldTimeSeconds() + State->Settings.Duration;
 	State->ForceNetUpdate();
@@ -1343,12 +1365,20 @@ bool ATBGameMode::AdvanceHidePreparation()
 bool ATBGameMode::StartEscapePhase()
 {
 	auto* Match = TB::GS(GetWorld());
-	if (!Match || Match->Phase != ETBPhase::Playing || Match->IsPreparing() || Match->bEscapePhase || Match->Remaining() <= 0.f)
+	if (!Match || Match->Phase != ETBPhase::Playing || Match->IsPreparing() || Match->IsIgniting() || Match->bEscapePhase || Match->Remaining() <= 0.f)
 		return false;
+	TActorIterator<ATBEscapeVehicle> Vehicle(GetWorld());
+	if (!Vehicle) return false;
 	const float Configured = TB::Rules().Match.EscapeMinimumRemainingSeconds;
 	const float Minimum = FMath::IsFinite(Configured) ? FMath::Max(0.f, Configured) : 30.f;
 	Match->EndTime = FMath::Max(Match->EndTime, Match->GetServerWorldTimeSeconds() + Minimum);
-	Match->bEscapePhase = true;
+	Match->Ignition.Vehicle = *Vehicle;
+	Match->Ignition.StartsAt = Match->GetServerWorldTimeSeconds();
+	for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->bHoldingInteract) It->ClearHeldInteraction();
+		It->ApplyState();
+	}
 	Match->ForceNetUpdate();
 	return true;
 }
@@ -1357,7 +1387,7 @@ bool ATBGameMode::StartEscapePhase()
 void ATBGameMode::CheckWin()
 {
 	auto* MatchInfo = TB::GS(GetWorld());
-	if (!MatchInfo || MatchInfo->Phase != ETBPhase::Playing || MatchInfo->IsPreparing())
+	if (!MatchInfo || MatchInfo->Phase != ETBPhase::Playing || MatchInfo->IsPreparing() || MatchInfo->IsIgniting())
 	{
 		return;
 	}

@@ -11,6 +11,7 @@
 #include "Core/TBLobbySettings.h"
 #include "Character/TBNPCController.h"
 #include "Character/TBCharacter.h"
+#include "Character/TBCharacterGeometry.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -118,7 +119,7 @@ bool FTBPlayroomVisionTest::RunTest(const FString&)
 	auto* Info = AI->GetPlayerState<ATBPlayerState>();
 	if (!Info) return false;
 	Info->Team = ETBTeam::Human; Body->ApplyState();
-	Target->GetCapsuleComponent()->SetCapsuleSize(7.5f, 9.75f);
+	Target->GetCapsuleComponent()->SetCapsuleSize(TBCharacterGeometry::ToyRadius, TBCharacterGeometry::ToyHalfHeight);
 	const FVector Eye = Body->GetPawnViewLocation();
 	AI->SetControlRotation(FRotator::ZeroRotator);
 	Target->SetActorLocation(Eye + FVector(1800, 0, 400));

@@ -17,6 +17,8 @@ public:
 	FTBSettings PendingRules;
 	FString PendingMap;
 	int32 SelectedStage = 1;
+	// A random preference stays selected; only this round's destination is resolved.
+	int32 ResolvedStage = INDEX_NONE;
 	int32 ExpectedPlayers = 0;
 	bool bDedicatedLobby = false;
 	bool bStartOnArrival = false;
@@ -29,9 +31,14 @@ private:
 };
 namespace TBLobbySettings
 {
+	inline constexpr int32 RandomStageId = 0;
 	inline constexpr int32 DemoStageId = 1;
 	inline constexpr int32 HouseStageId = 3;
 	const TCHAR* StagePath(int32 Index);
+	bool IsStageAvailable(int32 Index);
+	// Called after the host/readiness checks; arrival reuses the cached random destination.
+	void ResolveStageForStart(UWorld* World);
+	void ResetStageResolution(UWorld* World);
 	int32 StageIndex(const UWorld* World);
 	int32 StageItemCount(int32 Index);
 	int32 AvailableItems(UWorld* World);

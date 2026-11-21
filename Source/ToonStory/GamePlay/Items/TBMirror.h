@@ -44,4 +44,8 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UTextureRenderTarget2D> TargetTexture;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> SurfaceMaterial;
 	double NextCapture = 0;
+	FVector CapturedEye = FVector::ZeroVector;
+	FQuat CapturedView = FQuat::Identity;
+	FTransform CapturedMirror = FTransform::Identity;
+	FMatrix CapturedProjection = FMatrix::Identity;
 };

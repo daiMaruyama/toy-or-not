@@ -147,6 +147,7 @@ public:
 	FVector GetCarryGripLocation() const;
 	bool CanAct() const;
 	bool IsMovementLocked() const;
+	bool IsToyFallen() const;
 	bool IsPhysicsLocked() const;
 	// 見られ方。GazeStateは本人にだけ届くので、IsSeenとIsGazedはサーバーとおもちゃ本人のPCでだけ正しい。
 	// 視界に入っているが、凝視はされていない。
@@ -211,6 +212,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTBHumanLookTest;
 	friend class FTBEmoteTest;
+	friend class FTBToyFallTest;
 	friend class FTBLobbyExplorationTest;
 #endif
 	UPROPERTY(ReplicatedUsing = OnRep_Emote)
@@ -220,6 +222,7 @@ private:
 	mutable uint32 PresentedEmoteRevision = 0;
 	bool bEmoteRejected = false;
 	uint64 LastEmoteCancelFrame = MAX_uint64;
+	ETBTeam MovementTeam = ETBTeam::None;
 	UFUNCTION()
 	void OnRep_Emote();
 	bool EmoteEligible() const;
@@ -228,8 +231,13 @@ private:
 	void UpdateEmote();
 	void UpdateHairEmote();
 	void RestoreEmoteHair();
-	TMap<TWeakObjectPtr<UPrimitiveComponent>, bool> EmoteHairVisibility;
-	void CancelEmote();
+	struct FEmoteHairState
+	{
+		bool bHiddenInGame;
+		bool bCastHiddenShadow;
+	};
+	TMap<TWeakObjectPtr<UPrimitiveComponent>, FEmoteHairState> EmoteHairVisibility;
+	void CancelEmote(bool bInterrupted = true);
 	UPROPERTY(ReplicatedUsing = OnRep_HumanLook)
 	FTBHumanLookSnapshot HumanLook;
 	uint32 HumanLookPossession = 0;

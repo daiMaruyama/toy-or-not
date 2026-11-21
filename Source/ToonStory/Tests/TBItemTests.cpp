@@ -6,6 +6,11 @@
 #include "Tests/TBItemTestActor.h"
 #include "GamePlay/Items/TBInteractionTarget.h"
 #include "GamePlay/TBDummyToy.h"
+#include "GamePlay/TBPickup.h"
+#include "Data/TBPresentationData.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Components/StaticMeshComponent.h"
+#include "Misc/ScopeExit.h"
 #include "Components/CapsuleComponent.h"
 #include "Character/TBCharacter.h"
 #include "Core/TBGameState.h"
@@ -218,6 +223,89 @@ bool FTBItemAimTest::RunTest(const FString& Parameters)
 	PC->SetControlRotation(OldAim);
 	Player->Team = OldTeam;
 	Player->bFrozen = bOldFrozen;
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBBatteryHighlightTest, "ToonStory.Items.BatteryHighlight",
+	EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+
+bool FTBBatteryHighlightTest::RunTest(const FString&)
+{
+	UWorld* World = nullptr;
+	for (const auto& Entry : GEngine->GetWorldContexts())
+		if (Entry.WorldType == EWorldType::Game && Entry.World() && Entry.World()->GetGameState<ATBGameState>())
+			{ World = Entry.World(); break; }
+	if (!TestNotNull(TEXT("Game world"), World) || !TestEqual(TEXT("Isolated standalone fixture"), World->GetNetMode(), NM_Standalone)) return false;
+	auto* PC = World->GetFirstPlayerController();
+	auto* Observer = PC ? Cast<ATBCharacter>(PC->GetPawn()) : nullptr;
+	auto* Player = Observer ? Observer->TBPS() : nullptr;
+	if (!TestNotNull(TEXT("Local observer"), Player)) return false;
+	TBTest::FPlayingScope Playing(*World->GetGameState<ATBGameState>());
+	const auto OldTeam = Player->Team;
+	const auto OldToyState = Player->ToyState;
+	Player->Team = ETBTeam::Toy;
+	Player->ToyState = ETBToyState::Free;
+	auto* Battery = World->SpawnActor<ATBPickup>(FVector(0, 0, 10000), FRotator::ZeroRotator);
+	auto* Wall = World->SpawnActor<AActor>();
+	ON_SCOPE_EXIT
+	{
+		Player->Team = OldTeam; Player->ToyState = OldToyState;
+		if (IsValid(Battery)) Battery->Destroy();
+		if (IsValid(Wall)) Wall->Destroy();
+	};
+	if (!TestNotNull(TEXT("Battery fixture"), Battery) || !TestNotNull(TEXT("Obstacle fixture"), Wall)) return false;
+	const FVector Target = Battery->Mesh->Bounds.Origin;
+	const FVector Eye = Target - FVector(200, 0, 0);
+	const FVector Forward = FVector::ForwardVector;
+	const auto& Feel = TB::PresentationData().Pickup;
+	const float CenterWeight = Battery->HighlightWeight(Observer, Eye, Forward);
+	TestTrue(TEXT("Visible battery lights for a toy looking at it, with a weaker maximum"), CenterWeight > 0.f && CenterWeight <= .5f);
+	Player->Team = ETBTeam::Human;
+	TestEqual(TEXT("Human observer receives no collectible highlight"), Battery->HighlightWeight(Observer, Eye, Forward), 0.f);
+	Player->Team = ETBTeam::Toy;
+	Player->ToyState = ETBToyState::Carried;
+	TestEqual(TEXT("Carried/spectating toy does not highlight batteries"), Battery->HighlightWeight(Observer, Eye, Forward), 0.f);
+	Player->ToyState = ETBToyState::Free;
+	TestEqual(TEXT("Battery behind observer stays unlit"), Battery->HighlightWeight(Observer, Eye, -Forward), 0.f);
+	TestEqual(TEXT("Outside the sight cone stays unlit"),
+	    Battery->HighlightWeight(Observer, Eye, FRotator(0, Feel.HighlightHalfAngle + 1, 0).Vector()), 0.f);
+	const float EdgeWeight = Battery->HighlightWeight(Observer, Eye, FRotator(0, Feel.HighlightHalfAngle * .85f, 0).Vector());
+	TestTrue(TEXT("Cone edge fades instead of flashing at full brightness"), EdgeWeight > 0.f && EdgeWeight < CenterWeight);
+	TestEqual(TEXT("Out of range stays unlit"),
+	    Battery->HighlightWeight(Observer, Target - Forward * (Feel.HighlightDistance + 1), Forward), 0.f);
+	auto* Blocker = NewObject<UBoxComponent>(Wall);
+	Wall->SetRootComponent(Blocker);
+	Blocker->SetBoxExtent(FVector(5, 50, 50));
+	Blocker->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Blocker->SetCollisionResponseToAllChannels(ECR_Block);
+	Blocker->RegisterComponent();
+	Wall->SetActorLocation(Eye + Forward * 100);
+	TestEqual(TEXT("Wall blocks highlight before any material is enabled"), Battery->HighlightWeight(Observer, Eye, Forward), 0.f);
+	Blocker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("Removing occlusion restores the cue"), Battery->HighlightWeight(Observer, Eye, Forward), CenterWeight);
+	Battery->ApplyHighlight(CenterWeight);
+	TestNotNull(TEXT("Cue uses the loaded rim material instance"), Battery->Mesh->GetOverlayMaterial());
+	FLinearColor Color;
+	if (Battery->RimMaterial)
+	{
+		Battery->RimMaterial->GetVectorParameterValue(FMaterialParameterInfo(TEXT("RimColor")), Color);
+		TestTrue(TEXT("Emissive rim is scaled down from the existing material"), Color.Equals(Battery->RimColor * CenterWeight, .001f));
+	}
+	Battery->bTaken = true; Battery->OnRep_Taken();
+	TestTrue(TEXT("Taking immediately removes the cue and its update work"),
+	    Battery->Mesh->GetOverlayMaterial() == nullptr && !Battery->IsActorTickEnabled() && Battery->HighlightWeight(Observer, Eye, Forward) == 0);
+	Battery->bTaken = false; Battery->OnRep_Taken();
+	TestTrue(TEXT("Rematch restores local cue checks"), Battery->IsActorTickEnabled() && !Battery->IsHidden());
+	Battery->ApplyHighlight(CenterWeight); Battery->ApplyHighlight(0.f);
+	TestNull(TEXT("Looking away removes the overlay draw"), Battery->Mesh->GetOverlayMaterial());
+	Battery->ApplyHighlight(.0002f); Battery->ApplyHighlight(0.f);
+	TestNull(TEXT("Leaving the very faint edge also removes the overlay draw"), Battery->Mesh->GetOverlayMaterial());
+	auto* OriginalView = PC->GetViewTarget();
+	Battery->ApplyHighlight(CenterWeight);
+	PC->SetViewTarget(Wall);
+	Battery->UpdateLocalHighlight();
+	TestNull(TEXT("An alternate local camera does not inherit the toy cue"), Battery->Mesh->GetOverlayMaterial());
+	PC->SetViewTarget(OriginalView);
 	return !HasAnyErrors();
 }
 #endif

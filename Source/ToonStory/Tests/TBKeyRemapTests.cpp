@@ -72,7 +72,10 @@ bool FTBRemapCheckTest::RunTest(const FString& Parameters)
 
 	// 同じ範囲どうし、Commonとの組はかぶる。
 	ExpectConflict(TEXT("Common vs Common"), MoveForward, EKeys::SpaceBar, Jump);
-	ExpectConflict(TEXT("Common vs Human"), Jump, EKeys::LeftControl, HumanCrouch);
+	const TB::FRemapResult CrouchAndFall = TB::CheckRemap(PC, Jump, EKeys::LeftControl);
+	TestTrue(TEXT("Common Ctrl conflicts with both human crouch and toy fall"),
+	    CrouchAndFall.Result == TB::ERemapResult::Conflict && CrouchAndFall.Conflicting.Num() == 2 &&
+	    CrouchAndFall.Conflicting.Contains(HumanCrouch) && CrouchAndFall.Conflicting.Contains(ToyFall));
 	ExpectConflict(TEXT("Human vs Common"), HumanCrouch, EKeys::W, MoveForward);
 	ExpectConflict(TEXT("Common vs Toy"), Jump, EKeys::LeftShift, ToySprint);
 	ExpectConflict(TEXT("Toy vs Common"), ToySprint, EKeys::SpaceBar, Jump);
@@ -92,7 +95,8 @@ bool FTBRemapCheckTest::RunTest(const FString& Parameters)
 	ExpectOK(TEXT("Human vs Toy (shift)"), HumanCrouch, EKeys::LeftShift);
 	ExpectOK(TEXT("Human vs Toy (taunt key)"), HumanInteract, EKeys::F);
 	ExpectOK(TEXT("Toy vs Human (drop key)"), ToyInteract, EKeys::Q);
-	ExpectOK(TEXT("Toy vs Human (crouch key)"), ToyTaunt, EKeys::LeftControl);
+	ExpectConflict(TEXT("Toy taunt vs toy fall"), ToyTaunt, EKeys::LeftControl, ToyFall);
+	ExpectOK(TEXT("Toy fall and human crouch can share Ctrl"), ToyFall, EKeys::LeftControl);
 	ExpectOK(TEXT("Lobby vs Human (crouch key)"), LobbyReady, EKeys::LeftControl);
 	ExpectOK(TEXT("Lobby vs Human (interact key)"), LobbyReady, EKeys::E);
 	ExpectOK(TEXT("Human vs Lobby"), HumanCrouch, EKeys::R);

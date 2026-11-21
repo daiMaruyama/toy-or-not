@@ -28,10 +28,22 @@ struct FTBGripCache
 	FVector ContactInBody = FVector::ZeroVector;
 };
 
+struct FTBFallenSupportCache
+{
+	TWeakObjectPtr<AActor> Visual;
+	TArray<TPair<TWeakObjectPtr<USkeletalMeshComponent>, TWeakObjectPtr<USkeletalMesh>>> Meshes;
+	TArray<FVector> Points;
+	FQuat Rotation = FQuat::Identity;
+	FVector Scale = FVector::ZeroVector;
+	float BottomOffset = 0;
+	int32 SkinnedParts = 0;
+	bool bMissingCPUData = false;
+};
+
 // Players and decoys deliberately share the same mesh, idle pose and floor correction.
 namespace TBToyPresentation
 {
-	inline constexpr float SizeScale = .75f;
+	inline constexpr float SizeScale = .70f;
 	int32 SelectionWeight(const UClass* VisualClass);
 	int32 SelectToy(const TArray<TSubclassOf<AActor>>& Catalogue);
 	void Initialize(AActor* Visual);
@@ -40,7 +52,10 @@ namespace TBToyPresentation
 	// タイトルのおもちゃのように、シーケンスで動かす見た目にもエモートを出せるようにする。
 	void UseLookPose(AActor* Visual);
 	void Animate(AActor* Visual, float Speed, bool Frozen);
+	// Biped figures lie face-up; the remaining toy shapes lie on their side.
+	FRotator FallRotation(AActor* Visual, float Angle);
 	void Ground(UChildActorComponent* Visual, float FloorZ);
+	void GroundFallen(UChildActorComponent* Visual, float FloorZ, FTBFallenSupportCache& Cache);
 	void Grip(UChildActorComponent* Visual, const FVector& HandPosition, FTBGripCache& Cache);
 	bool CarryContacts(const ATBCharacter* Human, FVector& Left, FVector& Right);
 	bool SupportsEmoteMesh(const USkeletalMesh* Mesh);

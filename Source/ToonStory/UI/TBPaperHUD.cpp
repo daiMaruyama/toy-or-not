@@ -104,6 +104,7 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 	}
 	const int32 Stage = Name == TEXT("StageExpanded") ? TBLobbySettings::DemoStageId
 	                    : Name == TEXT("StagePlayroom") ? TBLobbySettings::HouseStageId
+	                    : Name == TEXT("StageRandom") ? TBLobbySettings::RandomStageId
 	                                                    : INDEX_NONE;
 	if (bStagePickerOpen)
 	{
@@ -115,7 +116,7 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 		const auto& Match = TB::Rules().Match;
 		if (Name == TEXT("SaveStage"))
 		{
-			if (!FPackageName::DoesPackageExist(TBLobbySettings::StagePath(DraftStage)))
+			if (!TBLobbySettings::IsStageAvailable(DraftStage))
 			{
 				StageDraftNotice = TEXT("Stage.SaveFailed");
 				return true;
@@ -137,7 +138,11 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 		}
 		if (Stage != INDEX_NONE) DraftStage = Stage;
 		else if (Name == TEXT("DraftNextStage"))
-			DraftStage = DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::DemoStageId : TBLobbySettings::HouseStageId;
+			DraftStage = DraftStage == TBLobbySettings::DemoStageId ? TBLobbySettings::HouseStageId
+			    : DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::RandomStageId : TBLobbySettings::DemoStageId;
+		else if (Name == TEXT("DraftPreviousStage"))
+			DraftStage = DraftStage == TBLobbySettings::RandomStageId ? TBLobbySettings::HouseStageId
+			    : DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::DemoStageId : TBLobbySettings::RandomStageId;
 		else if (Name == TEXT("DraftLessTime")) StageDraft.Duration -= Match.DurationStep;
 		else if (Name == TEXT("DraftMoreTime")) StageDraft.Duration += Match.DurationStep;
 		else if (Name == TEXT("DraftFewerItems")) --StageDraft.RequiredItems;
@@ -310,6 +315,7 @@ void ATBHUD::DrawLobby()
 		NormalizeStageDraft();
 		const bool Host = PC->HasAuthority() && PC->IsLocalController() && !State->bTravelPending;
 		const bool House = DraftStage == TBLobbySettings::HouseStageId;
+		const bool Random = DraftStage == TBLobbySettings::RandomStageId;
 		const int32 NPCCount = StageDraft.NPCHumans + StageDraft.NPCToys;
 		const bool CanAddNPC = DraftPlayerCount + NPCCount < State->PlayerLimit;
 		auto Number = [&](const TCHAR* Key, int32 Value)
@@ -477,9 +483,9 @@ void ATBHUD::DrawLobby()
 		}
 
 		Label(TEXT("Stage.ChooseStage"), 512, 158, 520, 1.08f);
-		DrawFittedText(House ? TEXT("01 / 02") : TEXT("02 / 02"), Ink, X + 1080 * S, Y + 158 * S, 88 * S, .95f * S, false, true);
+		DrawFittedText(Random ? TEXT("03 / 03") : House ? TEXT("02 / 03") : TEXT("01 / 03"), Ink, X + 1080 * S, Y + 158 * S, 88 * S, .95f * S, false, true);
 		RoundedPanel(TBPaper::Outline, X + 512 * S, Y + 192 * S, 656 * S, 328 * S, 14, 0);
-		if (const auto* Preview = ArtTextures.Find(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo")); Preview && *Preview)
+		if (const auto* Preview = ArtTextures.Find(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo")); !Random && Preview && *Preview)
 		{
 			// Cover the preview area, preserving the source aspect ratio and a smooth rounded silhouette.
 			const float LX = X + 516 * S, LY = Y + 196 * S, PW = 648 * S, PH = 320 * S, R = 10 * S;
@@ -535,10 +541,15 @@ void ATBHUD::DrawLobby()
 			Gradient.BlendMode = SE_BLEND_Translucent;
 			Canvas->DrawItem(Gradient);
 		}
+		if (Random)
+		{
+			RoundedPanel(TBPaper::Teal, X + 516 * S, Y + 196 * S, 648 * S, 320 * S, 10, 0);
+			DrawFittedText(TEXT("?"), Ink, X + 720 * S, Y + 260 * S, 240 * S, 7.f * S, true, true);
+		}
 		RoundedPanel(TBPaper::Teal, X + 1004 * S, Y + 209 * S, 146 * S, 32 * S, 4, 2);
 		DrawFittedText(TBText::String(TEXT("Stage.Preview")), Ink, X + 1013 * S, Y + 220 * S, 128 * S, .65f * S, true, true);
-		DrawText(House ? TEXT("01") : TEXT("02"), TBPaper::Gold, X + 538 * S, Y + 452 * S, PaperFont, .9f * S);
-		DrawFittedText(TBText::String(House ? TEXT("Stage.House") : TEXT("Stage.Demo")), TBPaper::Paper,
+		DrawText(Random ? TEXT("03") : House ? TEXT("02") : TEXT("01"), Random ? Ink : TBPaper::Gold, X + 538 * S, Y + 452 * S, PaperFont, .9f * S);
+		DrawFittedText(TBText::String(Random ? TEXT("Stage.Random") : House ? TEXT("Stage.House") : TEXT("Stage.Demo")), Random ? Ink : TBPaper::Paper,
 		    X + 538 * S, Y + 483 * S, 600 * S, 1.38f * S, true);
 		auto Arrow = [&](FName Id, const TCHAR* Glyph, float PX)
 		{
@@ -546,11 +557,12 @@ void ATBHUD::DrawLobby()
 			    X + PX * S, Y + 547 * S, 34 * S, 2.f * S, true, true);
 			if (Host) AddHitBox({X + PX * S, Y + 536 * S}, {34 * S, 44 * S}, Id, true);
 		};
-		Arrow(House ? TEXT("StageExpanded") : TEXT("StagePlayroom"), TEXT("‹"), 508);
+		Arrow(TEXT("DraftPreviousStage"), TEXT("‹"), 508);
 		Arrow(TEXT("DraftNextStage"), TEXT("›"), 1138);
-		RoundedPanel(House ? TBPaper::Teal : TBPaper::Cream, X + 552 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
-		RoundedPanel(House ? TBPaper::Cream : TBPaper::Teal, X + 574 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
-		Wrapped(TBText::String(House ? TEXT("Stage.HouseDescription") : TEXT("Stage.DemoDescription")), 612, 550, 510, .74f, 2, Muted);
+		RoundedPanel(!House && !Random ? TBPaper::Teal : TBPaper::Cream, X + 552 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
+		RoundedPanel(House ? TBPaper::Teal : TBPaper::Cream, X + 574 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
+		RoundedPanel(Random ? TBPaper::Teal : TBPaper::Cream, X + 596 * S, Y + 548 * S, 13 * S, 13 * S, 6.5f, 2);
+		Wrapped(TBText::String(Random ? TEXT("Stage.RandomDescription") : House ? TEXT("Stage.HouseDescription") : TEXT("Stage.DemoDescription")), 630, 550, 492, .74f, 2, Muted);
 		RoundedPanel(TBPaper::Teal, X + 780 * S, Y + 600 * S, 9 * S, 9 * S, 4.5f, 1, Muted);
 		DrawFittedText(TBText::String(TEXT("Stage.Explore")), Muted, X + 798 * S, Y + 601 * S, 90 * S, .72f * S);
 		RoundedPanel(TBPaper::Gold, X + 900 * S, Y + 600 * S, 9 * S, 9 * S, 4.5f, 1, Muted);

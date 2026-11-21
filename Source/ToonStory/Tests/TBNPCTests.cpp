@@ -3,6 +3,7 @@
 #include "Tests/TBTestMatch.h"
 #include "Character/TBNPCController.h"
 #include "Character/TBCharacter.h"
+#include "Character/TBCharacterGeometry.h"
 #include "Character/TBMovement.h"
 #include "Data/TBCharacterData.h"
 #include "Data/TBDataSettings.h"
@@ -599,11 +600,12 @@ bool FTBNPCNavigationTest::RunTest(const FString& Parameters)
 		    (!Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) ||
 		     UNavigationSystemV1::IsNavigationBeingBuiltOrLocked(World))) return false;
 		TArray<FVector> Starts;
+		const FNavAgentProperties ToyAgent(TBCharacterGeometry::ToyRadius, 2.f * TBCharacterGeometry::ToyHalfHeight);
 		for (TActorIterator<APlayerStart> It(World); It; ++It)
 		{
 			Starts.Add(It->GetActorLocation());
 			FNavLocation Projected;
-			const auto* Data = Nav->GetNavDataForProps(FNavAgentProperties(7.5f, 19.5f), It->GetActorLocation());
+			const auto* Data = Nav->GetNavDataForProps(ToyAgent, It->GetActorLocation());
 			const bool OnNav = Data && Nav->ProjectPointToNavigation(It->GetActorLocation(), Projected, FVector(100,100,500), Data);
 			AddInfo(FString::Printf(TEXT("Start %s: %s projected=%d %s"), *It->GetName(), *It->GetActorLocation().ToString(), OnNav, *Projected.Location.ToString()));
 		}
@@ -613,7 +615,7 @@ bool FTBNPCNavigationTest::RunTest(const FString& Parameters)
 		{
 			for (const FVector& Start : Starts)
 			{
-				const FNavAgentProperties Agent = Human ? FNavAgentProperties(26, 130) : FNavAgentProperties(7.5f, 19.5f);
+				const FNavAgentProperties Agent = Human ? FNavAgentProperties(26, 130) : ToyAgent;
 				auto* Data = Nav->GetNavDataForProps(Agent, Start);
 				auto* Path = Data ? UNavigationSystemV1::FindPathToLocationSynchronously(World, Start, Destination, const_cast<ANavigationData*>(Data)) : nullptr;
 				if (Path && Path->IsValid() && !Path->IsPartial()) return true;
@@ -626,7 +628,7 @@ bool FTBNPCNavigationTest::RunTest(const FString& Parameters)
 			FHitResult Floor;
 			World->LineTraceSingleByChannel(Floor, It->GetActorLocation() + FVector(0,0,15), It->GetActorLocation() - FVector(0,0,100), ECC_Visibility);
 			FNavLocation Projected;
-			const auto* Data = Nav->GetNavDataForProps(FNavAgentProperties(7.5f,19.5f));
+			const auto* Data = Nav->GetNavDataForProps(ToyAgent);
 			bool ProjectedOK = Data && Nav->ProjectPointToNavigation(It->GetActorLocation(), Projected, FVector(40,40,50), Data);
 			AddInfo(FString::Printf(TEXT("Pickup %s floor=%s z=%.1f nav=%d %s"), *It->GetName(), *GetNameSafe(Floor.GetActor()), Floor.ImpactPoint.Z, ProjectedOK, *Projected.Location.ToString()));
 			if (Reaches(It->GetActorLocation(), false)) ++Reachable;
@@ -702,6 +704,7 @@ void FTBNPCTravelTest::GetTests(TArray<FString>& Names, TArray<FString>& Command
 {
 	Names.Add(TEXT("Demo")); Commands.Add(TEXT("1"));
 	Names.Add(TEXT("House")); Commands.Add(TEXT("3"));
+	Names.Add(TEXT("Random")); Commands.Add(TEXT("0"));
 }
 bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 {
@@ -726,17 +729,24 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 	PC->GetPlayerState<ATBPlayerState>()->bReady = true;
 	TBLobbySettings::SelectStage(PC, Stage);
 	Mode->StartRound(PC);
-		TestTrue(TEXT("Supported stage starts travel"), State->bTravelPending);
+	const int32 Destination = Stage == TBLobbySettings::RandomStageId
+	    ? World->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage : Stage;
+	TestTrue(TEXT("Destination is a retained playable stage"), Destination == TBLobbySettings::DemoStageId || Destination == TBLobbySettings::HouseStageId);
+	TestTrue(TEXT("Supported stage starts travel"), State->bTravelPending);
 	TestEqual(TEXT("No bots in lobby arrival count"), State->PlayerArray.Num(), 1);
 	const double Deadline = FPlatformTime::Seconds() + 60;
 	auto Arrived = MakeShared<bool>(false);
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Deadline, Arrived, Stage]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Deadline, Arrived, Stage, Destination]()
 	{
 		auto* Current = CurrentWorld();
 		auto* Match = Current ? Current->GetGameState<ATBGameState>() : nullptr;
 		if ((!Match || Match->Phase != ETBPhase::Playing || Match->IsPreparing()) && FPlatformTime::Seconds() < Deadline) return false;
-		*Arrived = Match && Match->Phase == ETBPhase::Playing && !Match->IsPreparing() && TBLobbySettings::StageIndex(Current) == Stage;
+		*Arrived = Match && Match->Phase == ETBPhase::Playing && !Match->IsPreparing() && TBLobbySettings::StageIndex(Current) == Destination;
 		TestTrue(TEXT("Match starts after arriving at selected stage"), *Arrived);
+		if (Match) TestEqual(TEXT("Arrival preserves the selection including Random"), Match->SelectedStage, Stage);
+		if (Stage == TBLobbySettings::RandomStageId && Current)
+			TestEqual(TEXT("Arrival and preparation keep the original random draw"),
+			    Current->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage, Destination);
 		if (*Arrived)
 		{
 			TestEqual(TEXT("NPC settings survive travel"), Match->Settings.NPCToys, 2);
@@ -768,7 +778,7 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 		return true;
 	}));
 	auto ReturnDeadline = MakeShared<double>(0);
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Arrived, ReturnDeadline]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Arrived, ReturnDeadline, Stage]()
 	{
 		if (!*Arrived) return true;
 		if (*ReturnDeadline == 0) *ReturnDeadline = FPlatformTime::Seconds() + 60;
@@ -780,6 +790,9 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 			if (!TestNotNull(TEXT("Lobby state restored"), Match)) return true;
 			TestEqual(TEXT("Bot states removed before return travel"), Match->PlayerArray.Num(), 1);
 			TestEqual(TEXT("NPC count retained after return travel"), Match->Settings.NPCToys, 2);
+			TestEqual(TEXT("Returning to lobby retains the selection including Random"), Match->SelectedStage, Stage);
+			TestEqual(TEXT("A new round can draw again after lobby return"),
+			    Current->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage, INDEX_NONE);
 		}
 		return true;
 	}));

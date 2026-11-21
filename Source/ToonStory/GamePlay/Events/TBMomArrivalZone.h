@@ -46,6 +46,8 @@ public:
 	static ATBMomArrivalZone* FindActive(UWorld* World);
 	/** NPCだけでは対処不能になるため、人間陣営を操作中のプレイヤーが必要。 */
 	static bool HasHumanPlayer(UWorld* World);
+	/** 隠れる準備が終わってからの保護時間。抽選・直接開始の両方で使う。 */
+	static bool HasPassedOpeningDelay(UWorld* World);
 private:
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> Marker;
 	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> Boundary;

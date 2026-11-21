@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GamePlay/TBBox.h"
 #include "GamePlay/TBPushableProps.h"
+#include "GamePlay/TBRoomLighting.h"
 #include "Net/UnrealNetwork.h"
 
 ATBGameState::ATBGameState()
@@ -49,8 +50,8 @@ void ATBGameState::OnPropHit(UPrimitiveComponent* Part, AActor* Other, UPrimitiv
 void ATBGameState::BeginPlay()
 {
 	Super::BeginPlay();
-	for (ULevel* Level : GetWorld()->GetLevels()) ConfigurePushableProps(Level, GetWorld());
-	FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ATBGameState::ConfigurePushableProps);
+	for (ULevel* Level : GetWorld()->GetLevels()) ConfigureStageActors(Level, GetWorld());
+	FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ATBGameState::ConfigureStageActors);
 }
 
 void ATBGameState::EndPlay(const EEndPlayReason::Type EndReason)
@@ -59,19 +60,20 @@ void ATBGameState::EndPlay(const EEndPlayReason::Type EndReason)
 	Super::EndPlay(EndReason);
 }
 
-void ATBGameState::ConfigurePushableProps(ULevel* Level, UWorld* World)
+void ATBGameState::ConfigureStageActors(ULevel* Level, UWorld* World)
 {
 	if (!Level || World != GetWorld()) return;
+	if (World->GetNetMode() != NM_DedicatedServer) ATBRoomLighting::ApplyStageLightRanges(*Level);
 	for (AActor* Actor : Level->Actors)
 	{
 		auto* Prop = Cast<AStaticMeshActor>(Actor);
 		if (!Prop) continue;
-		TBPushableProps::TryEnable(*Prop);
+		const bool bInitialized = TBPushableProps::TryEnable(*Prop);
 		auto* Part = Prop->GetStaticMeshComponent();
 		if (!Part || !Part->ComponentHasTag(TEXT("TBPushable"))) continue;
 		// World geometry still supports the prop. A character cannot use it as a moving floor.
 		Part->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-		Part->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+		Part->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
 		Part->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 		Part->CanCharacterStepUpOn = ECB_No;
 		if (HasAuthority() && Part->IsSimulatingPhysics() && !PropPeakHeights.Contains(Part))
@@ -83,6 +85,14 @@ void ATBGameState::ConfigurePushableProps(ULevel* Level, UWorld* World)
 			Part->OnComponentHit.AddUniqueDynamic(this, &ATBGameState::OnPropHit);
 			SetActorTickEnabled(true);
 		}
+		// Collision filters and hit notifications above can recreate/wake the body.
+		// Apply sleep after all setup. A received awake snapshot must keep its queued
+		// physics target; a received sleeping snapshot stays asleep even if filters woke it.
+		const auto& RepMovement = Prop->GetReplicatedMovement();
+		const bool bReceivedSnapshot = GetNetMode() == NM_Client && RepMovement.bRepPhysics;
+		if (bInitialized && (bReceivedSnapshot ? RepMovement.bSimulatedPhysicSleep :
+			(Part->GetPhysicsLinearVelocity().IsNearlyZero() && Part->GetPhysicsAngularVelocityInRadians().IsNearlyZero())))
+			Part->PutRigidBodyToSleep();
 	}
 }
 
@@ -101,6 +111,7 @@ void ATBGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ATBGameState, LobbyReturnError);
 	DOREPLIFETIME(ATBGameState, Collected);
 	DOREPLIFETIME(ATBGameState, bEscapePhase);
+	DOREPLIFETIME(ATBGameState, Ignition);
 	DOREPLIFETIME(ATBGameState, bVehicleEscapeResult);
 	DOREPLIFETIME(ATBGameState, EscapedPlayers);
 	DOREPLIFETIME(ATBGameState, ResultStyle);
@@ -145,8 +156,21 @@ float ATBGameState::HideRemaining() const
 	    ? FMath::Max(0., HidePreparation.EndsAt - GetServerWorldTimeSeconds()) : 0.f;
 }
 
+void ATBGameState::OnRep_Ignition()
+{
+	IgnitionReceivedAt = Ignition.StartsAt >= 0 ? GetWorld()->GetTimeSeconds() : -1.;
+}
+
+double ATBGameState::IgnitionElapsed() const
+{
+	// A smoothed server clock may still be behind the reliable evidence that ignition started.
+	const double SinceReceipt = IgnitionReceivedAt >= 0 ? GetWorld()->GetTimeSeconds() - IgnitionReceivedAt : 0.;
+	return FMath::Clamp(FMath::Max(GetServerWorldTimeSeconds() - Ignition.StartsAt, SinceReceipt), 0., FTBEscapeIgnition::Duration);
+}
+
 float ATBGameState::Remaining() const
 {
 	if (IsPreparing()) return Settings.Duration;
-	return Phase == ETBPhase::Playing ? FMath::Max(0., EndTime - GetServerWorldTimeSeconds()) : 0.f;
+	const double Now = IsIgniting() ? Ignition.StartsAt : GetServerWorldTimeSeconds();
+	return Phase == ETBPhase::Playing ? FMath::Max(0., EndTime - Now) : 0.f;
 }

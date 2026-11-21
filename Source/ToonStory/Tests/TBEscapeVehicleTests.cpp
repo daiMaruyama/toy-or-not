@@ -46,6 +46,7 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	const auto OldToyState = Info->ToyState;
 	const bool OldFrozen = Info->bFrozen, OldEscape = Match->bEscapePhase;
 	const bool OldResult = Match->bVehicleEscapeResult;
+	const auto OldIgnition = Match->Ignition;
 	const auto OldEscaped = Match->EscapedPlayers;
 	const ETBWinner OldWinner = Match->Winner;
 	const FString OldReason = Match->Reason;
@@ -53,6 +54,7 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	TBTest::FPlayingScope Playing(*Match, Match->GetServerWorldTimeSeconds() + 5.0);
 	Info->Team = ETBTeam::Toy; Info->ToyState = ETBToyState::Free; Info->bFrozen = false;
 	Match->bEscapePhase = false;
+	Match->Ignition = {};
 	FActorSpawnParameters Params; Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	auto* Car = World->SpawnActor<ATBEscapeVehicle>(FVector(10000,10000,10000), FRotator::ZeroRotator, Params);
 	ATBEscapeExit* Exit = nullptr;
@@ -64,6 +66,7 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 		Info->Team = OldTeam; Info->ToyState = OldToyState; Info->bFrozen = OldFrozen;
 		Match->EscapedPlayers = OldEscaped;
 		Match->bEscapePhase = OldEscape; Match->bVehicleEscapeResult = OldResult;
+		Match->Ignition = OldIgnition;
 		Match->Winner = OldWinner; Match->Reason = OldReason;
 		Toy->SetActorLocation(OldLocation, false, nullptr, ETeleportType::TeleportPhysics);
 		Toy->ApplyState();
@@ -73,6 +76,18 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	TestTrue(TEXT("Escape phase starts"), Mode->StartEscapePhase());
 	TestTrue(TEXT("At least 30 seconds remain"), Match->Remaining() >= 29.9f);
 	TestFalse(TEXT("Phase cannot start twice"), Mode->StartEscapePhase());
+	TestTrue(TEXT("The car shot runs before boarding opens"), Match->IsIgniting() && !Match->bEscapePhase);
+	TestTrue(TEXT("Toy is held during the shot"), Toy->IsMovementLocked() && !Toy->CanAct());
+	Info->Team = ETBTeam::Human;
+	TestTrue(TEXT("Human is held during the shot"), Toy->IsMovementLocked() && !Toy->CanAct());
+	Info->Team = ETBTeam::Toy;
+	TestFalse(TEXT("Cannot board during ignition"), Car->Board(Toy));
+	// Move both timestamps together, as if the shot had started 4.625 seconds earlier.
+	Match->Ignition.StartsAt -= FTBEscapeIgnition::Duration;
+	Match->EndTime -= FTBEscapeIgnition::Duration;
+	Mode->Tick(.016f);
+	TestFalse(TEXT("Movement resumes after ignition"), Toy->IsMovementLocked());
+	TestTrue(TEXT("Escape clock resumes with the full minimum"), FMath::IsNearlyEqual(Match->Remaining(), 30.f, .05f));
 	TestTrue(TEXT("Toy boards"), Car->Board(Toy));
 	TestTrue(TEXT("First passenger drives"), Car->IsDriver(Toy));
 	TestFalse(TEXT("Passenger is protected from gaze"), Toy->CanBeFrozenBy(Toy));

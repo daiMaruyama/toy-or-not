@@ -23,6 +23,7 @@ namespace TB::Keys
 	inline const FName HumanInteract(TEXT("Human_Interact"));
 	inline const FName HumanDrop(TEXT("Human_Drop"));
 	inline const FName HumanGaze(TEXT("Human_Gaze"));
+	inline const FName ToyFall(TEXT("Toy_Fall"));
 	inline const FName ToySprint(TEXT("Toy_Sprint"));
 	inline const FName ToyInteract(TEXT("Toy_Interact"));
 inline const FName ToyPush(TEXT("Toy_Push"));

@@ -32,6 +32,14 @@ namespace
 		for (const auto& Stage : Stages) if (Stage.Id == Index) return &Stage;
 		return &Stages[0];
 	}
+	int32 NormalizeSelection(int32 Index)
+	{
+		return Index == TBLobbySettings::RandomStageId ? Index : FindStage(Index)->Id;
+	}
+	const TCHAR* SelectionName(int32 Index)
+	{
+		return Index == TBLobbySettings::RandomStageId ? TEXT("Random") : FindStage(Index)->Name;
+	}
 } // namespace
 
 void UTBLobbySettings::Initialize(FSubsystemCollectionBase& Collection)
@@ -50,6 +58,7 @@ void UTBLobbySettings::Initialize(FSubsystemCollectionBase& Collection)
 			    ArrivalDeadline = 0;
 			    bDedicatedLobby = false;
 			    SelectedStage = 1;
+			    ResolvedStage = INDEX_NONE;
 		    }
 	    });
 }
@@ -61,8 +70,35 @@ void UTBLobbySettings::Deinitialize()
 
 const TCHAR* TBLobbySettings::StagePath(int32 Index)
 {
-	const auto* Stage = FindStage(Index);
-	return Stage ? Stage->Path : nullptr;
+	return Index == RandomStageId ? nullptr : FindStage(Index)->Path;
+}
+bool TBLobbySettings::IsStageAvailable(int32 Index)
+{
+	if (Index != RandomStageId) return FPackageName::DoesPackageExist(StagePath(Index));
+	for (const auto& Stage : Stages)
+		if (!FPackageName::DoesPackageExist(Stage.Path)) return false;
+	return true;
+}
+void TBLobbySettings::ResolveStageForStart(UWorld* World)
+{
+	if (!World || !World->GetAuthGameMode<ATBGameMode>()) return;
+	auto* State = World->GetGameState<ATBGameState>();
+	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
+	if (!State || State->Phase != ETBPhase::Lobby || State->bTravelPending ||
+	    State->SelectedStage != RandomStageId || Pending->ResolvedStage != INDEX_NONE) return;
+	Pending->ResolvedStage = Stages[FMath::RandRange(0, int32(UE_ARRAY_COUNT(Stages)) - 1)].Id;
+	State->StageName = FindStage(Pending->ResolvedStage)->Name;
+	State->ForceNetUpdate();
+}
+void TBLobbySettings::ResetStageResolution(UWorld* World)
+{
+	if (!World || !World->GetGameInstance()) return;
+	World->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage = INDEX_NONE;
+	if (auto* State = World->GetGameState<ATBGameState>(); State && State->SelectedStage == RandomStageId)
+	{
+		State->StageName = SelectionName(RandomStageId);
+		State->ForceNetUpdate();
+	}
 }
 int32 TBLobbySettings::StageIndex(const UWorld* World)
 {
@@ -77,7 +113,10 @@ int32 TBLobbySettings::StageIndex(const UWorld* World)
 }
 int32 TBLobbySettings::StageItemCount(int32 Index)
 {
-	return FindStage(Index)->ItemCount;
+	if (Index != RandomStageId) return FindStage(Index)->ItemCount;
+	int32 Count = MAX_int32;
+	for (const auto& Stage : Stages) Count = FMath::Min(Count, Stage.ItemCount);
+	return Count;
 }
 int32 TBLobbySettings::AvailableItems(UWorld* World)
 {
@@ -86,8 +125,7 @@ int32 TBLobbySettings::AvailableItems(UWorld* World)
 	if (ShouldTravelToStage(World))
 	{
 		const auto* State = World->GetGameState<ATBGameState>();
-		const auto* Stage = State ? FindStage(State->SelectedStage) : nullptr;
-		return Stage ? Stage->ItemCount : 1;
+		return State ? StageItemCount(State->SelectedStage) : 1;
 	}
 	int32 Count = 0;
 	for (TActorIterator<ATBPickup> It(World); It; ++It)
@@ -108,23 +146,23 @@ void TBLobbySettings::SelectStage(ATBController* Host, int32 Index)
 	auto* World = Host->GetWorld();
 	auto* Mode = World->GetAuthGameMode<ATBGameMode>();
 	auto* State = World->GetGameState<ATBGameState>();
-	Index = FindStage(Index)->Id;
-	const auto* Path = StagePath(Index);
+	Index = NormalizeSelection(Index);
 	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
-	if (!Mode || !Mode->IsHost(Host) || !State || State->Phase != ETBPhase::Lobby || State->bTravelPending || !Path ||
+	if (!Mode || !Mode->IsHost(Host) || !State || State->Phase != ETBPhase::Lobby || State->bTravelPending ||
 	    !Pending->PendingMap.IsEmpty())
 	{
 		return;
 	}
-	if (!FPackageName::DoesPackageExist(Path))
+	if (!IsStageAvailable(Index))
 	{
 		return;
 	}
 	Pending->bStageSelected = true;
+	Pending->ResolvedStage = INDEX_NONE;
 	Pending->SelectedStage = Index;
 	State->SelectedStage = Index;
 	State->Settings.RequiredItems = FMath::Min(State->Settings.RequiredItems, AvailableItems(World));
-	State->StageName = FindStage(Index)->Name;
+	State->StageName = SelectionName(Index);
 	State->ForceNetUpdate();
 }
 bool TBLobbySettings::IsLobbyMapName(const FString& MapName)
@@ -140,7 +178,10 @@ bool TBLobbySettings::ShouldTravelToStage(const UWorld* World)
 	if (!World || !World->GetGameInstance()) return false;
 	const auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
 	const auto* State = World->GetGameState<ATBGameState>();
-	return IsLobby(World) || (State && Pending->bStageSelected && StageIndex(World) != State->SelectedStage);
+	const int32 Destination = State && State->SelectedStage == RandomStageId
+	    ? Pending->ResolvedStage : State ? State->SelectedStage : INDEX_NONE;
+	return IsLobby(World) || (State && Pending->bStageSelected &&
+	    (Destination == INDEX_NONE || StageIndex(World) != Destination));
 }
 
 void TBLobbySettings::CancelTravel(UWorld* World)
@@ -148,6 +189,7 @@ void TBLobbySettings::CancelTravel(UWorld* World)
 	if (!World || !World->GetGameInstance()) return;
 	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
 	Pending->PendingMap.Reset();
+	ResetStageResolution(World);
 	Pending->bStartOnArrival = false;
 	Pending->bArrivalCancelled = false;
 	Pending->ArrivalDeadline = 0;
@@ -173,7 +215,10 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	{
 		return TEXT("別のマップ移動が処理中です。");
 	}
-	const TCHAR* Destination = StartMatch ? StagePath(State->SelectedStage) : TEXT("/Game/Maps/TB_Lobby");
+	if (StartMatch) ResolveStageForStart(World);
+	const int32 DestinationStage = State->SelectedStage == RandomStageId ? Pending->ResolvedStage : State->SelectedStage;
+	if (StartMatch && DestinationStage == INDEX_NONE) return TEXT("移動先がまだ決まっていません。");
+	const TCHAR* Destination = StartMatch ? StagePath(DestinationStage) : TEXT("/Game/Maps/TB_Lobby");
 	if (!Destination)
 	{
 		return TEXT("移動先が設定されていません。");
@@ -181,10 +226,11 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	const FString Path(Destination);
 	if (!FPackageName::DoesPackageExist(Path))
 	{
+		if (StartMatch) ResetStageResolution(World);
 		return TEXT("移動先のマップが見つかりません。");
 	}
-	State->SelectedStage = FindStage(State->SelectedStage)->Id;
-	if (StartMatch) State->StageName = FindStage(State->SelectedStage)->Name;
+	State->SelectedStage = NormalizeSelection(State->SelectedStage);
+	if (StartMatch) State->StageName = FindStage(DestinationStage)->Name;
 	Pending->PendingRules = State->Settings;
 	Pending->SelectedStage = State->SelectedStage;
 	Pending->ExpectedPlayers = State->PlayerArray.Num();
@@ -198,6 +244,7 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	{
 		State->bTravelPending = false;
 		Pending->PendingMap.Reset();
+		ResetStageResolution(World);
 		Pending->bStartOnArrival = false;
 		return TEXT("サーバーがマップ移動を開始できませんでした。");
 	}
@@ -287,21 +334,20 @@ void TBLobbySettings::Restore(ATBGameMode* Mode)
 	if (IsLobby(World))
 	{
 		Pending->bDedicatedLobby = true;
+		Pending->ResolvedStage = INDEX_NONE;
 	}
 	const int32 CurrentStage = StageIndex(World);
 	if (!Pending->bDedicatedLobby && !Pending->bStageSelected && Pending->PendingMap.IsEmpty() && CurrentStage != INDEX_NONE)
 	{
 		Pending->SelectedStage = CurrentStage;
 	}
-	Pending->SelectedStage = FindStage(Pending->SelectedStage)->Id;
+	Pending->SelectedStage = NormalizeSelection(Pending->SelectedStage);
 	State->SelectedStage = Pending->SelectedStage;
 	// Arenaなどの直接起動時は、GameModeが設定したマップ名を維持する。
 	if (Pending->bDedicatedLobby || CurrentStage != INDEX_NONE)
 	{
-		if (const auto* Stage = FindStage(State->SelectedStage))
-		{
-			State->StageName = Stage->Name;
-		}
+		State->StageName = SelectionName(State->SelectedStage == RandomStageId && CurrentStage != INDEX_NONE
+		    ? CurrentStage : State->SelectedStage);
 	}
 	if (!Pending->PendingMap.IsEmpty() && World->GetMapName().EndsWith(FPackageName::GetShortName(Pending->PendingMap)))
 	{

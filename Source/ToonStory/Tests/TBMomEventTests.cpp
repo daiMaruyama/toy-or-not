@@ -67,11 +67,18 @@ bool FTBMomEventTest::RunTest(const FString&)
 		Humans[Index]->SetActorLocation(Zone->GetActorLocation()+FVector(X,0,Humans[Index]->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+Height));
 	};
 	Rules.ArrivalSeconds=10; Rules.PersuadeSeconds=3; Rules.Radius=90;
+	TestEqual(TEXT("Mom opening grace defaults to one minute"), Rules.InitialDelaySeconds, 60.f);
 	Match->Phase=ETBPhase::Lobby;
 	TestFalse(TEXT("Lobby cannot start event"),Zone->StartEvent());
 	Playing.Hold(); Match->HidePreparation.bHiding=true;
 	TestFalse(TEXT("Preparation cannot start event"),Event->Execute(World));
 	Match->HidePreparation.bHiding=false;
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds();
+	TestFalse(TEXT("No warning or arrival at the beginning of a round"),Event->CanExecute(World));
+	TestFalse(TEXT("Direct zone start cannot bypass opening protection"),Zone->StartEvent());
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-59.99;
+	TestFalse(TEXT("Mom remains ineligible before sixty seconds"),Event->Execute(World));
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-60;
 	// NPCだけの人間陣営と、途中切断によりNPCだけになった状況を再現する。
 	auto* NPC=World->SpawnActor<ATBNPCController>();
 	NPC->SetActorTickEnabled(false);
@@ -115,6 +122,9 @@ bool FTBMomEventTest::RunTest(const FString&)
 	TestEqual(TEXT("Deadline ends round"),Match->Phase,ETBPhase::Results);
 	Playing.Hold(); Zone->StartEvent(); ++Match->HidePreparation.Round; Zone->Advance(1);
 	TestFalse(TEXT("Previous round never carries event"),Zone->State.bActive);
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds();
+	TestFalse(TEXT("A new round receives its own full opening protection"),Zone->StartEvent());
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-60;
 	Zone->StartEvent(); Match->Phase=ETBPhase::Lobby; Zone->Advance(1);
 	TestFalse(TEXT("Returning to lobby clears event"),Zone->State.bActive);
 	Playing.Hold(); Rules.PersuadeSeconds=0;
@@ -130,6 +140,9 @@ bool FTBMomEventTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { Events=SavedEvents; UTBEventTestEvent::Executions=Executions; Owner->Destroy(); };
 	Events.bEnabled=true; Events.CooldownSeconds=3; Events.ChancePerSecond=1;
 	Events.EventClasses={UTBMomArrivalEvent::StaticClass(),UTBEventTestEvent::StaticClass()};
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds();
+	TestFalse(TEXT("Director cannot explicitly trigger mom during opening protection"),Director->TryTrigger(UTBMomArrivalEvent::StaticClass()));
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-60;
 	TestTrue(TEXT("Director starts mom event"),Director->TryTrigger(UTBMomArrivalEvent::StaticClass()));
 	Director->Advance(100);
 	TestEqual(TEXT("Mom blocks other natural event rolls"),UTBEventTestEvent::Executions,Executions);

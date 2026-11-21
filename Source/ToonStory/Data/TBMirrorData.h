@@ -23,8 +23,8 @@ public:
 	float ViewDistance = 1500.f;
 	/** 反射映像の横解像度。縦はプレイヤーの画面比から決める。 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rendering", meta=(DisplayName="反射映像の横解像度", ClampMin="128", ClampMax="2048"))
-	int32 CaptureWidth = 512;
-	/** 反射映像の最大更新回数。視認判定の頻度には影響しない。 */
+	int32 CaptureWidth = 1024;
+	/** 静止した視点での反射映像の最大更新回数。視点移動時は即時更新。視認判定の頻度には影響しない。 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rendering", meta=(DisplayName="反射映像の毎秒更新回数", ClampMin="1", ClampMax="60"))
 	float FramesPerSecond = 30.f;
 	/** 反射テクスチャを表示する鏡面用のマテリアル。 */

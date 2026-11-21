@@ -56,6 +56,12 @@ DAの数値を変更したらPlayを開始し直して確認する。`/Game/Data
 
 ## 実際の暗さ
 
+House と Demo はレベル読み込み時に、配置済みの一部の室内灯だけ照射半径を制限する。
+House の広域点光源3灯は最大20m、対象のスポット・矩形ライトは最大9m。Demo の対象4灯は最大6.5m。
+対象は `ATBRoomLighting::ApplyStageLightRanges` のレベル名・Actor名で指定する。配置を改名したときはこの対応も確認する。
+既に上限より短いライトはその値を使う。消灯・再点灯や暗所の凝視判定は従来どおり部屋単位。
+Epic のローカルライトは柔らかい影のサンプリングを4レイにする。影の解像度は `Config/DefaultScalability.ini` の設定に従う。
+
 ポストプロセスで画面を暗転させず、登録したライトそのものを消す。
 プロジェクトは既にLumen有効・Static Lighting無効。Movableライトは動的な直接光と間接光に対応する。
 参考: https://dev.epicgames.com/documentation/unreal-engine/movable-light-mobility-in-unreal-engine

@@ -283,6 +283,8 @@ USTRUCT(BlueprintType)
 struct FTBMomEventRules
 {
 	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="ママが来る！", meta=(DisplayName="試合開始後の発生禁止時間", ClampMin="0", Units="s"))
+	float InitialDelaySeconds = 60;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="ママが来る！", meta=(DisplayName="ママ到着までの秒数", ClampMin="1", Units="s"))
 	float ArrivalSeconds = 45;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="ママが来る！", meta=(DisplayName="説得に必要な連続滞在秒数", ClampMin="0.1", Units="s"))

@@ -5,7 +5,6 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Core/TBPlayerState.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -46,6 +45,7 @@ void ATBToyCharacter::UpdateAppearance(bool bToy)
 			ToyVisual->SetChildActorClass(nullptr);
 		}
 		AppliedVisual.Reset();
+		FallenSupport = {};
 		// 人間のCarryAnchor補正は専用サーバーでも必要。
 		Super::UpdateAppearance(false);
 		return;
@@ -115,16 +115,25 @@ void ATBToyCharacter::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	TBToyPresentation::Animate(ToyVisual->GetChildActor(), GetVelocity().Size2D(), IsMovementLocked());
+	const float TargetAngle = IsToyFallen() ? 90.f : 0.f;
+	FallenAngle = FMath::FInterpConstantTo(FallenAngle, TargetAngle, DeltaSeconds, 450.f);
+	if (Carrier || IsPhysicsLocked()) FallenAngle = 0;
+	ToyVisual->SetRelativeRotation(TBToyPresentation::FallRotation(ToyVisual->GetChildActor(), FallenAngle));
+	TBToyPresentation::Animate(ToyVisual->GetChildActor(), GetVelocity().Size2D(), IsMovementLocked() || FallenAngle > .01f);
+	if (FallenAngle <= .01f) FallenSupport = {};
 	if (Carrier)
 	{
 		TBToyPresentation::Grip(ToyVisual, Carrier->GetCarryGripLocation(), GripCache);
 	}
-	if (!Carrier && GetCharacterMovement()->IsMovingOnGround())
+	const auto* Movement = GetCharacterMovement();
+	const bool bFrozenOnFloor = IsGazeFrozen() && Movement->CurrentFloor.IsWalkableFloor() &&
+	    Movement->CurrentFloor.GetDistanceToFloor() <= UCharacterMovementComponent::MAX_FLOOR_DIST;
+	if (!Carrier && (Movement->IsMovingOnGround() || bFrozenOnFloor))
 	{
-		TBToyPresentation::Ground(ToyVisual, GetActorLocation().Z -
-		                                         GetCapsuleComponent()->GetScaledCapsuleHalfHeight() -
-		                                         GetCharacterMovement()->CurrentFloor.FloorDist);
+		const float FloorZ = GetActorLocation().Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight() -
+		    GetCharacterMovement()->CurrentFloor.FloorDist;
+		if (FallenAngle > .01f) TBToyPresentation::GroundFallen(ToyVisual, FloorZ, FallenSupport);
+		else TBToyPresentation::Ground(ToyVisual, FloorZ);
 	}
 }
 

@@ -14,6 +14,7 @@
 #include "Engine/TargetPoint.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/Package.h"
@@ -168,9 +169,35 @@ bool ATBBoxEscapeCourse::SafeExitPoint(FVector Position, const ATBCharacter* Toy
 	if (CourseBounds->Bounds.GetBox().Intersect(CapsuleBox) ||
 	    Box->StorageRoomBounds().ExpandBy(FMath::Max(Radius, Half)).IsInsideOrOn(InRoom)) return false;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TBCourseExit), false, Toy);
-	if (!Toy) for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It) Params.AddIgnoredActor(*It);
-	return TB::SupportsCapsule(GetWorld(), Position, Radius, Half, ECC_GameTraceChannel1, Params,
+	if (!Toy)
+	{
+		for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It) Params.AddIgnoredActor(*It);
+		// Validate the authored exit's fixed floor and clearance. Movable props can
+		// occupy it during play; actual escape keeps checking those live blockers.
+		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+			for (const auto* Part : TInlineComponentArray<UPrimitiveComponent*>(*It))
+				if (Part->Mobility == EComponentMobility::Movable && Part->IsSimulatingPhysics() &&
+				    Part->ComponentHasTag(TEXT("TBPushable"))) Params.AddIgnoredComponent(Part);
+	}
+	const bool Supported = TB::SupportsCapsule(GetWorld(), Position, Radius, Half, ECC_GameTraceChannel1, Params,
 	    Toy ? Toy->GetCharacterMovement()->GetWalkableFloorZ() : .71f);
+	if (!Supported && !Toy)
+	{
+		const auto Shape = FCollisionShape::MakeCapsule(Radius, Half);
+		TArray<FOverlapResult> Overlaps;
+		GetWorld()->OverlapMultiByChannel(Overlaps, Position, FQuat::Identity, ECC_GameTraceChannel1, Shape, Params);
+		for (const auto& Overlap : Overlaps)
+			if (const auto* Part = Overlap.Component.Get(); Part && Overlap.bBlockingHit)
+				UE_LOG(LogTemp, Display, TEXT("[BoxExitValidation] map=%s course=%s position=%s blocker=%s movable=%d simulating=%d pushable=%d"),
+				    *GetWorld()->GetMapName(), *GetName(), *Position.ToString(), *Part->GetPathName(),
+				    Part->Mobility == EComponentMobility::Movable, Part->IsSimulatingPhysics(), Part->ComponentHasTag(TEXT("TBPushable")));
+		FHitResult Floor;
+		const bool Hit = GetWorld()->SweepSingleByChannel(Floor, Position + FVector(0, 0, 1), Position - FVector(0, 0, 12),
+		    FQuat::Identity, ECC_GameTraceChannel1, Shape, Params);
+		UE_LOG(LogTemp, Display, TEXT("[BoxExitValidation] map=%s position=%s floor=%s hit=%d penetrating=%d normalZ=%.3f"),
+		    *GetWorld()->GetMapName(), *Position.ToString(), *GetNameSafe(Floor.GetComponent()), Hit, Floor.bStartPenetrating, Floor.ImpactNormal.Z);
+	}
+	return Supported;
 }
 
 bool ATBBoxEscapeCourse::Contains(const UBoxComponent* Volume, const ATBCharacter* Toy, float Margin) const
@@ -211,6 +238,7 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 	const auto* State = TB::GS(GetWorld());
 	if (!State || State->Phase != ETBPhase::Playing || State->IsPreparing())
 	{ Attempts.Reset(); return; }
+	if (State->IsIgniting()) return;
 	FString Error;
 	TArray<UPrimitiveComponent*> Supports;
 	if (!ValidateWithSupports(Error, false, Supports)) return;
