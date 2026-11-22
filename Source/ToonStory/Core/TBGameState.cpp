@@ -2,8 +2,11 @@
 
 #include "TBGameState.h"
 #include "Audio/TBAudioEvents.h"
+#include "Components/TextRenderComponent.h"
+#include "Core/TBLobbySettings.h"
 #include "Data/TBPresentationData.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/TextRenderActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
@@ -50,6 +53,18 @@ void ATBGameState::OnPropHit(UPrimitiveComponent* Part, AActor* Other, UPrimitiv
 void ATBGameState::BeginPlay()
 {
 	Super::BeginPlay();
+	if (TBLobbySettings::IsLobby(GetWorld()))
+	{
+		// 共有マップに残っている旧ロゴを、ホストと参加者それぞれの画面で隠す。
+		for (AActor* Actor : GetWorld()->PersistentLevel->Actors)
+		{
+			auto* Label = Cast<ATextRenderActor>(Actor);
+			if (!Label || Label->GetFName() != FName(TEXT("TextRenderActor_0"))) continue;
+			auto* Text = Label->GetTextRender();
+			if (Text && Text->Text.ToString() == TEXT("TOON STORY")) Text->SetVisibility(false);
+			break;
+		}
+	}
 	for (ULevel* Level : GetWorld()->GetLevels()) ConfigureStageActors(Level, GetWorld());
 	FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ATBGameState::ConfigureStageActors);
 }

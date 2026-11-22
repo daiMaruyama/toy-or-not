@@ -522,26 +522,35 @@ void ATBController::UpdateLobbyCamera(bool InLobby)
 
 void ATBController::UpdateMenuInput(bool ShowMenu)
 {
-	if (bLobbyInput != ShowMenu)
+	const auto* State = TB::GS(GetWorld());
+	const bool ShowLobbyCursor = State && State->Phase == ETBPhase::Lobby;
+	if (!bInputModeInitialized || bLobbyInput != ShowMenu || bLobbyCursor != ShowLobbyCursor)
 	{
+		const bool WasMenuOpen = bLobbyInput;
+		bInputModeInitialized = true;
 		bLobbyInput = ShowMenu;
-		bShowMouseCursor = ShowMenu;
-		bEnableClickEvents = ShowMenu;
-		SetIgnoreLookInput(ShowMenu);
-		SetIgnoreMoveInput(ShowMenu);
-		if (ShowMenu)
-			if (auto* Body = Cast<ATBCharacter>(GetPawn()); Body && Body->TBPS() && Body->TBPS()->Team == ETBTeam::Toy)
-				Body->UnCrouch(); // UI focus can consume the physical key-up; end the held fall now.
+		bLobbyCursor = ShowLobbyCursor;
+		bShowMouseCursor = ShowMenu || ShowLobbyCursor;
+		bEnableClickEvents = ShowMenu || ShowLobbyCursor;
+		if (WasMenuOpen != ShowMenu)
+		{
+			SetIgnoreLookInput(ShowMenu);
+			SetIgnoreMoveInput(ShowMenu);
+			if (ShowMenu)
+				if (auto* Body = Cast<ATBCharacter>(GetPawn()); Body && Body->TBPS() && Body->TBPS()->Team == ETBTeam::Toy)
+					Body->UnCrouch(); // UI focus can consume the physical key-up; end the held fall now.
+		}
 		ApplyMenuInputMode();
 	}
 }
 
 void ATBController::ApplyMenuInputMode()
 {
-	if (bLobbyInput)
+	if (bLobbyInput || bLobbyCursor)
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
 		SetInputMode(Mode);
 	}
 	else
