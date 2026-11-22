@@ -15,18 +15,33 @@
 #include "Data/TBPresentationData.h"
 #include "GamePlay/TBBox.h"
 #include "GamePlay/Events/TBMomArrivalZone.h"
+#include "GamePlay/Items/TBEscapeExit.h"
+#include "GamePlay/Items/TBEscapeVehicle.h"
 #include "GamePlay/TBRuleMath.h"
+#include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Canvas.h"
 #include "CanvasItem.h"
 #include "GlobalRenderResources.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "InputCoreTypes.h"
 #include "Misc/PackageName.h"
 
 static TAutoConsoleVariable<int32> CVarTBDebugHUD(TEXT("tb.DebugHUD"), 0, TEXT("Show detailed match diagnostics."));
+
+// Each escape stage has one car and one gate. Keep weak references so driving only updates
+// the projected position, and a streamed-out or replaced actor is discovered again.
+template <typename T>
+static T* ResolveEscapeGuideActor(UWorld* World, TWeakObjectPtr<T>& Cached)
+{
+	if (Cached.IsValid() && Cached->GetWorld() == World) return Cached.Get();
+	TActorIterator<T> It(World);
+	Cached = It ? *It : nullptr;
+	return Cached.Get();
+}
 
 void ATBHUD::BeginStageDraft()
 {
@@ -462,7 +477,14 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	auto* PC = &Controller;
 	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
 	const float W = Canvas->ClipX, H = Canvas->ClipY;
-	const FLinearColor Ink = TBPaper::Ink, Panel = TBPaper::Paper;
+	const float U = FMath::Min(W / 1600.f, H / 900.f);
+	const float ActionW = 222 * U, ActionH = 40 * U;
+	const float ActionX = (W - ActionW) * .5f, ActionY = H * .878f - ActionH;
+	TGuardValue<bool> SubtitleText(bDrawingMatchSubtitles, true);
+	const FLinearColor Ink = FLinearColor::FromSRGBColor(FColor(255, 249, 223));
+	const FLinearColor Gold = FLinearColor::FromSRGBColor(FColor(255, 220, 136));
+	const FLinearColor Mint = FLinearColor::FromSRGBColor(FColor(176, 228, 216));
+	const FLinearColor Alert = FLinearColor::FromSRGBColor(FColor(255, 164, 138));
 	const auto* Player = Controller.GetPlayerState<ATBPlayerState>();
 	if (Controller.ShouldHidePreparationView())
 	{
@@ -472,9 +494,9 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		    : TBText::Literal(TEXT("Canvas.Preparing"));
 		if (Controller.IsShowingEntranceApproach())
 		{
-			PaperPanel(Panel, W * .5f - 300 * S, H - 130 * S, 600 * S, 75 * S);
-			DrawText(FString::Format(TBText::Literal(TEXT("Canvas.EntranceSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}),
-			         Ink, W * .5f - 265 * S, H - 100 * S, PaperFont, 1.2f * S);
+			DrawSubtitleShade(W * .5f - 230 * S, H - 92 * S, 460 * S, 44 * S);
+			DrawFittedText(FString::Format(TBText::Literal(TEXT("Canvas.EntranceSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}),
+			    Ink, W * .5f - 218 * S, H - 76 * S, 436 * S, S, true, true);
 		}
 		else DrawText(Wait, TBPaper::Cream, W * .5f - 220 * S, H * .5f, PaperFont, 1.3f * S);
 		return;
@@ -483,16 +505,18 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	float BannerY = 128 * S;
 	auto Banner = [&](const FString& Label, FLinearColor Color)
 	{
-		PaperSign(TBPaper::Cream, W * .5f - 290 * S, BannerY, 580 * S, 42 * S);
-		DrawFittedText(Label, Color == TBPaper::Teal ? TBPaper::Ink : Color, W * .5f - 270 * S,
-		    BannerY + 16 * S, 540 * S, 1.05f * S, true, true);
-		BannerY += 52 * S;
+		const float TextScale = .9f * S;
+		float TW = 0, TH = 0;
+		GetTextSize(Label, TW, TH, HeadingFont, TextScale);
+		const float Width = FMath::Min(520 * S, TW + 38 * S);
+		const float Left = (W - Width) * .5f;
+		DrawSubtitleShade(Left, BannerY, Width, 34 * S);
+		DrawFittedText(Label, Color, Left + 12 * S, BannerY + 11 * S,
+		    Width - 24 * S, TextScale, true, true);
+		BannerY += 42 * S;
 	};
-	if (MatchState.bEscapePhase)
-		Banner(Player && Player->Team == ETBTeam::Human ? TBText::Literal(TEXT("Canvas.StopEscape")) :
-		    TBText::Literal(TEXT("Canvas.EscapeNow")), TBPaper::Teal);
 	if (MatchState.IsPreparing())
-		Banner(FString::Format(TBText::Literal(TEXT("Canvas.HideSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}), TBPaper::Accent);
+		Banner(FString::Format(TBText::Literal(TEXT("Canvas.HideSeconds")), {FMath::CeilToInt(MatchState.HideRemaining())}), Gold);
 	const bool Child = Player && Player->Team == ETBTeam::Human;
 	const auto* LocalCharacter = Controller.GetPawn<ATBCharacter>();
 	// Keep destination labels in the constrained camera Canvas, including letterboxed views.
@@ -504,14 +528,14 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	TArray<FBox2D> GuidePanels;
 	GuidePanels.Emplace(FVector2D(W * .5f - 38 * S, H * .5f - 38 * S),
 	    FVector2D(W * .5f + 38 * S, H * .5f + 38 * S));
-	if (Child && LocalCharacter && LocalCharacter->HasCarriedToy() && LocalCharacter->StoreStarted >= 0 &&
-	    IsValid(MatchState.Box) && IsValid(MatchState.Box->InteractionPoint))
-		GuidePanels.Emplace(FVector2D(W * .5f - 172 * S, H * .76f - 8 * S),
-		    FVector2D(W * .5f + 172 * S, H * .76f + 84 * S));
+	if (LocalCharacter && ((LocalCharacter->ContactItem && !LocalCharacter->IsGazeFrozen()) ||
+	    (Child && LocalCharacter->StoreStarted >= 0 && LocalCharacter->HasCarriedToy())))
+		GuidePanels.Emplace(FVector2D(ActionX - 10 * U, ActionY - 8 * U),
+		    FVector2D(ActionX + ActionW + 6 * U, ActionY + ActionH + 4 * U));
 	auto DirectionCue = [&](const FVector& Destination, const TCHAR* LabelKey, FLinearColor Color,
 	    float EdgeLane, bool bReached, const FString& Detail = FString())
 	{
-		if (!Child || !LocalCharacter || MatchState.IsPreparing() || Destination.ContainsNaN()) return;
+		if (!LocalCharacter || MatchState.IsPreparing() || Destination.ContainsNaN()) return;
 		const FVector Delta = Destination - GuideViewLocation;
 		const FVector Projected = Canvas->Project(Destination, false);
 		const bool bInFront = FVector::DotProduct(Delta, GuideViewRotation.Vector()) > 0;
@@ -525,8 +549,11 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		const bool bAnchored = bOnScreen || bVerticalEdge;
 		if (bReached && !bAnchored && Detail.IsEmpty()) return;
 		const bool bLeft = FVector::DotProduct(Delta, GuideRight) < 0;
-		const float Width = (Detail.IsEmpty() ? 82.f : 156.f) * S;
-		const float Height = (Detail.IsEmpty() ? 26.f : 38.f) * S;
+		const FString Label = TBText::String(LabelKey);
+		float LabelW = 0, LabelH = 0;
+		GetTextSize(Label, LabelW, LabelH, HeadingFont, .81f * U);
+		const float Width = Detail.IsEmpty() ? FMath::Clamp(LabelW + (bAnchored ? 20 : 41) * U, 51 * U, 126 * U) : 166 * U;
+		const float Height = (Detail.IsEmpty() ? 33.f : 46.f) * U;
 		const FVector2D Pin(Projected.X, FMath::Clamp(Projected.Y, double(GuideTop), double(H - 100 * S)));
 		const float X = bAnchored ? FMath::Clamp(float(Pin.X) - Width * .5f, 18 * S, W - Width - 18 * S) :
 		    bLeft ? 18 * S : W - Width - 18 * S;
@@ -583,30 +610,27 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 				Dot(Pin, 2.3f * S, Color);
 			}
 		}
-		RoundedPanel(TBPaper::Cream.CopyWithNewOpacity(.92f), X, Y, Width, Height, 5, 1.2f);
-		float TextX = X + 7 * S, TextWidth = Width - 14 * S;
+		DrawSubtitleShade(X, Y, Width, Height, bAnchored ? ESubtitleShade::Center : ESubtitleShade::Uniform);
+		float TextX = X + 8 * U, TextWidth = Width - 16 * U;
 		if (!bAnchored && !bReached)
 		{
-			const FVector2D Center(X + (bLeft ? 12 * S : Width - 12 * S), Y + Height * .5f);
+			const FVector2D Center(X + (bLeft ? 13 * U : Width - 13 * U), Y + Height * .5f);
 			const float Sign = bLeft ? -1.f : 1.f;
-			const FVector2D Tip = Center + FVector2D(5 * Sign, 0) * S;
-			const FVector2D Top = Center + FVector2D(-3 * Sign, -6) * S;
-			const FVector2D Bottom = Center + FVector2D(-3 * Sign, 6) * S;
-			Stroke(Top, Tip, 3 * S, Color);
-			Stroke(Tip, Bottom, 3 * S, Color);
-			Dot(Tip, 1.5f * S, Color);
-			if (bLeft) TextX += 16 * S;
-			TextWidth -= 16 * S;
+			const FVector2D Tip = Center + FVector2D(4 * Sign, 0) * U;
+			Stroke(Center + FVector2D(-2 * Sign, -5) * U, Tip, 3 * U, Color);
+			Stroke(Tip, Center + FVector2D(-2 * Sign, 5) * U, 3 * U, Color);
+			if (bLeft) TextX += 17 * U;
+			TextWidth -= 17 * U;
 		}
-		DrawFittedText(TBText::String(LabelKey), Color, TextX, Y + (Detail.IsEmpty() ? 10 : 8) * S,
-		    TextWidth, .62f * S, true, true);
+		DrawFittedText(Label, Ink, TextX, Y + (Detail.IsEmpty() ? 15 : 11) * U,
+		    TextWidth, .81f * U, true, true);
 		if (!Detail.IsEmpty())
-			DrawFittedText(Detail, Ink, X + 7 * S, Y + 25 * S, Width - 14 * S, .60f * S, false, true);
+			DrawFittedText(Detail, Ink, X + 7 * U, Y + 31 * U, Width - 14 * U, .73f * U, false, true);
 	};
 	if (const auto* Mom = ATBMomArrivalZone::FindActive(GetWorld()); Mom && !MatchState.IsPreparing())
 	{
 		const auto& Event = Mom->State;
-		const FLinearColor Warning = TBPaper::Danger;
+		const FLinearColor Warning = Alert;
 		Banner(FString::Format(TBText::Literal(TEXT("Canvas.MomSeconds")), {FMath::CeilToInt(Event.Remaining)}), Warning);
 		if (Child)
 		{
@@ -614,12 +638,12 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 			{
 				GuidePanels.Emplace(FVector2D(W * .5f - 235 * S, H * .60f),
 				    FVector2D(W * .5f + 235 * S, H * .60f + 100 * S));
-				FramePanel(W*.5f-235*S,H*.60f,470*S,100*S);
-				DrawText(FString::Format(TBText::Literal(TEXT("Canvas.Persuading")), {FString::Printf(TEXT("%.1f"), Event.Held), FString::Printf(TEXT("%.1f"), Event.RequiredHold)}),
-				         Ink,W*.5f-220*S,H*.60f+19*S,PaperFont,S);
-				DrawProgress(Event.Held/FMath::Max(.1f,Event.RequiredHold), W*.5f-220*S, H*.60f+40*S, 440*S, 40*S, TBPaper::Gold);
-				DrawText(TBText::Literal(TEXT("Canvas.PersuadePause")),
-				         Ink,W*.5f-220*S,H*.60f+86*S,PaperFont,.7f*S);
+				const float Left = W * .5f - 150 * S, Top = H * .60f;
+				DrawSubtitleShade(Left, Top, 300 * S, 70 * S);
+				DrawFittedText(FString::Format(TBText::Literal(TEXT("Canvas.Persuading")), {FString::Printf(TEXT("%.1f"), Event.Held), FString::Printf(TEXT("%.1f"), Event.RequiredHold)}),
+				    Ink, Left + 14 * S, Top + 12 * S, 272 * S, .85f * S, true);
+				DrawProgress(Event.Held / FMath::Max(.1f, Event.RequiredHold), Left + 14 * S, Top + 33 * S, 272 * S, 4 * S, Gold);
+				DrawFittedText(TBText::Literal(TEXT("Canvas.PersuadePause")), Ink, Left + 14 * S, Top + 52 * S, 272 * S, .72f * S);
 			}
 			if (LocalCharacter)
 				DirectionCue(Mom->GetActorLocation() + FVector(0, 0, 60), TEXT("Canvas.MomDestination"),
@@ -627,82 +651,85 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		}
 	}
 	// Use a short, persistent objective. World feedback and emotes never displace it.
-	const float U = FMath::Min(W / 1600.f, H / 900.f);
-	const FLinearColor SlipPaper = FLinearColor::FromSRGBColor(FColor(234, 223, 200));
-	const FLinearColor SlipInk = FLinearColor::FromSRGBColor(FColor(50, 54, 47));
-	const FLinearColor SlipEdge = FLinearColor::FromSRGBColor(FColor(76, 73, 58));
-	auto Slip = [&](float X, float Y, float Width, float Height, FLinearColor Fill, FLinearColor Edge)
-	{
-		// Only the silhouette casts a shadow. Keep the playfield visible through the paper.
-		const float Line = FMath::Max(1.f, 1.5f * U);
-		DrawRect(TBPaper::Shadow, X + Line, Y + Height, Width, Line);
-		DrawRect(TBPaper::Shadow, X + Width, Y + Line, Line, Height - Line);
-		Edge.A = .85f;
-		DrawRect(Edge, X, Y, Width, Line);
-		DrawRect(Edge, X, Y + Height - Line, Width, Line);
-		DrawRect(Edge, X, Y + Line, Line, Height - 2 * Line);
-		DrawRect(Edge, X + Width - Line, Y + Line, Line, Height - 2 * Line);
-		DrawSmoothPolygon({{X + Line, Y + Line}, {X + Width - Line, Y + Line},
-		    {X + Width - Line, Y + Height - Line}, {X + Line, Y + Height - Line}}, Fill.CopyWithNewOpacity(.82f), true);
-	};
-	const FLinearColor TeamColor = FLinearColor::FromSRGBColor(Child ? FColor(54, 91, 86) : FColor(133, 75, 52));
-	const float GoalX = 18 * U, GoalY = 22 * U;
-	Slip(GoalX, GoalY, 282 * U, 62 * U, SlipPaper, SlipEdge);
-	DrawRect(TeamColor, GoalX, GoalY, 5 * U, 62 * U);
-	DrawFittedText(TBText::String(Child ? TEXT("Canvas.Human") : TEXT("Canvas.Toy")), TeamColor,
-	    GoalX + 15 * U, GoalY + 18 * U, 256 * U, .78f * U, true);
-	const TCHAR* Objective = TEXT("Canvas.HumanObjective");
+	const TCHAR* Objective = MatchState.bEscapePhase ? TEXT("Canvas.StopEscape") : TEXT("Canvas.HumanObjective");
 	if (!Child)
 	{
 		if (Player && Player->ToyState == ETBToyState::Boxed)
 			Objective = TEXT("Canvas.BoxClimb");
 		else if (MatchState.IsPreparing())
 			Objective = TEXT("Canvas.HideObjective");
+		else if (MatchState.bEscapePhase)
+			Objective = LocalCharacter && IsValid(LocalCharacter->EscapeVehicle)
+			    ? TEXT("Canvas.ExitObjective") : TEXT("Canvas.VehicleObjective");
 		else
-			Objective = MatchState.bEscapePhase ? TEXT("Canvas.VehicleObjective") : TEXT("Canvas.ToyObjective");
+			Objective = TEXT("Canvas.ToyObjective");
 	}
-	DrawFittedText(TBText::String(Objective), SlipInk, GoalX + 15 * U, GoalY + 40 * U, 256 * U, U, true);
+	const FString Goal = TBText::String(Objective);
+	float GoalTextW = 0, GoalTextH = 0;
+	GetTextSize(Goal, GoalTextW, GoalTextH, HeadingFont, 1.04f * U);
+	const float GoalX = 28 * U, GoalY = H * .032f;
+	const float GoalW = FMath::Clamp(GoalTextW + 32 * U, 200 * U, 384 * U);
+	const FLinearColor TeamColor = Child ? Mint : FLinearColor::FromSRGBColor(FColor(255, 209, 136));
+	DrawSubtitleShade(GoalX - 8 * U, GoalY - 3 * U, GoalW + 16 * U, 53 * U, ESubtitleShade::Uniform);
+	DrawFittedText(TBText::String(Child ? TEXT("Canvas.Human") : TEXT("Canvas.Toy")), TeamColor,
+	    GoalX + 12 * U, GoalY + 9 * U, GoalW - 28 * U, .73f * U, true);
+	DrawFittedText(Goal, Ink, GoalX + 12 * U, GoalY + 30 * U, GoalW - 26 * U, 1.04f * U, true);
 
 	const int32 Seconds = FMath::Max(0, FMath::CeilToInt(MatchState.Remaining()));
 	const bool Urgent = Seconds <= 10;
-	const float ClockX = W * .5f - 92 * U;
-	const FLinearColor ClockFace = FLinearColor::FromSRGBColor(Urgent ? FColor(241, 196, 143) : FColor(226, 213, 181));
-	Slip(ClockX, 21 * U, 184 * U, 62 * U, ClockFace, Urgent ? TBPaper::Accent : SlipEdge);
-	DrawArt(TEXT("Icon_Hourglass"), ClockX + 12 * U, 35 * U, 29 * U, 34 * U);
 	const FString Clock = FString::Printf(TEXT("%02d:%02d"), Seconds / 60, Seconds % 60);
-	DrawFittedText(Clock, Urgent ? TBPaper::Danger : SlipInk, ClockX + 46 * U, 45 * U, 129 * U, 2.35f * U, true, true);
+	const float ClockX = W * .5f - 55 * U, ClockY = H * .027f;
+	DrawSubtitleShade(ClockX - 17 * U, ClockY - 5 * U, 144 * U, 44 * U);
+	DrawArt(TEXT("Icon_Hourglass"), ClockX + 5 * U, ClockY + 6 * U, 18 * U, 21 * U);
+	float ClockW = 0, ClockH = 0;
+	GetTextSize(Clock, ClockW, ClockH, NumericFont, 1.62f * U);
+	const float Fit = FMath::Min(1.f, 86 * U / FMath::Max(1.f, ClockW));
+	DrawText(Clock, Urgent ? Alert : Ink, ClockX + 30 * U, ClockY + 16 * U + (16.2f * U - ClockH * .5f) * Fit,
+	    NumericFont, 1.62f * U * Fit);
 
-	const FLinearColor TeamCountInk = FLinearColor::FromSRGBColor(FColor(76, 98, 91));
-	const float CountX = W - 206 * U, CountY = 19 * U;
-	Slip(CountX, CountY, 186 * U, 134 * U, SlipPaper, SlipEdge);
+	// Size the narrow counter to its widest live row (including custom NPC counts).
+	const int32 ToyTotal = MatchState.Settings.Toys + MatchState.Settings.NPCToys;
+	const float CountScale = 1.18f * U, TotalScale = .68f * U;
+	auto TallyWidth = [&](int32 Current, int32 Total)
+	{
+		float CurrentW = 0, TotalW = 0, TextH = 0;
+		GetTextSize(FString::FromInt(Current), CurrentW, TextH, NumericFont, CountScale);
+		GetTextSize(FString::Printf(TEXT("/ %d"), Total), TotalW, TextH, PaperFont, TotalScale);
+		return 43 * U + CurrentW + TotalW;
+	};
+	const float CountW = FMath::Max(TallyWidth(MatchState.Collected, MatchState.Settings.RequiredItems),
+	    TallyWidth(MatchState.BoxedCount, ToyTotal));
+	const float CountX = W - 27 * U - CountW, CountY = H * .032f;
 	auto Tally = [&](FName Icon, int32 Current, int32 Total, float RowY)
 	{
-		DrawArt(Icon, CountX + 12 * U, RowY + 11 * U, 45 * U, 45 * U);
+		DrawArt(Icon, CountX + 3 * U, RowY, 23 * U, 23 * U);
 		const FString Value = FString::FromInt(Current);
 		float ValueWidth = 0, ValueHeight = 0;
-		GetTextSize(Value, ValueWidth, ValueHeight, HeadingFont, 1.9f * U);
-		const float ValueX = CountX + 67 * U;
-		DrawText(Value, SlipInk, ValueX, RowY + 28 * U, HeadingFont, 1.9f * U);
-		const float TotalX = ValueX + ValueWidth + 4 * U;
-		DrawFittedText(FString::Printf(TEXT("/ %d"), Total), TeamCountInk, TotalX, RowY + 40 * U,
-		    CountX + 177 * U - TotalX, 1.26f * U);
+		GetTextSize(Value, ValueWidth, ValueHeight, NumericFont, CountScale);
+		const float ValueX = CountX + 32 * U;
+		DrawText(Value, Ink, ValueX, RowY + 12 * U, NumericFont, CountScale);
+		const float TotalX = ValueX + ValueWidth + 5 * U;
+		DrawFittedText(FString::Printf(TEXT("/ %d"), Total), FLinearColor::FromSRGBColor(FColor(227, 224, 200)), TotalX, RowY + 18 * U,
+		    CountX + CountW - TotalX, TotalScale);
 	};
-	Tally(TEXT("Icon_BatteryPickup"), MatchState.Collected, MatchState.Settings.RequiredItems, CountY);
+	DrawSubtitleShade(CountX - 12 * U, CountY - 4 * U, CountW + 22 * U, 65 * U, ESubtitleShade::Uniform);
+	Tally(TEXT("Icon_BatteryPickup"), MatchState.Collected, MatchState.Settings.RequiredItems, CountY + 2 * U);
 	Tally(MatchState.BoxedCount > 0 ? TEXT("Icon_ToyBoxFull") : TEXT("Icon_ToyBoxEmpty"), MatchState.BoxedCount,
-	    MatchState.Settings.Toys + MatchState.Settings.NPCToys, CountY + 67 * U);
-	if (auto* Character = Cast<ATBCharacter>(Controller.GetPawn()); Character && Character->ContactItem && !Character->IsGazeFrozen())
+	    ToyTotal, CountY + 33 * U);
+	auto InteractionProgress = [&](const TCHAR* LabelKey, float Progress)
 	{
-		FramePanel(W * .5f - 164 * S, H * .76f, 328 * S, 76 * S);
-		DrawProgress(Character->ItemProgress, W * .5f - 146 * S, H * .76f + 40 * S, 292 * S, 27 * S, TBPaper::Gold);
-		DrawText(TBText::Literal(TEXT("Canvas.Collecting")), Ink,
-		         W * .5f - 146 * S, H * .76f + 18 * S, PaperFont, .95f * S);
-	}
+		DrawSubtitleShade(ActionX - 23 * U, ActionY - 6 * U, ActionW + 46 * U, ActionH + 12 * U);
+		DrawFittedText(TBText::String(LabelKey), Ink, ActionX + 12 * U, ActionY + 12 * U, ActionW - 24 * U, .83f * U, true);
+		DrawProgress(Progress, ActionX + 12 * U, ActionY + 29 * U, ActionW - 24 * U, 4 * U, Gold);
+	};
+	if (LocalCharacter && LocalCharacter->ContactItem && !LocalCharacter->IsGazeFrozen())
+		InteractionProgress(TEXT("Canvas.Collecting"), LocalCharacter->ItemProgress);
 	if (Player && Player->Team == ETBTeam::Toy && MatchState.Box && MatchState.Box->Rescuers > 0)
 	{
-		PaperPanel(TBPaper::Paper, W * .5f - 150 * S, BannerY, 300 * S, 54 * S);
+		DrawSubtitleShade(W * .5f - 150 * S, BannerY, 300 * S, 54 * S);
 		DrawFittedText(FString::Format(TBText::Literal(TEXT("Canvas.Rescuing")), {FMath::RoundToInt(MatchState.Box->RescueProgress * 100)}), Ink,
 		    W * .5f - 134 * S, BannerY + 14 * S, 268 * S, 1.05f * S, false, true);
-		DrawProgress(MatchState.Box->RescueProgress, W * .5f - 130 * S, BannerY + 38 * S, 260 * S, 7 * S, TBPaper::Teal);
+		DrawProgress(MatchState.Box->RescueProgress, W * .5f - 130 * S, BannerY + 38 * S, 260 * S, 4 * S, Mint);
 	}
 	if (auto* Character = Cast<ATBCharacter>(Controller.GetPawn());
 	    Child && Character && !MatchState.IsPreparing() && Character->HasCarriedToy() &&
@@ -720,27 +747,44 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		const FString Prompt = !Storing && NearBox
 		    ? FString::Format(TBText::Literal(TEXT("Canvas.StorePrompt")), {*InteractKey, FMath::RoundToInt(Duration)})
 		    : FString();
-		DirectionCue(BoxLocation + FVector(0, 0, 60), TEXT("Canvas.BoxDestination"), TBPaper::HumanBlue,
+		DirectionCue(BoxLocation + FVector(0, 0, 60), TEXT("Canvas.BoxDestination"), Mint,
 		    .52f, NearBox, Prompt);
-		if (Storing)
+		if (Storing) InteractionProgress(TEXT("Canvas.StoreProgress"), Elapsed / Duration);
+	}
+	if (MatchState.bEscapePhase && !MatchState.IsPreparing() && Player && Player->Team == ETBTeam::Toy &&
+	    Player->ToyState == ETBToyState::Free && LocalCharacter && !LocalCharacter->Carrier)
+	{
+		if (IsValid(LocalCharacter->EscapeVehicle))
 		{
-			FramePanel(W * .5f - 164 * S, H * .76f, 328 * S, 76 * S);
-			DrawProgress(Elapsed / Duration, W * .5f - 146 * S, H * .76f + 40 * S, 292 * S, 27 * S, TBPaper::Gold);
-			DrawFittedText(TBText::String(TEXT("Canvas.StoreProgress")), Ink, W * .5f - 146 * S,
-			    H * .76f + 18 * S, 292 * S, .95f * S);
+			const auto* Exit = ResolveEscapeGuideActor(GetWorld(), EscapeGuideExit);
+			if (Exit && IsValid(Exit->ExitArea))
+				DirectionCue(Exit->ExitArea->GetComponentLocation(), TEXT("Canvas.ExitDestination"),
+				    Gold, .52f, false);
+		}
+		else
+		{
+			const auto* Car = ResolveEscapeGuideActor(GetWorld(), EscapeGuideVehicle);
+			if (Car && IsValid(Car->BoardingArea))
+				DirectionCue(Car->BoardingArea->GetComponentLocation(), TEXT("Canvas.VehicleDestination"),
+				    Gold, .52f, false);
 		}
 	}
 	if (Controller.bStuckHint)
 	{
-		DrawFittedText(TBText::Literal(TEXT("Canvas.StuckHelp")), TBPaper::Accent, 330 * S, H * .65f, W - 360 * S, S);
+		DrawFittedText(TBText::Literal(TEXT("Canvas.StuckHelp")), Gold, 330 * S, H * .65f, W - 360 * S, S);
 	}
 	if (!Controller.Notice.IsEmpty())
 	{
-		PaperPanel(TBPaper::Cream, W - 450 * S, H - 155 * S, 426 * S, 70 * S);
-		DrawFittedText(TBText::TranslateNotice(Controller.Notice).Left(80), TBPaper::Ink, W - 428 * S, H - 132 * S, 382 * S, .85f * S);
+		const FString Label = TBText::TranslateNotice(Controller.Notice);
+		float TW = 0, TH = 0;
+		GetTextSize(Label, TW, TH, PaperFont, .84f * S);
+		const float Width = FMath::Min(424 * S, TW + 30 * S);
+		const float X = W - Width - 20 * S, Y = H - 72 * S;
+		DrawSubtitleShade(X, Y, Width, 38 * S, ESubtitleShade::Uniform);
+		DrawFittedText(Label, Ink, X + 12 * S, Y + 14 * S, Width - 24 * S, .84f * S);
 	}
-	DrawRect(Ink, W * .5f - 3 * S, H * .5f - 1 * S, 6 * S, 2 * S);
-	DrawRect(Ink, W * .5f - 1 * S, H * .5f - 3 * S, 2 * S, 6 * S);
+	DrawRect(TBPaper::PrintInk, W * .5f - 3 * S, H * .5f - 1 * S, 6 * S, 2 * S);
+	DrawRect(TBPaper::PrintInk, W * .5f - 1 * S, H * .5f - 3 * S, 2 * S, 6 * S);
 	if (CVarTBDebugHUD.GetValueOnGameThread() != 0)
 	{
 		DrawDebugHUD();
@@ -753,6 +797,28 @@ void ATBHUD::BeginPlay()
 	PaperFont = TBPaper::Font(this);
 	HeadingFont = TBPaper::Font(this, TBPaper::EFontRole::Heading);
 	NumericFont = TBPaper::Font(this, TBPaper::EFontRole::Numeric);
+	// Feather the background behind centered subtitles such as the clock and action progress.
+	constexpr int32 MaskSize = 64;
+	TArray64<uint8> MaskPixels;
+	MaskPixels.SetNumUninitialized(MaskSize * MaskSize * 4);
+	for (int32 Y = 0; Y < MaskSize; ++Y)
+	{
+		for (int32 X = 0; X < MaskSize; ++X)
+		{
+			const FVector2D Position(2.f * X / (MaskSize - 1) - 1.f, 2.f * Y / (MaskSize - 1) - 1.f);
+			const float Opacity = 1.f - FMath::SmoothStep(.2f, 1.f, float(Position.Size()));
+			const int32 Pixel = 4 * (Y * MaskSize + X);
+			MaskPixels[Pixel] = MaskPixels[Pixel + 1] = MaskPixels[Pixel + 2] = 255;
+			MaskPixels[Pixel + 3] = FMath::RoundToInt(255 * Opacity);
+		}
+	}
+	MatchSubtitleMask = UTexture2D::CreateTransient(MaskSize, MaskSize, PF_B8G8R8A8, NAME_None, MaskPixels);
+	if (MatchSubtitleMask)
+	{
+		MatchSubtitleMask->Filter = TF_Bilinear;
+		MatchSubtitleMask->AddressX = MatchSubtitleMask->AddressY = TA_Clamp;
+		MatchSubtitleMask->UpdateResource();
+	}
 	// A single filtered tile draws the print grain at any screen size without per-dot draw calls.
 	TArray64<uint8> Dot;
 	constexpr int32 Side = 16;
@@ -778,10 +844,9 @@ void ATBHUD::BeginPlay()
 	    TEXT("Tape_Cream"), TEXT("Tag_Toy"), TEXT("Tag_Human"),
 	    TEXT("Tag_Any"), TEXT("Burst_Yellow"), TEXT("Burst_Teal"), TEXT("TitleLogo"),
 	    TEXT("PauseReset"), TEXT("PauseResume"), TEXT("PausePlayers"),
-	    TEXT("Progress_Yellow"), TEXT("Progress_Track"),
 	    TEXT("Button_Gear"), TEXT("Button_Leave"), TEXT("Mark_TriangleBrown"), TEXT("Mark_TriangleYellow"), TEXT("Label_You"),
 	    TEXT("Frame_SquareBrown"), TEXT("Frame_SquareLavender"), TEXT("Gauge_Green"), TEXT("Gauge_Orange"), TEXT("Gauge_Gray"),
-	    TEXT("Frame_Settings"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")};
+	    TEXT("StagePreview_Demo"), TEXT("StagePreview_House")};
 	for (const TCHAR* Name : Names)
 	{
 		const FString Asset = FString::Printf(TEXT("T_UI_%s"), Name);
@@ -805,6 +870,11 @@ void ATBHUD::DrawText(const FString& Text, FLinearColor Color, float X, float Y,
 	FCanvasTextItem Item(FVector2D(X, Y - 10.f * Scale), FText::FromString(Text),
 	    FSlateFontInfo(Face, RasterPoints), Color);
 	Item.Scale = FVector2D(Points / RasterPoints);
+	if (bDrawingMatchSubtitles)
+	{
+		const float Offset = FMath::Max(1.f, FMath::Min(Canvas->ClipX / 1600.f, Canvas->ClipY / 900.f));
+		Item.EnableShadow(FLinearColor(.006f, .012f, .01f, .95f), FVector2D(Offset, Offset));
+	}
 	Item.bOutlined = Outlined;
 	Item.OutlineColor = TBPaper::Ink.CopyWithNewOpacity(Color.A);
 	Canvas->DrawItem(Item);
@@ -908,32 +978,9 @@ void ATBHUD::DrawButton(FName Id, const FString& Label, float X, float Y, float 
 
 void ATBHUD::DrawProgress(float Value, float X, float Y, float W, float H, FLinearColor Color)
 {
-	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	if (H >= 18 * S)
-	{
-		const auto* Track = ArtTextures.Find(TEXT("Progress_Track"));
-		const auto* Gold = ArtTextures.Find(TEXT("Progress_Yellow"));
-		if (Track && *Track && Gold && *Gold)
-		{
-			const float Scale = FMath::Min(W / 293.f, H / 27.f);
-			const float PX = X + (W - 293 * Scale) * .5f, PY = Y + (H - 27 * Scale) * .5f;
-			DrawTexture(Track->Get(), PX, PY, 293 * Scale, 27 * Scale, 0, 0, 1, 1);
-			const float Fraction = FMath::Clamp(Value, 0.f, 1.f);
-			if (Fraction > 0.f)
-				DrawTexture(Gold->Get(), PX + 5 * Scale, PY + 5 * Scale, 283 * Scale * Fraction, 17 * Scale,
-				    0, 0, Fraction, 1);
-			return;
-		}
-	}
-	const float Inset = FMath::Min(2.f * S, H * .2f);
-	DrawRect(TBPaper::Outline, X, Y, W, H);
-	DrawRect(FLinearColor(.80f, .77f, .68f), X + Inset, Y + Inset, W - 2 * Inset, H - 2 * Inset);
-	const float Fill = FMath::Clamp(Value, 0.f, 1.f) * (W - 2 * Inset);
-	if (Fill > 0.f)
-	{
-		DrawRect(Color, X + Inset, Y + Inset, Fill, H - 2 * Inset);
-		DrawRect(FLinearColor(1, 1, 1, .24f), X + Inset, Y + Inset, Fill, (H - 2 * Inset) * .3f);
-	}
+	DrawRect(FLinearColor::FromSRGBColor(FColor(227, 230, 204, 122)), X, Y, W, H);
+	const float Fill = FMath::Clamp(Value, 0.f, 1.f) * W;
+	if (Fill > 0.f) DrawRect(Color, X, Y, Fill, H);
 }
 
 void ATBHUD::PaperPanel(FLinearColor Tint, float X, float Y, float W, float H)
@@ -965,33 +1012,13 @@ void ATBHUD::PaperPanel(FLinearColor Tint, float X, float Y, float W, float H)
 	Layer(Tint, X + Border, Y + Border, W - 2 * Border, H - 2 * Border);
 }
 
-void ATBHUD::DrawSlicedArt(UTexture2D* Texture, float X, float Y, float W, float H, float Edge,
-                          FVector2D UVEdge, FLinearColor Tint)
+void ATBHUD::DrawSubtitleShade(float X, float Y, float W, float H, ESubtitleShade Shade)
 {
-	Edge = FMath::Min(Edge, .5f * FMath::Min(W, H));
-	const float PX[] = {X, X + Edge, X + W - Edge, X + W};
-	const float PY[] = {Y, Y + Edge, Y + H - Edge, Y + H};
-	const double U[] = {0, UVEdge.X, 1 - UVEdge.X, 1};
-	const double V[] = {0, UVEdge.Y, 1 - UVEdge.Y, 1};
-	for (int32 Row = 0; Row < 3; ++Row)
-		for (int32 Col = 0; Col < 3; ++Col)
-			DrawTexture(Texture, PX[Col], PY[Row], PX[Col + 1] - PX[Col], PY[Row + 1] - PY[Row],
-			    U[Col], V[Row], U[Col + 1] - U[Col], V[Row + 1] - V[Row], Tint);
-}
-
-void ATBHUD::FramePanel(float X, float Y, float W, float H)
-{
-	const auto* Frame = ArtTextures.Find(TEXT("Frame_Settings"));
-	if (!Frame || !*Frame)
-	{
-		PaperPanel(TBPaper::Cream, X, Y, W, H);
-		return;
-	}
-	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	const float Edge = FMath::Min(24.f * S, FMath::Min(W, H) * .25f);
-	const FVector2D UVEdge(.25, .25);
-	DrawSlicedArt(Frame->Get(), X + 3 * S, Y + 5 * S, W, H, Edge, UVEdge, TBPaper::Shadow);
-	DrawSlicedArt(Frame->Get(), X, Y, W, H, Edge, UVEdge);
+	if (W <= 0.f || H <= 0.f) return;
+	if (Shade == ESubtitleShade::Uniform)
+		DrawRect(FLinearColor::FromSRGBColor(FColor(16, 35, 32, 66)), X, Y, W, H);
+	else if (MatchSubtitleMask)
+		DrawTexture(MatchSubtitleMask, X, Y, W, H, 0.f, 0.f, 1.f, 1.f, FLinearColor::FromSRGBColor(FColor(16, 35, 32, 198)));
 }
 
 void ATBHUD::PaperSign(FLinearColor Fill, float X, float Y, float W, float H)

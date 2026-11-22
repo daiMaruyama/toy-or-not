@@ -56,8 +56,6 @@ private:
 	UPROPERTY(Transient)
 	TMap<FName, TObjectPtr<class UTexture2D>> ArtTextures;
 	void DrawArt(FName Name, float X, float Y, float W, float H, FLinearColor Tint = FLinearColor::White);
-	void DrawSlicedArt(UTexture2D* Texture, float X, float Y, float W, float H, float Edge,
-	                   FVector2D UVEdge, FLinearColor Tint = FLinearColor::White);
 	void DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
 	                bool Enabled = true, bool Selected = false, bool Destructive = false);
 	void DrawCheck(float X, float Y, float Size, FLinearColor Color);
@@ -65,7 +63,11 @@ private:
 	void DrawFittedText(const FString& Text, FLinearColor Color, float X, float Y, float Width, float Scale,
 	                    bool Heading = false, bool Center = false, bool Outlined = false);
 	void PaperPanel(FLinearColor Tint, float X, float Y, float W, float H);
-	void FramePanel(float X, float Y, float W, float H);
+	enum class ESubtitleShade : uint8 { Center, Uniform };
+	UPROPERTY(Transient)
+	TObjectPtr<class UTexture2D> MatchSubtitleMask;
+	bool bDrawingMatchSubtitles = false;
+	void DrawSubtitleShade(float X, float Y, float W, float H, ESubtitleShade Shade = ESubtitleShade::Center);
 	void PaperSign(FLinearColor Fill, float X, float Y, float W, float H);
 	void DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color, bool ShadePaper = false);
 	void RoundedPanel(FLinearColor Fill, float X, float Y, float W, float H, float Radius = 24.f,
@@ -75,6 +77,8 @@ private:
 	              bool ScalePosition = false, bool Outlined = false);
 	void DrawResults(const class ATBGameState& MatchState);
 	void DrawMatch(const class ATBGameState& MatchState, class ATBController& Controller);
+	TWeakObjectPtr<class ATBEscapeVehicle> EscapeGuideVehicle;
+	TWeakObjectPtr<class ATBEscapeExit> EscapeGuideExit;
 	void DrawLobby();
 	void DrawRoomPanel(float X, float Y, float W, float H, float Unit, FLinearColor Fill);
 	void DrawRoomButton(FName Id, const FString& Caption, float X, float Y, float W, float H, float Unit,

@@ -36,6 +36,8 @@
 #include "GamePlay/TBBoxEscapeCourse.h"
 #include "GamePlay/TBDummyToy.h"
 #include "GamePlay/Events/TBMomArrivalZone.h"
+#include "GamePlay/Items/TBEscapeExit.h"
+#include "GamePlay/Items/TBEscapeVehicle.h"
 #include "Input/TBKeyLabels.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -135,6 +137,7 @@ namespace
 		{
 			RestoreTitleButton();
 			RestoreChat();
+			ClearEscapeReview();
 			RestoreNavigation();
 			RestoreStorage();
 			if (Options.IsValid()) Options->Dismiss();
@@ -205,7 +208,8 @@ namespace
 				Test->AddError(TEXT("UI fixture unexpectedly initiated travel; refusing misleading captures."));
 				return true;
 			}
-			if (Playing && ((Step >= 9 && Step <= 15) || (Step >= 19 && Step <= 22) || (Step >= 24 && Step <= 44)))
+			if (Playing && ((Step >= 9 && Step <= 15) || (Step >= 19 && Step <= 22) || (Step >= 24 && Step <= 44) ||
+			    (Step >= 48 && Step <= 50)))
 			{
 				Playing->Hold(State->GetServerWorldTimeSeconds() + (Step == 19 ? 10 : 187));
 				if (Step == 12)
@@ -231,7 +235,7 @@ namespace
 			// after the opening tick. Keep this fixture open through the capture frame.
 			if (!bTitle && Step == 4 && PC.IsValid()) PC->OpenChat();
 			if (TitleSlateButton.IsValid() && !HoldTitleButton()) return true;
-			if (bOverviewActive) HoldOverview();
+			if (bOverviewActive && !(ReviewCar.IsValid() && Body.IsValid() && Body->EscapeVehicle == ReviewCar.Get())) HoldOverview();
 			// Keep the real replicated start time at the selected progress while rendering;
 			// screenshot latency must not turn the half-full sample into a finished attempt.
 			if (!bTitle && Step >= 40 && Step <= 42 && Body.IsValid())
@@ -362,6 +366,21 @@ namespace
 				        Player->Team == ETBTeam::Toy && Player->ToyState == ETBToyState::Boxed &&
 				        (ATBBoxEscapeCourse::Find(World.Get(), State->Box) != nullptr) == (Step == 38))) return true;
 				if (!bTitle && Step >= 40 && Step <= 44 && !CheckStorage()) return true;
+				if (!bTitle && Step >= 48 && Step <= 50)
+				{
+					const bool bBoarded = Step != 48;
+					if (!Test->TestTrue(TEXT("Escape guide capture uses the current toy's replicated boarding state"),
+					    ReviewCar.IsValid() && ReviewExit.IsValid() && Body.IsValid() && State->bEscapePhase &&
+					    Player->Team == ETBTeam::Toy && Player->ToyState == ETBToyState::Free &&
+					    Body->EscapeVehicle.Get() == (bBoarded ? ReviewCar.Get() : nullptr))) return true;
+					const FVector Target = bBoarded ? ReviewExit->GetActorLocation() : ReviewCar->GetActorLocation();
+					FVector2D Screen;
+					const float Width = GEngine->GameViewport->Viewport->GetSizeXY().X;
+					if (!Test->TestTrue(TEXT("The photographed target is on the requested side of the actual camera"),
+					    PC->ProjectWorldLocationToScreen(Target, Screen) &&
+					    (Step == 48 ? Screen.X < 0 : Step == 49 ? Screen.X > Width : Screen.X > Width * .2f && Screen.X < Width * .8f)))
+						return true;
+				}
 				if (!bTitle && (Step == 45 || Step == 46) &&
 				    !Test->TestTrue(TEXT("Result capture shows the local winner after the reveal"),
 				        State->Phase == ETBPhase::Results && PC->IsResultShown() && Body.IsValid() &&
@@ -398,6 +417,8 @@ namespace
 			else if (!bTitle && Step == 8) Step = 23;
 			else if (!bTitle && Step == 23) Step = 9;
 			else if (!bTitle && Step == 22) Step = 24;
+			else if (!bTitle && Step == 44) Step = 48;
+			else if (!bTitle && Step == 50) Step = 45;
 			else ++Step;
 			if (bRosterOnly && Step == 3) Step = 18;
 			else if (bRosterOnly && Step == 19) return true;
@@ -411,6 +432,14 @@ namespace
 		// Each screenshot has its own deadline so a long series can run at native display resolution.
 		static constexpr double CaptureTimeout = 60.;
 		float StorageFraction() const { return Step == 40 ? 0.f : Step == 41 ? .5f : .95f; }
+
+		void ClearEscapeReview()
+		{
+			if (ReviewCar.IsValid()) ReviewCar->Destroy();
+			if (ReviewExit.IsValid()) ReviewExit->Destroy();
+			ReviewCar.Reset();
+			ReviewExit.Reset();
+		}
 
 		void RestoreStorage()
 		{
@@ -1295,8 +1324,13 @@ namespace
 				Name = TEXT("64-storage-complete");
 				break;
 			case 45:
+				ClearEscapeReview();
 				RestoreNavigation();
 				RestoreStorage();
+				Player->Team = ETBTeam::Human;
+				State->bEscapePhase = false;
+				PC->ClientPreparationRole(State->HidePreparation.Round, Player->Team);
+				Body->ApplyState();
 				State->Phase = ETBPhase::Results;
 				State->Winner = ETBWinner::Humans;
 				State->ResultStyle = ETBResultStyle::None;
@@ -1310,6 +1344,53 @@ namespace
 				State->Winner = ETBWinner::Toys;
 				Body->ApplyState();
 				Name = TEXT("66-results-local-toy-winner");
+				break;
+			case 48:
+			{
+				RestoreNavigation();
+				RestoreStorage();
+				RestoreOverview();
+				Player->Team = ETBTeam::Toy;
+				Player->ToyState = ETBToyState::Free;
+				State->bEscapePhase = true;
+				PC->ClientPreparationRole(State->HidePreparation.Round, Player->Team);
+				if (!BeginOverview()) return false;
+				FActorSpawnParameters Spawn;
+				Spawn.ObjectFlags |= RF_Transient;
+				Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+				const FVector Left = OverviewLocation + OverviewRotation.RotateVector(FVector(700, -3000, 0));
+				const FVector Right = OverviewLocation + OverviewRotation.RotateVector(FVector(700, 3000, 0));
+				ReviewCar = World->SpawnActor<ATBEscapeVehicle>(Left, FRotator::ZeroRotator, Spawn);
+				ReviewExit = World->SpawnActor<ATBEscapeExit>(Right, FRotator::ZeroRotator, Spawn);
+				if (!Test->TestNotNull(TEXT("Transient escape car"), ReviewCar.Get()) ||
+				    !Test->TestNotNull(TEXT("Transient escape gate"), ReviewExit.Get())) return false;
+				ReviewCar->SetActorTickEnabled(false);
+				ReviewExit->SetActorTickEnabled(false);
+				Name = TEXT("67-escape-car-left");
+				break;
+			}
+			case 49:
+			{
+				const FVector Forward = FRotator(0, OverviewRotation.Yaw, 0).Vector();
+				const FVector AboveFloor = OverviewLocation + Forward * 350;
+				FCollisionQueryParams Query(SCENE_QUERY_STAT(UIReviewEscapeFloor), false, Body.Get());
+				FHitResult Floor;
+				if (!Test->TestTrue(TEXT("Escape car stands on an actual room surface"),
+				    World->LineTraceSingleByChannel(Floor, AboveFloor, AboveFloor - FVector(0, 0, 4000), ECC_Visibility, Query)))
+					return false;
+				ReviewCar->SetActorLocationAndRotation(Floor.ImpactPoint + FVector(0, 0, 20),
+				    FRotator(0, OverviewRotation.Yaw, 0), false, nullptr, ETeleportType::TeleportPhysics);
+				if (!Test->TestTrue(TEXT("Toy boards through the live escape vehicle API"), ReviewCar->Board(Body.Get()))) return false;
+				PC->SetControlRotation(FRotator(-8, OverviewRotation.Yaw, 0));
+				ReviewExit->SetActorLocation(ReviewCar->GetActorLocation() +
+				    PC->GetControlRotation().RotateVector(FVector(700, 3000, 0)));
+				Name = TEXT("68-escape-gate-right");
+				break;
+			}
+			case 50:
+				ReviewExit->SetActorLocation(ReviewCar->GetActorLocation() +
+				    FRotator(0, PC->GetControlRotation().Yaw, 0).RotateVector(FVector(900, 100, 55)));
+				Name = TEXT("69-escape-gate-visible");
 				break;
 			default:
 				return false;
@@ -1326,6 +1407,8 @@ namespace
 		TWeakObjectPtr<ATBDummyToy> NavigationDummy, OldCarriedDummy;
 		TWeakObjectPtr<ATBMomArrivalZone> NavigationMom;
 		TWeakObjectPtr<ATBCharacter> OldCarriedToy;
+		TWeakObjectPtr<ATBEscapeVehicle> ReviewCar;
+		TWeakObjectPtr<ATBEscapeExit> ReviewExit;
 		TWeakObjectPtr<UCameraComponent> ReviewCamera;
 		TWeakObjectPtr<UTBMovement> OverviewMovement;
 		TWeakObjectPtr<AActor> OldViewTarget;

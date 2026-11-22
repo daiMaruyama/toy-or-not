@@ -216,7 +216,6 @@ FString TBText::TranslateNotice(const FString& Source)
 		{TEXT(""), TEXT(" 準備をやり直してください。"), TEXT("Notice.RetryPreparation"), false, true},
 		{TEXT(""), TEXT(" 元の位置へ安全に戻せませんでした。ロビーへ戻ってください。"), TEXT("Notice.ReturnLobby"), false, true},
 		{TEXT("Every player must press "), TEXT(" to be ready."), TEXT("Notice.ReadyRequired")},
-		{TEXT("Items collect automatically while touching. "), TEXT(" is for rescue."), TEXT("Notice.AutoCollect")},
 	};
 	for (const auto& Pattern : Patterns)
 	{

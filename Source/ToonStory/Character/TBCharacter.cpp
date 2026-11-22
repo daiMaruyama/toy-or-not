@@ -1138,16 +1138,9 @@ void ATBCharacter::ServerInteract_Implementation()
 			TB::Notice(this, TEXT("No toy in reach."));
 		}
 	}
-	else
+	else if (Box && Box->InRange(this) && Box->HasPrisoners())
 	{
-		if (Box && Box->InRange(this) && Box->HasPrisoners())
-		{
-			bRescuing = true;
-		}
-		else
-		{
-			TB::Notice(this, TB::Notices::ItemsAutoCollect);
-		}
+		bRescuing = true;
 	}
 }
 

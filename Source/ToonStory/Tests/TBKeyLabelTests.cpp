@@ -61,8 +61,6 @@ bool FTBExpandKeyTokensTest::RunTest(const FString& Parameters)
 		const FString Expanded = Expand(Notice);
 		TestFalse(*FString::Printf(TEXT("No token is left in: %s"), Notice), Expanded.Contains(TEXT("{")));
 	}
-	TestEqual(TEXT("Items notice"), Expand(TB::Notices::ItemsAutoCollect),
-	          FString(TEXT("Items collect automatically while touching. E is for rescue.")));
 	TestEqual(TEXT("Ready notice"), Expand(TB::Notices::ReadyRequired), FString(TEXT("Every player must press R to be ready.")));
 	return true;
 }
@@ -90,12 +88,8 @@ bool FTBNoticeKeyTest::RunTest(const FString& Parameters)
 	// IMCの既定のキーではなく、このプレイヤーの割り当てが出る。取り違えも捕まえる。
 	FTBKeyRemapper Remapper(*this, User);
 	Remapper.Remap(TB::Keys::LobbyReady, EKeys::T);
-	Remapper.Remap(TB::Keys::ToyInteract, EKeys::U);
 	PC->ClientNotice(TB::Notices::ReadyRequired, false);
 	TestEqual(TEXT("Ready notice follows Lobby_Ready"), PC->Notice, FString(TEXT("Every player must press T to be ready.")));
-	PC->ClientNotice(TB::Notices::ItemsAutoCollect, false);
-	TestEqual(TEXT("Items notice follows Toy_Interact, not Human_Interact"), PC->Notice,
-	          FString(TEXT("Items collect automatically while touching. U is for rescue.")));
 	return true;
 }
 
