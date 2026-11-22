@@ -184,9 +184,11 @@ private:
 	ETBToyState LastToyState = ETBToyState::Free;
 	void UpdateLobbyCamera(bool InLobby);
 	void UpdateMenuInput(bool ShowMenu);
-	// bLobbyInputに合わせた入力モードを入れる。
+	// メニューとロビーのカーソル状態に合わせた入力モードを入れる。
 	void ApplyMenuInputMode();
 	bool bLobbyInput = false;
+	bool bLobbyCursor = false;
+	bool bInputModeInitialized = false;
 	double NoticeExpires = 0;
 	bool bLeaveMenuOpen = false;
 	bool bLobbyCameraActive = false;

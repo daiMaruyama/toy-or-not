@@ -904,11 +904,15 @@ bool FTBEmoteTest::RunTest(const FString&)
 		// Ordinary chat is intentionally unavailable during Playing.
 		State->Phase = ETBPhase::Lobby;
 		LocalPC->PlayerTick(0);
+		TestTrue(TEXT("Lobby shows a clickable cursor without blocking movement"),
+		    LocalPC->bShowMouseCursor && LocalPC->bEnableClickEvents && !LocalPC->IsMoveInputIgnored());
 		LocalPC->OpenChat();
 		if (!TestTrue(TEXT("Ordinary chat is open for the negative input case"), LocalPC->IsChatOpen())) return false;
 		Dispatch(); TestFalse(TEXT("Typing a digit in chat cannot emote"), Source->Emote.bActive); LocalPC->CloseChat();
 		State->Phase = ETBPhase::Playing;
 		LocalPC->PlayerTick(0);
+		TestTrue(TEXT("Starting play hides the cursor and restores movement"),
+		    !LocalPC->bShowMouseCursor && !LocalPC->bEnableClickEvents && !LocalPC->IsMoveInputIgnored());
 		State->HidePreparation.bHiding = true; Dispatch(); TestFalse(TEXT("Preparation blocks every emote shortcut"), Source->Emote.bActive);
 		State->HidePreparation.bHiding = false;
 		LocalPS->bFrozen = true; Dispatch(); TestFalse(TEXT("Frozen pawn cannot emote from input"), Source->Emote.bActive); LocalPS->bFrozen = false;

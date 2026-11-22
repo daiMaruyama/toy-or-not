@@ -494,23 +494,32 @@ void ATBController::UpdateLobbyCamera(bool InLobby)
 
 void ATBController::UpdateMenuInput(bool ShowMenu)
 {
-	if (bLobbyInput != ShowMenu)
+	const auto* State = TB::GS(GetWorld());
+	const bool ShowLobbyCursor = State && State->Phase == ETBPhase::Lobby;
+	if (!bInputModeInitialized || bLobbyInput != ShowMenu || bLobbyCursor != ShowLobbyCursor)
 	{
+		const bool WasMenuOpen = bLobbyInput;
+		bInputModeInitialized = true;
 		bLobbyInput = ShowMenu;
-		bShowMouseCursor = ShowMenu;
-		bEnableClickEvents = ShowMenu;
-		SetIgnoreLookInput(ShowMenu);
-		SetIgnoreMoveInput(ShowMenu);
+		bLobbyCursor = ShowLobbyCursor;
+		bShowMouseCursor = ShowMenu || ShowLobbyCursor;
+		bEnableClickEvents = ShowMenu || ShowLobbyCursor;
+		if (WasMenuOpen != ShowMenu)
+		{
+			SetIgnoreLookInput(ShowMenu);
+			SetIgnoreMoveInput(ShowMenu);
+		}
 		ApplyMenuInputMode();
 	}
 }
 
 void ATBController::ApplyMenuInputMode()
 {
-	if (bLobbyInput)
+	if (bLobbyInput || bLobbyCursor)
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
 		SetInputMode(Mode);
 	}
 	else
