@@ -72,6 +72,7 @@ private:
 	friend class FTBHidePreparationTest;
 	friend class FTBHumanEntranceTest;
 	friend class FTBBoxEscapeTest;
+	friend class FTBBoxEscapeLidTest;
 	friend class FTBRematchTest;
 	friend class FTBStorageHoldTest;
 	friend class FTBAuthoredLightingTest;

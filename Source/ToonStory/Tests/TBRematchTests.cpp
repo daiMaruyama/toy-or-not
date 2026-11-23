@@ -15,6 +15,7 @@
 #include "GamePlay/TBPickup.h"
 #include "GamePlay/Items/TBItemSpawnDirector.h"
 #include "GamePlay/Items/TBItemSpawnPoint.h"
+#include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/Engine.h"
@@ -309,10 +310,40 @@ bool FTBStorageHoldTest::RunTest(const FString& Parameters)
 		TV->Tick(0);
 		Toy->Tick(0);
 		TV->Tick(0);
-		const FVector ToScreen = (TV->Screen->Bounds.Origin - Toy->GetActorLocation()).GetSafeNormal2D();
+		// 向きは、本人の目（カメラ）の位置から画面の中心へ。運搬カメラの解除のあとでも、その向きになる。
+		const FVector ToScreen = (TV->ScreenCenter() - Toy->Camera->GetComponentLocation()).GetSafeNormal();
 		const FVector Facing = Second->GetControlRotation().Vector();
-		TestTrue(TEXT("Arrival faces the television"), FVector::DotProduct(ToScreen, Facing.GetSafeNormal2D()) > .9f);
-		TestTrue(TEXT("Arrival looks up at the television after the carry view is released"), Facing.Z > .1f);
+		TestTrue(TEXT("Arrival aims at the screen center from the eye after the carry view is released"),
+		         FVector::DotProduct(ToScreen, Facing) > .999f);
+		auto AimDot = [&]
+		{
+			const FVector Wanted = (TV->ScreenCenter() - Toy->Camera->GetComponentLocation()).GetSafeNormal();
+			return FVector::DotProduct(Wanted, Second->GetControlRotation().Vector());
+		};
+		auto Restart = [&]
+		{
+			TV->bFacedArrival = false;
+			TV->ArrivalFaceStart = -1;
+			Second->SetControlRotation(FRotator::ZeroRotator);
+		};
+		// 落下エリアが埋まって壁際の予備位置に収納された場合も、そこからテレビの画面の中心を向く。
+		Restart();
+		Toy->SetActorLocation(Box->StorageRoom->GetComponentTransform().TransformPosition(ATBBox::StorageSlot(0)), false, nullptr, ETeleportType::TeleportPhysics);
+		TV->Tick(0);
+		TestTrue(TEXT("A toy stored at a fallback slot aims at the screen center"), AimDot() > .999f);
+		TestTrue(TEXT("Aiming at the fallback slot started the follow timer"), TV->ArrivalFaceStart >= 0);
+		// 位置が遅れて届く（まだ箱の外）間は向かず、待っている時間は上限に数えない。届いてから向く。
+		Restart();
+		Toy->SetActorLocation(FVector(-4000, 0, 500), false, nullptr, ETeleportType::TeleportPhysics);
+		TV->Tick(0);
+		World->Tick(LEVELTICK_All, 2.5f);
+		TV->Tick(0);
+		TestTrue(TEXT("Waiting for the position does not turn the view"), Second->GetControlRotation().IsNearlyZero());
+		TestFalse(TEXT("Waiting longer than the limit does not finish the facing"), TV->bFacedArrival);
+		TestTrue(TEXT("The follow timer has not started while waiting"), TV->ArrivalFaceStart < 0);
+		Toy->SetActorLocation(Box->StorageRoom->GetComponentTransform().TransformPosition(ATBBox::StorageSlot(0)), false, nullptr, ETeleportType::TeleportPhysics);
+		TV->Tick(0);
+		TestTrue(TEXT("Once the position arrives the view aims at the screen center"), AimDot() > .999f);
 	}
 	Box->ReleasePrisoners();
 	TestEqual(TEXT("Rescue moves stored toy outside the chest"), ToyInfo->ToyState, ETBToyState::Free);

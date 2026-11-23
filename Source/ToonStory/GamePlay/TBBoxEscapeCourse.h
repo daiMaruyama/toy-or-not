@@ -51,6 +51,12 @@ private:
 	{
 		uint32 Generation = 0;
 		bool bDescendedBelowGoal = false;
+		// ゴールの瞬間にふたへの頭突きを出したか。出してから出口へ移すまでの残り秒。
+		bool bBumped = false;
+		float ReleaseIn = 0.f;
+		// 出口へ移すのに失敗したか。失敗後は、ゴールの高さからいったん離れ（bLeftGoal）、もう一度届いたときだけやり直す。
+		bool bFailed = false;
+		bool bLeftGoal = false;
 	};
 	TMap<TWeakObjectPtr<ATBCharacter>, FCaptureAttempt> Attempts;
 	bool Contains(const UBoxComponent* Volume, const ATBCharacter* Toy, float Margin = 0) const;

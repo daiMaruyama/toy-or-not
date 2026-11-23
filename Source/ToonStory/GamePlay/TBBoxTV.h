@@ -56,7 +56,12 @@ public:
 	TObjectPtr<UMaterialInterface> ScreenMaterial;
 	UPROPERTY(EditDefaultsOnly, Category = "Television", meta = (ClampMin = "0"))
 	int32 ScreenMaterialIndex = 0;
-	// 映像の解像度・更新回数・砂嵐・入ったときの向きはマスターデータ（TB::PresentationData().Television）にある。
+	// 映像の解像度・更新回数・砂嵐はマスターデータ（TB::PresentationData().Television）にある。
+
+	// 画面の中心（ワールド）。画面のメッシュの今の境界から求めるので、テレビを動かしても大きさを変えても追従する。
+	FVector ScreenCenter() const;
+	// 目の位置から画面の中心を向く向き。ヨーもピッチも同じ基準。
+	static FRotator ArrivalRotation(const FVector& Eye, const FVector& Center);
 
 	static constexpr int32 CameraChannels = 3;
 	static constexpr int32 MaxChannel = 9;
@@ -84,6 +89,9 @@ public:
 	}
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FTBStorageHoldTest;
+#endif
 	UPROPERTY(ReplicatedUsing = OnRep_Channel)
 	FTBTVChannel Channel;
 	UPROPERTY(ReplicatedUsing = OnRep_PowerOn)
@@ -99,6 +107,8 @@ private:
 	bool bOSDBound = false;
 	// 箱に入った本人の画面を、テレビへ向け終えたか。箱から出ると戻る。
 	bool bFacedArrival = false;
+	// 落ちている間は向き続ける。着地しないままでも止まるよう、向きはじめた時刻を持つ（0未満は向けていない）。
+	double ArrivalFaceStart = -1;
 
 	UFUNCTION()
 	void OnRep_Channel();
@@ -114,7 +124,9 @@ private:
 	void SetChannel(int32 Number);
 	void ResetChannel();
 	bool HasLocalViewer() const;
-	bool FaceArrival() const;
+	bool FaceArrival();
+	// 箱の部屋（落下エリアと、埋まったときの予備位置を含む）の中か。
+	bool IsInBoxRoom(const FVector& Position) const;
 	bool IsAvailableTarget(const ATBPlayerState* Player) const;
 	void SetViewing(bool bEnable);
 	void CaptureFrame();

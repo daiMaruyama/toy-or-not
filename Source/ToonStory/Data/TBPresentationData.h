@@ -32,6 +32,24 @@ struct FTBLidFeel
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
 	          meta = (DisplayName = "部屋の明るさが戻るまで", Units = "s", ClampMin = "0.01"))
 	float FlashSeconds = .35f;
+	// 脱出のゴールの瞬間は、頭でふたを押し上げて、救助・収納より大きく・長く・勢いよく開く。閉じる時間と光が戻る時間は共通。
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で開く角度", Units = "Degrees", ClampMin = "0", ClampMax = "80"))
+	float EscapeOpenAngle = 75.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた", meta = (DisplayName = "脱出の光の強さ", ClampMin = "0"))
+	float EscapePeakIntensity = 80000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で開くのにかかる時間", Units = "s", ClampMin = "0.01"))
+	float EscapeOpenSeconds = .12f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で開いたままの時間", Units = "s", ClampMin = "0"))
+	float EscapeHoldSeconds = 1.6f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた", meta = (DisplayName = "脱出で部屋が明るくなる量", ClampMin = "0"))
+	float EscapeFlashExposure = 4.f;
+	/** ゴールしてから本人を出口へ移すまで。この間にふたが開いて、頭で押し上げたように見せる */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "箱のふた",
+	          meta = (DisplayName = "脱出で出口へ移すまで", Units = "s", ClampMin = "0", ClampMax = "1.5"))
+	float EscapeReleaseDelay = .25f;
 };
 
 /** 決着からリザルトの画面までの演出。秒は決着の瞬間から数える */
@@ -77,11 +95,7 @@ struct FTBTelevisionFeel
 	/** チャンネルを変えたときに砂嵐を挟む時間 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "テレビ",
 	          meta = (DisplayName = "切り替えの砂嵐", Units = "s", ClampMin = "0", ClampMax = "2"))
-	float NoiseSeconds = .4f;
-	/** 箱に入れられた瞬間に見る位置の、画面中心からの高さ */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "テレビ",
-	          meta = (DisplayName = "入ったときに見上げる高さ", Units = "cm"))
-	float ArrivalLookAbove = 100.f;
+	float NoiseSeconds = .12f;
 };
 
 USTRUCT(BlueprintType)
@@ -91,7 +105,7 @@ struct FTBRemoteFeel
 	/** 立ち位置の揺れや乗り直しで、同じ操作が続けて起きないようにする */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リモコン",
 	          meta = (DisplayName = "ボタンを続けて押せるまで", Units = "s", ClampMin = "0"))
-	float PressCooldown = .5f;
+	float PressCooldown = .22f;
 };
 
 /** 箱のふた・部屋の光、テレビ、リモコンの演出 */

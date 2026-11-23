@@ -27,10 +27,10 @@ constexpr float GlowPreview = 1.25f;    // 選択予告。clientでは操作成�
 constexpr float GlowAvailable = 1.f;    // 光る
 constexpr float GlowUnavailable = -.6f; // 暗くする
 // World centimetres/seconds, independent of the authored remote's scale.
-constexpr double DwellSeconds = .20;
+constexpr double DwellSeconds = .08;
 constexpr double RearmSeconds = .10;
 constexpr double MaxObservationGap = .25;
-constexpr float MaxSpeed = 2.f;
+constexpr float MaxSpeed = 8.f;
 constexpr float MaxDrift = .5f;
 constexpr float EdgeMargin = .20f;
 constexpr float NearestMargin = .25f;
