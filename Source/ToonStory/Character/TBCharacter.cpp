@@ -26,6 +26,7 @@
 #include "GamePlay/TBPickup.h"
 #include "GamePlay/Items/TBInteractable.h"
 #include "GamePlay/Items/TBInteractionTarget.h"
+#include "GamePlay/Items/TBMotionSensorLight.h"
 #include "GamePlay/Items/TBWalkieTalkie.h"
 #include "GamePlay/Items/TBEscapeVehicle.h"
 #include "Data/TBEscapeVehicleData.h"
@@ -510,6 +511,10 @@ void ATBCharacter::OnEmoteVisualEndPlay(AActor* Visual, EEndPlayReason::Type Rea
 
 void ATBCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (EndPlayReason == EEndPlayReason::Destroyed && HasAuthority() && IsValid(CarriedSensorLight))
+	{
+		CarriedSensorLight->ReturnToPlacement();
+	}
 	CancelEmote();
 	RestoreEmoteHair();
 	TBToyPresentation::RestoreEmoteOwner(this);
@@ -697,13 +702,14 @@ void ATBCharacter::PossessedBy(AController* PlayerController)
 
 void ATBCharacter::UnPossessed()
 {
+	if (HasAuthority() && IsValid(CarriedSensorLight)) CarriedSensorLight->ReturnToPlacement();
 	InvalidateHumanLook();
 	Super::UnPossessed();
 }
 
 bool ATBCharacter::CanBeFrozenBy(const ATBCharacter* Observer) const
 {
-	return !EscapeVehicle && Observer && !ATBRoomLighting::ProtectsFromGaze(GetWorld(), GetActorLocation(), Observer->GetActorLocation());
+	return !EscapeVehicle && Observer && !ATBRoomLighting::ProtectsFromGaze(GetWorld(), GetActorLocation(), Observer->GetActorLocation(), this);
 }
 
 void ATBCharacter::SetFrozen(bool bFrozen)
@@ -920,6 +926,7 @@ void ATBCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ATBCharacter, Carrier);
 	DOREPLIFETIME(ATBCharacter, CarriedToy);
 	DOREPLIFETIME(ATBCharacter, CarriedDummy);
+	DOREPLIFETIME(ATBCharacter, CarriedSensorLight);
 	DOREPLIFETIME(ATBCharacter, EscapeVehicle);
 	DOREPLIFETIME(ATBCharacter, HumanLook);
 	DOREPLIFETIME(ATBCharacter, Emote);
@@ -1082,6 +1089,14 @@ void ATBCharacter::ServerInteract_Implementation()
 		return;
 	}
 	LastRequest = Now;
+	if (IsValid(CarriedSensorLight))
+	{
+		FTBInteractionContext Context;
+		Context.InstigatorCharacter = this;
+		Context.ActionId = ATBMotionSensorLight::PutDownAction;
+		if (!CarriedSensorLight->TryInteract(Context)) TB::Notice(this, TEXT("ここにはライトを置けません。"));
+		return;
+	}
 	const FTBInteractionTarget Target = TB::FindInteractionTarget(this);
 	if (auto* Item = Cast<ITBInteractable>(Target.Actor))
 	{
@@ -1164,6 +1179,11 @@ void ATBCharacter::ServerDrop_Implementation()
 {
 	if (TB::Playing(GetWorld()))
 	{
+		if (IsHuman() && CanAct() && IsValid(CarriedSensorLight))
+		{
+			CarriedSensorLight->PutDown(this);
+			return;
+		}
 		DropToy();
 	}
 }

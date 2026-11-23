@@ -31,7 +31,8 @@ public:
 	void ResetLighting();
 	bool Contains(const FVector& Position) const;
 	// Overlapping volumes use the most restrictive rule: a lit room always wins.
-	static bool ProtectsFromGaze(const UWorld* World, const FVector& ToyPosition, const FVector& HumanPosition);
+	static bool ProtectsFromGaze(const UWorld* World, const FVector& ToyPosition, const FVector& HumanPosition,
+	    const AActor* IlluminatedActor = nullptr);
 	UFUNCTION()
 	void OnRep_LightsOn();
 };

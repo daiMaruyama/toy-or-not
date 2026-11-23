@@ -426,7 +426,7 @@ bool ATBNPCController::Exposed(const FVector& Position) const
 	for (const auto& Human : VisibleHumans)
 	{
 		auto* It = Human.Get();
-		if (!It || ATBRoomLighting::ProtectsFromGaze(GetWorld(), Position, It->GetActorLocation())) continue;
+		if (!It || ATBRoomLighting::ProtectsFromGaze(GetWorld(), Position, It->GetActorLocation(), GetPawn())) continue;
 		const FVector Eye = It->GetPawnViewLocation();
 		const FVector Delta = Position + FVector(0, 0, SightTargetHeightCm) - Eye;
 		if (Delta.SizeSquared() > FMath::Square(ThreatRangeCm) ||

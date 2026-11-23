@@ -543,7 +543,11 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 	DrawText(FString::Printf(TEXT("箱のなか  %d / %d"), MatchState.BoxedCount, MatchState.Settings.Toys + MatchState.Settings.NPCToys), Accent,
 	         W - 270 * S, 68 * S, PaperFont, .95f * S);
 	PaperPanel(Panel, 24 * S, H - 62 * S, (Child ? 900 : 700) * S, 38 * S);
-	DrawText(TB::MatchHintText(PC, Child), Ink, 40 * S, H - 51 * S, PaperFont, .95f * S);
+	const auto* HintCharacter = Controller.GetPawn<ATBCharacter>();
+	const FString MatchHint = Child && HintCharacter && IsValid(HintCharacter->CarriedSensorLight.Get())
+	    ? FString::Printf(TEXT("[%s] センサーライトを置く"), *TB::KeyLabel(PC, TB::Keys::HumanInteract))
+	    : TB::MatchHintText(PC, Child);
+	DrawText(MatchHint, Ink, 40 * S, H - 51 * S, PaperFont, .95f * S);
 	if (Player && Player->bFrozen)
 	{
 		// 赤で怖がらせず、紙の札で知らせる。止まった間の色はセピアの画面が伝える。

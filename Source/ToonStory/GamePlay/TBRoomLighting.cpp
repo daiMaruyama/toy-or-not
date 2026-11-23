@@ -1,5 +1,6 @@
 #include "TBRoomLighting.h"
 #include "TBRuleMath.h"
+#include "GamePlay/Items/TBMotionSensorLight.h"
 #include "Data/TBRuleData.h"
 #include "Components/BoxComponent.h"
 #include "Components/LightComponent.h"
@@ -62,7 +63,8 @@ bool ATBRoomLighting::Contains(const FVector& Position) const
 	return FMath::Abs(Local.X) <= Extent.X && FMath::Abs(Local.Y) <= Extent.Y && FMath::Abs(Local.Z) <= Extent.Z;
 }
 
-bool ATBRoomLighting::ProtectsFromGaze(const UWorld* World, const FVector& ToyPosition, const FVector& HumanPosition)
+bool ATBRoomLighting::ProtectsFromGaze(const UWorld* World, const FVector& ToyPosition, const FVector& HumanPosition,
+    const AActor* IlluminatedActor)
 {
 	if (!World) return false;
 	bool bInDarkRoom = false;
@@ -73,5 +75,10 @@ bool ATBRoomLighting::ProtectsFromGaze(const UWorld* World, const FVector& ToyPo
 		if (!TBRuleMath::DarknessProtects(It->bLightsOn, DistanceSquared, TB::Rules().Vision.DarkProtectionDistanceMeters)) return false;
 		bInDarkRoom = true;
 	}
-	return bInDarkRoom;
+	if (!bInDarkRoom) return false;
+	for (TActorIterator<ATBMotionSensorLight> It(World); It; ++It)
+	{
+		if (It->Illuminates(ToyPosition, IlluminatedActor)) return false;
+	}
+	return true;
 }

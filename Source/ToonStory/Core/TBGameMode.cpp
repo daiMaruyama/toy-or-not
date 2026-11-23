@@ -8,6 +8,7 @@
 #include "GamePlay/Events/TBMomArrivalZone.h"
 #include "GamePlay/Items/TBItemSpawnDirector.h"
 #include "GamePlay/TBRoomLighting.h"
+#include "GamePlay/Items/TBMotionSensorLight.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "TBLobbySettings.h"
@@ -1112,6 +1113,10 @@ void ATBGameMode::ResetStageInteractions()
 {
 	for (TActorIterator<ATBMomArrivalZone> It(GetWorld());It;++It) It->ResetEvent();
 	ItemSpawns->ResetRound();
+	for (TActorIterator<ATBMotionSensorLight> It(GetWorld()); It; ++It)
+	{
+		It->ResetPlacement();
+	}
 	for (TActorIterator<ATBRoomLighting> It(GetWorld()); It; ++It)
 	{
 		It->ResetLighting();

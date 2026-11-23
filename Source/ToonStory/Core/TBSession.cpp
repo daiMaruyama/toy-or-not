@@ -27,7 +27,7 @@ namespace
 {
 	constexpr double OfflineReturnTimeoutSeconds = 30.0;
 	const FName GameKey(TEXT("TOYBOX_BUILD"));
-	const FString BuildTag(TEXT("ToonStory_EscapeVehicle_20261107"));
+	const FString BuildTag(TEXT("ToonStory_MotionSensorLight_20261122"));
 	const FName LobbyKey(TEXT("LOBBY_OPEN"));
 } // namespace
 void UTBSession::Initialize(FSubsystemCollectionBase& Collection)
@@ -684,6 +684,7 @@ bool FTBSessionBuildCompatibilityTest::RunTest(const FString&)
 	const FString OldTag(TEXT("ToonStory_ResidentialStages_20261028"));
 	TestNotEqual(TEXT("Network schema change separates old build"),BuildTag,OldTag);
 	const auto Current=MakeResult(BuildTag);
+	const auto BeforeMotionSensor=MakeResult(TEXT("ToonStory_EscapeVehicle_20261107"));
 	const auto Old=MakeResult(OldTag);
 	const auto ItemsOnly=MakeResult(TEXT("ToonStory_RandomItemSpawns_20261031"));
 	const auto MomOnly=MakeResult(TEXT("ToonStory_MomEvent_20261101"));
@@ -699,14 +700,14 @@ bool FTBSessionBuildCompatibilityTest::RunTest(const FString&)
 	auto Missing=Current;
 	Missing.Session.SessionSettings.Remove(GameKey);
 	Session->Search=MakeShared<FOnlineSessionSearch>();
-	Session->Search->SearchResults={Old,ItemsOnly,MomOnly,BeforeLobbyEmotes,BeforeRemoteFeedback,BeforeWalkie,BeforeDecoy,BeforeHumanRoster,BeforeGlassAudio,BeforeTabletop,MainDecoyGround,BeforeLobbyReturnRetry,Missing,Current};
+	Session->Search->SearchResults={Old,ItemsOnly,MomOnly,BeforeLobbyEmotes,BeforeRemoteFeedback,BeforeWalkie,BeforeDecoy,BeforeHumanRoster,BeforeGlassAudio,BeforeTabletop,MainDecoyGround,BeforeLobbyReturnRetry,BeforeMotionSensor,Missing,Current};
 	Session->CurrentOperation=UTBSession::ESessionOperation::Finding;
 	Session->Found(true);
 	TestEqual(TEXT("Search exposes only matching build"),Session->Rooms.Num(),1);
 	FString SelectedTag;
 	if (Session->Results.Num()==1) Session->Results[0].Session.SessionSettings.Get(GameKey,SelectedTag);
 	TestEqual(TEXT("Search retained the current build"),SelectedTag,BuildTag);
-	for (const auto& Incompatible:{Old,ItemsOnly,MomOnly,BeforeLobbyEmotes,BeforeRemoteFeedback,BeforeWalkie,BeforeDecoy,BeforeHumanRoster,BeforeGlassAudio,BeforeTabletop,MainDecoyGround,BeforeLobbyReturnRetry,Missing})
+	for (const auto& Incompatible:{Old,ItemsOnly,MomOnly,BeforeLobbyEmotes,BeforeRemoteFeedback,BeforeWalkie,BeforeDecoy,BeforeHumanRoster,BeforeGlassAudio,BeforeTabletop,MainDecoyGround,BeforeLobbyReturnRetry,BeforeMotionSensor,Missing})
 	{
 		Session->Status.Reset();
 		Session->BeginJoin(Incompatible);
