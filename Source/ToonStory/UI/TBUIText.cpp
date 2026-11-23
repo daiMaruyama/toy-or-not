@@ -5,6 +5,7 @@
 #include "Internationalization/StringTableRegistry.h"
 #include "Internationalization/TextLocalizationManager.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "Internationalization/Regex.h"
 
 namespace
@@ -102,9 +103,16 @@ namespace
 		{TEXT("開始確定前にNPCが変わりました。"), TEXT("Notice.StageSetup33")},
 	};
 
-	FString File(const FString& Code)
+	bool LoadCatalog(const FString& Code, FStringTable& Table)
 	{
-		return FPaths::ProjectContentDir() / TEXT("Localization/UI") / (Code + TEXT(".csv"));
+		const FString Path = FPaths::ProjectContentDir() / TEXT("Localization/UI") / (Code + TEXT(".csv"));
+		FString CSV;
+		if (!FFileHelper::LoadFileToString(CSV, *Path)) return false;
+		// Quoted cells preserve literal newlines. Keep the UI copy the same after
+		// editing a translation on Windows or on a system using LF.
+		CSV.ReplaceInline(TEXT("\r\n"), TEXT("\n"), ESearchCase::CaseSensitive);
+		CSV.ReplaceCharInline(TEXT('\r'), TEXT('\n'));
+		return Table.ImportStringsFromCSVString(CSV, *Path);
 	}
 }
 
@@ -114,7 +122,7 @@ bool TBText::SetLanguage(const FString& Code)
 	if (Language == Code) return true;
 	// Validate into a temporary table first: a missing/broken file must not clear the active UI.
 	FStringTableRef Imported = MakeShared<FStringTable, ESPMode::ThreadSafe>();
-	if (!Imported->ImportStringsFromCSVFile(File(Code))) return false;
+	if (!LoadCatalog(Code, *Imported)) return false;
 	if (!FInternationalization::Get().SetCurrentCulture(Code)) return false;
 	auto& Registry = FStringTableRegistry::Get();
 	auto Active = Registry.FindMutableStringTable(TableId);
@@ -136,7 +144,7 @@ bool TBText::SetLanguage(const FString& Code)
 	});
 	// Missing translations fall back to Japanese, while retaining stable keys.
 	FStringTableRef Japanese = MakeShared<FStringTable, ESPMode::ThreadSafe>();
-	if (Japanese->ImportStringsFromCSVFile(File(TEXT("ja"))))
+	if (LoadCatalog(TEXT("ja"), *Japanese))
 	{
 		Japanese->EnumerateSourceStrings([&](const FString& Key, const FString& Value)
 		{
@@ -208,7 +216,6 @@ FString TBText::TranslateNotice(const FString& Source)
 		{TEXT(""), TEXT(" 準備をやり直してください。"), TEXT("Notice.RetryPreparation"), false, true},
 		{TEXT(""), TEXT(" 元の位置へ安全に戻せませんでした。ロビーへ戻ってください。"), TEXT("Notice.ReturnLobby"), false, true},
 		{TEXT("Every player must press "), TEXT(" to be ready."), TEXT("Notice.ReadyRequired")},
-		{TEXT("Items collect automatically while touching. "), TEXT(" is for rescue."), TEXT("Notice.AutoCollect")},
 	};
 	for (const auto& Pattern : Patterns)
 	{

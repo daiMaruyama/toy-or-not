@@ -322,6 +322,12 @@ FText UTBSession::GetRoomLabel(int32 Index) const
 	    Result.Session.NumOpenPublicConnections, Result.Session.SessionSettings.NumPublicConnections, Ping);
 }
 
+FString UTBSession::GetCurrentRoomOwner() const
+{
+	const FNamedOnlineSession* Current = Sessions.IsValid() ? Sessions->GetNamedSession(NAME_GameSession) : nullptr;
+	return Current ? Current->OwningUserName : FString();
+}
+
 void UTBSession::Join(int32 Index)
 {
 	if (CurrentOperation != ESessionOperation::Idle || !Acquire())

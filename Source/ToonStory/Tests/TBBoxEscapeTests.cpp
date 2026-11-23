@@ -10,6 +10,7 @@
 #include "Character/TBCharacter.h"
 #include "Character/TBNPCController.h"
 #include "Data/TBRuleData.h"
+#include "Data/TBPresentationData.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -42,13 +43,18 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	    World->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->bDedicatedLobby || TBLobbySettings::ShouldTravelToStage(World)) return false;
 	const auto OriginalSettings = State->Settings;
 	const auto Preference = Host->GetPlayerState<ATBPlayerState>()->Preference;
+	// このテストは同期で進めるので、ゴールの瞬間に出口へ移す前提。遅らせる秒は別のテスト（BoxEscapeLid）で見る。
+	auto& PresentationFeel = const_cast<UTBPresentationData&>(TB::PresentationData());
+	const float OriginalReleaseDelay = PresentationFeel.Lid.EscapeReleaseDelay;
+	PresentationFeel.Lid.EscapeReleaseDelay = 0.f;
 	auto* Guest = Cast<ATBController>(UGameplayStatics::CreatePlayer(World, -1, true));
-	if (!Guest) return false;
+	if (!Guest) { PresentationFeel.Lid.EscapeReleaseDelay = OriginalReleaseDelay; return false; }
 	ATBController* Third = nullptr;
 	auto* Box = State->Box.Get();
 	TArray<AActor*> Actors;
 	ON_SCOPE_EXIT
 	{
+		PresentationFeel.Lid.EscapeReleaseDelay = OriginalReleaseDelay;
 		if (IsValid(World) && IsValid(State) && IsValid(Mode) && IsValid(Host))
 		{
 			if (State->Phase == ETBPhase::Playing) Mode->Finish(ETBWinner::None, TEXT("Escape fixture cleanup"), true);
@@ -316,7 +322,11 @@ bool FTBBoxEscapeTest::RunTest(const FString&)
 	TestEqual(TEXT("The same pushable still blocks real escape and keeps the toy boxed"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
 	Blocker->SetActorLocation(ExitLocation + FVector(100, 0, 0), false, nullptr, ETeleportType::TeleportPhysics);
 	Course->Tick(0);
-	TestEqual(TEXT("Moving the pushable away releases while still above the jump finish line"), Toy->TBPS()->ToyState, ETBToyState::Free);
+	// 失敗したあとは、ゴールの高さに居続けても移さない。いったん離れて、もう一度届いたときに、頭突きのあとで移す（このテストは遅らせる秒が0）。
+	TestEqual(TEXT("An exit that opens while the toy stays at the finish height does not release it"), Toy->TBPS()->ToyState, ETBToyState::Boxed);
+	Place(FVector(200, 0, 20));
+	Place(Finish, MOVE_Falling);
+	TestEqual(TEXT("Leaving and reaching the finish height again releases through the unblocked exit"), Toy->TBPS()->ToyState, ETBToyState::Free);
 	TestTrue(TEXT("Escape reaches the cleared exit with the prop collision still enabled"),
 	    Toy->GetActorLocation().Equals(ExitLocation, 1.f) && Collision->IsQueryCollisionEnabled());
 	if (!Store(TEXT("Another capture succeeds"), Toy)) return false;

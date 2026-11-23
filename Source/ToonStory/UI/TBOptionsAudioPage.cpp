@@ -17,19 +17,8 @@ void TBOptionsPages::BuildAudio(UTBOptionsMenu& Menu, UTBGameUserSettings& Setti
 	{
 		const auto Kind = ETBVolume(Index);
 		auto* Row = Menu.AddRow(TBOptionsPage::Audio, TBText::Get(VolumeNames[Index]), true);
-		Row->Step = [M, S, Kind](int32 Steps)
-		{
-			S->StepVolume(Kind, Steps);
-			S->CommitVolumes(M->GetOwningPlayer() ? M->GetOwningPlayer()->GetGameInstance() : nullptr);
-		};
 		Row->Value = [S, Kind] { return FString::Printf(TEXT("%d%%"), FMath::RoundToInt(S->GetVolume(Kind) * 100)); };
 		Row->Fill = [S, Kind] { return S->GetVolume(Kind); };
-		Row->CanStep = [S, Kind](int32 Steps)
-		{
-			const auto& Range = TB::ConfigData().Audio.Get(Kind);
-			const float Volume = S->GetVolume(Kind);
-			return Steps < 0 ? Volume > Range.Clamp(0.f) + KINDA_SMALL_NUMBER : Volume < Range.Clamp(1.f) - KINDA_SMALL_NUMBER;
-		};
 		// 動かしている途中も音量を変えて聞かせる。保存は手を離したときだけ。
 		const float VolumeStep = TB::ConfigData().Audio.Step;
 		BindSlider(*Row, 0.f, 1.f, VolumeStep,

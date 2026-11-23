@@ -71,6 +71,7 @@ bool UTBAudioEvents::ShouldDeliver(ETBSoundEvent Event, const ATBPlayerState* Re
 	case ETBSoundEvent::CaptureHard:
 	case ETBSoundEvent::Capture:
 	case ETBSoundEvent::Store:
+	case ETBSoundEvent::LidBump:
 		return true;
 	default:
 		// UI, movement, loops and phase sounds have local/state-driven playback.

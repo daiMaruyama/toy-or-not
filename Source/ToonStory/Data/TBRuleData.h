@@ -82,11 +82,11 @@ struct FTBGazeRules
 	float ToyShadowStrength = 1.f;
 	/** 止まったおもちゃの画面にかける色。白なら色味を変えない */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "凝視|演出", meta = (DisplayName = "止まったときの色味"))
-	FLinearColor FrozenTint = FLinearColor(1.f, .78f, .5f);
+	FLinearColor FrozenTint = FLinearColor(.69f, .68f, .67f);
 	/** 止まったおもちゃの画面の鮮やかさ。1でそのまま、0で白黒 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "凝視|演出",
 	          meta = (DisplayName = "止まったときの鮮やかさ", ClampMin = "0", ClampMax = "1"))
-	float FrozenSaturation = .15f;
+	float FrozenSaturation = .11f;
 	/** 凝視中の人間の画面の端を暗くする色 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "凝視|演出", meta = (DisplayName = "凝視中の画面の端の色"))
 	FLinearColor HumanEdgeColor = FLinearColor(.02f, .02f, .03f);

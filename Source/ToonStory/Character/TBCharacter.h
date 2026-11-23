@@ -292,8 +292,8 @@ private:
 	bool bLastViewCrouched = false;
 	// 凝視の視野の寄り具合。0で通常、1で寄りきった状態。
 	float GazeZoom = 0;
-	// 凝視で止まった画面のセピアの濃さ。0で通常、1でセピア。
-	float FrozenSepia = 0;
+	// 凝視で止まった本人の画面だけ、明度と彩度をなだらかに落とす。
+	float FrozenViewBlend = 0;
 
 protected:
 	// 親子で表示の切り替え状態を共有する。

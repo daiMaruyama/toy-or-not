@@ -169,8 +169,7 @@ bool FTBMomZoneAssetTest::RunTest(const FString&)
 	auto* Zone=World->SpawnActor<ATBMomArrivalZone>(Class,FVector(0,0,10000),FRotator::ZeroRotator);
 	if (!TestNotNull(TEXT("Zone can spawn without editing a map"),Zone)) return false;
 	ON_SCOPE_EXIT { Zone->Destroy(); };
-	if (TestNotNull(TEXT("Blueprint supplies red material"),Zone->BoundaryMaterial.Get()))
-		TestTrue(TEXT("Boundary supports instanced rendering"),Zone->BoundaryMaterial->GetMaterial()->bUsedWithInstancedStaticMeshes);
+	TestNotNull(TEXT("Blueprint retains its authored boundary material reference"),Zone->BoundaryMaterial.Get());
 	for (auto* Part : TInlineComponentArray<UStaticMeshComponent*>(Zone))
 		if (Part->GetName() == TEXT("PlaceholderCube"))
 		{
@@ -178,9 +177,28 @@ bool FTBMomZoneAssetTest::RunTest(const FString&)
 			TestFalse(TEXT("Hidden marker cannot cast a cube shadow"), Part->CastShadow);
 		}
 	auto* Boundary=Zone->FindComponentByClass<UInstancedStaticMeshComponent>();
-	if (TestNotNull(TEXT("Blueprint retains dashed boundary"),Boundary))
+	if (TestNotNull(TEXT("Blueprint retains its floor boundary component"),Boundary))
 	{
-		TestEqual(TEXT("Boundary has all dashes"),Boundary->GetInstanceCount(),48);
+		if (auto* Material=Boundary->GetMaterial(0))
+		{
+			TestTrue(TEXT("Visible boundary supports instanced rendering"),Material->GetMaterial()->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes));
+			FLinearColor Color;
+			TestTrue(TEXT("Legacy red material renders as warm paper"),
+			    Material->GetVectorParameterValue(FMaterialParameterInfo(TEXT("Color")),Color) &&
+			    Color.R>Color.B && Color.G>Color.R*.7f);
+		}
+		else AddError(TEXT("Visible boundary material is missing"));
+		TestTrue(TEXT("Continuous boundary has enough pieces for a smooth outline"),Boundary->GetInstanceCount()>=64);
+		for (int32 Index=0;Index<Boundary->GetInstanceCount();++Index)
+		{
+			FTransform Piece,Next;
+			Boundary->GetInstanceTransform(Index,Piece);
+			Boundary->GetInstanceTransform((Index+1)%Boundary->GetInstanceCount(),Next);
+			TestTrue(TEXT("Neighboring paper pieces meet without dashed gaps"),
+			    FVector::Distance(Piece.GetLocation(),Next.GetLocation())<Piece.GetScale3D().X*100);
+			TestTrue(TEXT("Paper outline stays within the actual standing radius"),
+			    Piece.GetLocation().Size2D()+Piece.GetScale3D().Y*50<=Zone->State.Radius+.01f);
+		}
 		TestFalse(TEXT("Boundary is hidden before event"),Boundary->IsVisible());
 		TestEqual(TEXT("Boundary never blocks players"),Boundary->GetCollisionEnabled(),ECollisionEnabled::NoCollision);
 	}

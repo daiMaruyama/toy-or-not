@@ -52,6 +52,7 @@ private:
 	void Sync(const UTBChatLog& Log);
 	void AddLine(const FTBChatLine& Line);
 	void RequestScrollToEnd();
+	void UpdatePanelLayout();
 	// 一番下へ寄せる指示を、あと何フレーム出すか。
 	int32 ScrollRetryFrames = 0;
 	bool bOpen = false;
@@ -77,13 +78,15 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> InputBack;
 	UPROPERTY(Transient)
+	TObjectPtr<UBorder> InputPlate;
+	UPROPERTY(Transient)
 	TObjectPtr<UEditableText> Input;
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> SendButton;
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> OpenButton;
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> OpenHint;
+	TObjectPtr<UTextBlock> EmptyLog;
 	// 履歴と同じ並び。
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UWidget>> LineWidgets;

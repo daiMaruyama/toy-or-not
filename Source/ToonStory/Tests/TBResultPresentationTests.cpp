@@ -17,7 +17,7 @@
 #include "Engine/World.h"
 #include "Misc/ScopeExit.h"
 
-// 決着からリザルトの画面まで。車で脱出したら車の演出と並べ直し、人間の勝ちはふた（箱の部屋が無ければママ）、それ以外はママ。
+// 決着からリザルトの画面まで。車で脱出したら車の演出と並べ直し、人間の勝ちはふた。演出がないときは直接リザルトへ。
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBResultPresentationTest, "ToonStory.Results.Presentation",
                                  EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
 bool FTBResultPresentationTest::RunTest(const FString&)
@@ -134,24 +134,27 @@ bool FTBResultPresentationTest::RunTest(const FString&)
 	TestTrue(TEXT("Winner sees their own toy"), PC->GetViewTarget() == Toy);
 	TestTrue(TEXT("Escaped toy celebrates"), Toy->IsCelebrating());
 
-	// 車を使わずにおもちゃが勝ったら、ママの吹き出し。
+	// 車を使わずに勝ったら勝者をすぐ表示する。
 	Playing.Hold(World->GetTimeSeconds() + 600);
 	State->bVehicleEscapeResult = false;
 	State->EscapedPlayers.Reset();
 	Mode->Finish(ETBWinner::Toys, TEXT("test"));
-	TestEqual(TEXT("Toy win without the car uses Mom"), State->ResultStyle, ETBResultStyle::Mom);
+	TestEqual(TEXT("Toy win without the car goes straight to results"), State->ResultStyle, ETBResultStyle::None);
+	TestEqual(TEXT("Toy winner is retained"), State->Winner, ETBWinner::Toys);
+	TestTrue(TEXT("Direct results show immediately"), State->IsResultRevealed());
+	TestTrue(TEXT("Direct results have no unused transition time"), FMath::IsNearlyEqual(State->EndTime - State->ResultStartTime, 10., .01));
 	State->ResultStartTime = State->GetServerWorldTimeSeconds() - (Feel.DecisiveSeconds + .1f);
 	PC->UpdateResultView();
-	TestNull(TEXT("No shot camera for Mom"), Cast<ACameraActor>(PC->GetViewTarget()));
+	TestNull(TEXT("No shot camera for direct results"), Cast<ACameraActor>(PC->GetViewTarget()));
 
-	// 人間の勝ちは、箱の部屋のふたがあればふた、無ければママ。
+	// 人間の勝ちは、箱の部屋のふたがあればふた、無ければ直接リザルトへ。
 	Playing.Hold(World->GetTimeSeconds() + 600);
 	Mode->Finish(ETBWinner::Humans, TEXT("test"));
 	FTransform LidShot;
 	const auto* Lid = ATBBoxLid::Find(World);
 	const bool bLid = Lid && Lid->ResultShot(LidShot);
 	AddInfo(FString::Printf(TEXT("Box lid in this map: %d"), bLid));
-	TestEqual(TEXT("Human win uses the lid when the box room exists"), State->ResultStyle, bLid ? ETBResultStyle::Lid : ETBResultStyle::Mom);
+	TestEqual(TEXT("Human win uses the lid when the box room exists"), State->ResultStyle, bLid ? ETBResultStyle::Lid : ETBResultStyle::None);
 
 	// ロビーに戻ると演出は残らない。
 	Mode->ClearResultPresentation();

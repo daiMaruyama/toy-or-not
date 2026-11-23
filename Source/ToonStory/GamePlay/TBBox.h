@@ -62,6 +62,10 @@ public:
 	static const UBoxComponent* FindDropArea(const UWorld* World);
 	// 収納・救助でフタが開く時に各PCで呼ばれる。
 	FTBBoxOpened OnOpened;
+	// 脱出のゴールの瞬間に各PCで呼ばれる。救助・収納より大きく開く。
+	FTBBoxOpened OnEscapeOpened;
+	// 脱出のゴールの瞬間。ふたへの頭突きの音と、大きく開く合図を全員へ送る（サーバーだけ）。
+	void PlayEscapeBump();
 
 private:
 	struct FCaptivity { uint32 Round = 0; uint32 Generation = 0; };
@@ -69,6 +73,8 @@ private:
 	uint32 NextCaptureGeneration = 0;
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastOpened();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastEscapeOpened();
 	void RefreshAppearance();
 	bool HasDummyPrisoners() const;
 	bool FindDropSpot(const ATBCharacter* Toy, FVector& OutSpot) const;

@@ -16,31 +16,18 @@ void TBOptionsPages::BuildControls(UTBOptionsMenu& Menu, UTBGameUserSettings& Se
 		const auto& Range = TB::ConfigData().Controls.MouseSensitivity;
 		return Fraction(S->GetMouseSensitivity(), Range.Min, Range.Max);
 	};
-	Sensitivity->CanStep = [S](int32 Steps)
-	{
-		const auto& Range = TB::ConfigData().Controls.MouseSensitivity;
-		const float Value = S->GetMouseSensitivity();
-		return Steps < 0 ? Value > Range.Min + .001f : Value < Range.Max - .001f;
-	};
-	Sensitivity->Step = [S](int32 Steps)
-	{
-		S->StepMouseSensitivity(Steps);
-		S->SaveSettings();
-	};
 	const auto& SensitivityRange = TB::ConfigData().Controls.MouseSensitivity;
 	BindSlider(*Sensitivity, SensitivityRange.Min, SensitivityRange.Max, SensitivityRange.Step,
 	           [S](float Value) { S->SetMouseSensitivity(Value); }, nullptr, [S] { S->SaveSettings(); });
 	auto* Invert = Menu.AddRow(TBOptionsPage::Controls, TBText::Get(TEXT("Options.InvertY")), false);
 	Invert->Value = [S] { return OnOff(S->IsMouseYInverted()); };
-	Invert->CanStep = [S](int32 Steps) { return (Steps > 0) != S->IsMouseYInverted(); };
-	Invert->Step = [S](int32 Steps)
+	Invert->Choices = ToggleChoices;
+	Invert->Select = [S](int32 Index)
 	{
-		S->SetMouseYInverted(Steps > 0);
+		S->SetMouseYInverted(Index != 0);
 		S->SaveSettings();
 	};
 
-	// キー設定。行ごとに今のキー名を出し、「変える」で付け替える。
-	Menu.AddNote(TBOptionsPage::Controls, TBText::Get(TEXT("Options.ControlsNote")));
 	const TCHAR* SectionKeys[] = {TEXT("Keys.Common"), TEXT("Keys.Human"), TEXT("Keys.Toy"), TEXT("Keys.Lobby"), TEXT("Keys.Results")};
 	int32 SectionIndex = 0;
 	for (const TB::FKeySection& Section : TB::KeySections())

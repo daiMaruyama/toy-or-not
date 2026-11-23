@@ -434,3 +434,15 @@ void ATBBox::MulticastOpened_Implementation()
 {
 	OnOpened.Broadcast();
 }
+
+void ATBBox::PlayEscapeBump()
+{
+	if (!HasAuthority()) return;
+	UTBAudioEvents::Emit(this, ETBSoundEvent::LidBump, nullptr, InteractionPoint->GetComponentLocation());
+	MulticastEscapeOpened();
+}
+
+void ATBBox::MulticastEscapeOpened_Implementation()
+{
+	OnEscapeOpened.Broadcast();
+}

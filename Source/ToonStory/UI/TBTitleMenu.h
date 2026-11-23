@@ -3,13 +3,13 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Components/ComboBoxString.h"
 #include "TBTitleMenu.generated.h"
 
 class UTBSession;
 class UButton;
 class UTextBlock;
 class UTexture2D;
+class UScrollBox;
 
 /** Title menu; observes the existing session subsystem. */
 UCLASS()
@@ -19,7 +19,7 @@ class TOONSTORY_API UTBTitleMenu : public UUserWidget
 public:
 	enum class EState : uint8
 	{
-		Story, // 寸劇を全画面で流す。メニューは隠す
+		Story, // 寸劇の終わり際にメニューを重ねる
 		Menu,  // メニューをフェードで出す。後ろでは部屋の様子がループする
 	};
 	EState GetState() const
@@ -83,18 +83,8 @@ protected:
 
 private:
 	void BuildPaperLayout();
-	void UpdateTitleCaptions();
-	struct FTitleCaption
-	{
-		TWeakObjectPtr<UButton> Button;
-		TWeakObjectPtr<class UImage> Patch;
-		TWeakObjectPtr<UWidget> Layer;
-		FString Key, Original;
-	};
-	TArray<FTitleCaption> TitleCaptions;
-	// 乗せているボタンの集中線だけを出す。
-	void UpdateBursts();
-	void EnterMenu();
+	void EnterMenu(bool bBeforeStoryEnd = false);
+	bool bOpeningOverlap = false;
 	// 寸劇を流さずメニューへ入るとき、寸劇を最後のコマの状態にする。
 	void SettleStory();
 	void StartLoop();
@@ -116,40 +106,51 @@ private:
 	TWeakObjectPtr<class ALevelSequenceActor> StoryActor;
 	UPROPERTY(Transient) TObjectPtr<UWidget> Blackout;
 	UPROPERTY(Transient) TObjectPtr<UWidget> MenuLayer;
-	UPROPERTY(Transient) TArray<TObjectPtr<UWidget>> RoomCardWidgets;
+	UPROPERTY(Transient) TObjectPtr<UWidget> TitlePrintSheet;
+	UPROPERTY(Transient) TObjectPtr<UWidget> StorySkipHint;
+	UPROPERTY(Transient) TObjectPtr<UWidget> FinderOverlay;
 	UPROPERTY(Transient) TObjectPtr<UTBSession> Session;
 	UPROPERTY(Transient) TObjectPtr<UButton> JoinButton;
-	UPROPERTY(Transient) TObjectPtr<UComboBoxString> RoomList;
+	UPROPERTY(Transient) TObjectPtr<UButton> RefreshRoomsButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> BackFromFinderButton;
+	UPROPERTY(Transient) TObjectPtr<UScrollBox> RoomList;
+	int32 SelectedRoom = INDEX_NONE;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> StatusText;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> RoomHintText;
 	UFUNCTION() void Refresh();
 	UFUNCTION() void Hover();
 	UFUNCTION() void Host();
 	UFUNCTION() void Find();
+	UFUNCTION() void CloseFinder();
 	UFUNCTION() void Join();
 	UFUNCTION()
 	void Quit();
+	UFUNCTION() void AskQuit();
+	UFUNCTION() void CancelQuit();
+	UPROPERTY(Transient) TObjectPtr<UWidget> QuitOverlay;
+	UPROPERTY(Transient) TObjectPtr<UButton> CancelQuitButton;
 	UFUNCTION()
 	void Help();
 	UFUNCTION() void CloseHelp();
-	// キー名は割り当てで変わるので、開くたびに作り直す。
+	UFUNCTION() void ShowToyHelp();
+	UFUNCTION() void ShowHumanHelp();
+	// 陣営を切り替えたら、その漫画と遊び方を一緒に更新する。
 	void RefreshHelpText();
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpToyText;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpHumanText;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpControlsText;
+	bool bHumanHelp = false;
+	UPROPERTY(Transient) TObjectPtr<UButton> HelpToyTab;
+	UPROPERTY(Transient) TObjectPtr<UButton> HelpHumanTab;
+	UPROPERTY(Transient) TObjectPtr<class UImage> HelpComic;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpGoal;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpCaptions;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpSpeech;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitleContent;
 	UPROPERTY(Transient) TObjectPtr<UWidget> HelpOverlay;
-	UPROPERTY(Transient) TObjectPtr<UButton> CloseHelpButton;
 	// オプション画面（UTBOptionsMenu）を開く。ロビー・試合中のメニューと同じ画面。
 	UFUNCTION() void OpenOptions();
 	TWeakObjectPtr<class UTBOptionsMenu> Options;
-	UFUNCTION()
-	class UWidget* RoomLabel(FString Item);
 	UPROPERTY(Transient)
 	TObjectPtr<class UFont> PaperFont;
 	UPROPERTY(Transient)
 	TObjectPtr<class UFont> LogoFont;
-	UPROPERTY(Transient)
-	TObjectPtr<class UTexture2D> PaperTexture;
-	UFUNCTION() void SelectionChanged(FString Item, ESelectInfo::Type SelectionType);
+	UFUNCTION() void RoomChecked(bool bChecked);
 };
