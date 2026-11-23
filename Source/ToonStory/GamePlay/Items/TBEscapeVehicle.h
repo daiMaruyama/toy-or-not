@@ -85,6 +85,7 @@ private:
 	UPROPERTY(Replicated)
 	float ResultCover = 0.f;
 	void ReleasePassengers();
+	bool FindExitSpot(ATBCharacter* Toy, FVector& Destination) const;
 	UFUNCTION()
 	void OnBoardingOverlap(UPrimitiveComponent* Component, AActor* Other, UPrimitiveComponent* OtherComponent,
 	                       int32 BodyIndex, bool bFromSweep, const FHitResult& Sweep);

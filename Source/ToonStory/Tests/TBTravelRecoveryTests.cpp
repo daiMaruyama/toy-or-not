@@ -5,6 +5,7 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBLobbySettings.h"
+#include "UI/TBUIText.h"
 #include "Core/TBSession.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -69,7 +70,7 @@ bool FTBTravelRecovery::RunTest(const FString&)
 	TBLobbySettings::CancelTravel(World);
 	TestEqual(TEXT("Cancellation releases the random destination"), Pending->ResolvedStage, INDEX_NONE);
 	TestEqual(TEXT("Cancellation preserves Random for retry"), State->SelectedStage, TBLobbySettings::RandomStageId);
-	TestEqual(TEXT("Cancellation restores the Random label"), State->StageName, FString(TEXT("Random")));
+	TestEqual(TEXT("Cancellation restores the Random label"), State->StageName, TBText::String(TEXT("Stage.Random")));
 	State->Phase = ETBPhase::Playing;
 	TestFalse(TEXT("An unresolved random destination cannot silently travel to Demo outside the lobby"), TBLobbySettings::TryTravel(Mode, true).IsEmpty());
 	TestTrue(TEXT("Refusing unresolved random leaves travel empty"), Pending->PendingMap.IsEmpty());

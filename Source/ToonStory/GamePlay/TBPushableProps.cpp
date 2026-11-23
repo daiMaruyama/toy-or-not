@@ -1,10 +1,25 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
 #include "TBPushableProps.h"
+#include "Character/TBCharacterGeometry.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Level.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "PhysicsEngine/BodySetup.h"
+
+void TBPushableProps::ConfigureCharacterCollision(UStaticMeshComponent& Part)
+{
+	const UStaticMesh* Mesh = Part.GetStaticMesh();
+	// Compare placed dimensions in the mesh's own axes so tipping a can doesn't change its class.
+	const FVector Extent = Mesh ? Mesh->GetBounds().BoxExtent * Part.GetComponentScale().GetAbs() : FVector::ZeroVector;
+	const double Width = Extent.X + Extent.Y + Extent.Z - Extent.GetMax() - Extent.GetMin();
+	const bool bYieldsToToy = Mesh && Width <= TBCharacterGeometry::ToyRadius + UE_KINDA_SMALL_NUMBER &&
+		Extent.GetMax() <= TBCharacterGeometry::ToyHalfHeight + UE_KINDA_SMALL_NUMBER;
+	Part.SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	Part.SetCollisionResponseToChannel(ECC_GameTraceChannel1, bYieldsToToy ? ECR_Ignore : ECR_Block);
+	Part.SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	Part.CanCharacterStepUpOn = ECB_No;
+}
 
 bool TBPushableProps::TryEnable(AStaticMeshActor& Prop)
 {
@@ -56,10 +71,7 @@ bool TBPushableProps::TryEnable(AStaticMeshActor& Prop)
 	Part->ComponentTags.AddUnique(TEXT("TBPushableConfigured"));
 	if (!bAuthoredPushable) Part->ComponentTags.AddUnique(TEXT("TBRuntimePushable"));
 	Part->SetCollisionProfileName(TEXT("PhysicsActor"));
-	Part->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-	Part->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
-	Part->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-	Part->CanCharacterStepUpOn = ECB_No;
+	ConfigureCharacterCollision(*Part);
 	// Existing props retain their authored mass (House uses 2 kg, Demo uses 1 kg).
 	if (!bAuthoredPushable) Part->SetMassOverrideInKg(NAME_None, 1.f);
 	Part->SetLinearDamping(.6f);

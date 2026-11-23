@@ -37,6 +37,7 @@ namespace TBLobbySettings
 	inline constexpr int32 DemoStageId = 1;
 	inline constexpr int32 HouseStageId = 3;
 	const TCHAR* StagePath(int32 Index);
+	FString StageDisplayName(int32 Index);
 	bool IsStageAvailable(int32 Index);
 	// Called after the host/readiness checks; arrival reuses the cached random destination.
 	void ResolveStageForStart(UWorld* World);

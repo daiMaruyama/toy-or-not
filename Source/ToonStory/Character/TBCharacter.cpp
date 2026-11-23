@@ -846,24 +846,75 @@ void ATBCharacter::UpdateCarryCamera()
 	UpdateAppearance(TBPS() && TBPS()->Team == ETBTeam::Toy);
 }
 
-// カメラは先に切り替える。寄せる先は毎フレームの最新値なので、運ぶ人の移動や視点操作があっても最後に飛ばない。
 void ATBCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 {
 	Super::CalcCamera(DeltaTime, OutResult);
 	if (IsValid(EscapeVehicle))
 	{
-		const FVector Focus = EscapeVehicle->GetActorLocation() + FVector(0, 0, 45);
-		const FRotator View = GetControlRotation();
-		const FVector Desired = Focus - View.Vector() * 250.f;
+		const float CarScale = FMath::Max(.01f, float(EscapeVehicle->GetActorScale3D().GetAbsMin()));
+		const FVector BodyCentre = EscapeVehicle->Mesh->Bounds.Origin;
+		const FRotator View(-16.f, EscapeVehicle->GetActorRotation().Yaw - 22.f, 0.f);
 		FCollisionQueryParams Query(SCENE_QUERY_STAT(TBEscapeVehicleCamera), false, this);
 		Query.AddIgnoredActor(EscapeVehicle);
+		// Give the sightline some width so thin chair legs cannot fill the foreground.
+		const FCollisionShape Probe = FCollisionShape::MakeSphere(8.f);
+		// Keep the original chase distance even on stages that scale down the toy car.
+		const FVector Focus = EscapeVehicle->GetActorLocation() + FVector::UpVector * 45.f;
+		const FVector Desired = Focus - View.Vector() * 250.f;
 		FHitResult Hit;
-		GetWorld()->SweepSingleByChannel(Hit, Focus, Desired, FQuat::Identity, ECC_Camera,
-		    FCollisionShape::MakeSphere(8.f), Query);
-		OutResult.Location = Hit.bBlockingHit ? Hit.Location : Desired;
-		OutResult.Rotation = View;
+		const bool bHit = GetWorld()->SweepSingleByChannel(Hit, BodyCentre, Desired, FQuat::Identity, ECC_Camera, Probe, Query);
+		const FVector Origin = EscapeVehicle->GetActorLocation();
+		const bool bCameraCut = DrivingCameraVehicle.Get() != EscapeVehicle ||
+			FVector::DistSquared(Origin, LastDrivingCameraOrigin) > FMath::Square(500.);
+		DrivingCameraVehicle = EscapeVehicle;
+		LastDrivingCameraOrigin = Origin;
+		if (bCameraCut || bHit == bDrivingCameraBlocked)
+		{
+			bDrivingCameraBlocked = bHit;
+			DrivingCameraSwitchTime = 0.f;
+		}
+		else
+		{
+			DrivingCameraSwitchTime += FMath::Max(DeltaTime, 0.f);
+			if (DrivingCameraSwitchTime >= (bHit ? .05f : .12f))
+			{
+				bDrivingCameraBlocked = bHit;
+				DrivingCameraSwitchTime = 0.f;
+			}
+		}
+		FVector Target = Desired;
+		float TargetAimBlend = 1.f;
+		if (bHit && bDrivingCameraBlocked)
+		{
+			// A wall behind the bumper leaves room above it. Keep the whole vehicle in frame
+			// as the arm retracts, and test the elevated sightline against shelves and ceilings.
+			const float Extension = Hit.Time;
+			const double HalfFov = FMath::DegreesToRadians(OutResult.FOV * .5);
+			const double HalfVerticalFov = FMath::Atan(FMath::Tan(HalfFov) / FMath::Max(16.f / 9.f, OutResult.AspectRatio));
+			const FVector LocalExtent = EscapeVehicle->Mesh->CalcLocalBounds().BoxExtent;
+			const double BodyRadius = (LocalExtent * EscapeVehicle->Mesh->GetComponentScale()).Size();
+			const double FramingDistance = BodyRadius * 1.2 / FMath::Sin(HalfVerticalFov);
+			const double RearDistanceSq = FVector::DistSquared2D(Hit.Location, BodyCentre);
+			FVector Raised = Hit.Location;
+			Raised.Z = FMath::Max(Raised.Z, BodyCentre.Z + FMath::Sqrt(FMath::Max(0., FMath::Square(FramingDistance) - RearDistanceSq)));
+			Target = GetWorld()->SweepSingleByChannel(Hit, BodyCentre, Raised, FQuat::Identity, ECC_Camera, Probe, Query)
+			    ? Hit.Location : Raised;
+			TargetAimBlend = Extension * Extension;
+		}
+		// Filter only the collision correction in car space, so steering stays responsive.
+		if (bHit == bDrivingCameraBlocked)
+		{
+			const float Alpha = bCameraCut ? 1.f : 1.f - FMath::Exp(-FMath::Max(0.f, DeltaTime) * (bHit ? 8.f : 5.f));
+			DrivingCameraOffset = FMath::Lerp(DrivingCameraOffset, View.UnrotateVector(Target - Desired), Alpha);
+			DrivingCameraAimBlend = FMath::Lerp(DrivingCameraAimBlend, TargetAimBlend, Alpha);
+		}
+		OutResult.Location = Desired + View.RotateVector(DrivingCameraOffset);
+		const FVector Aim = FMath::Lerp(BodyCentre, Focus, DrivingCameraAimBlend) - OutResult.Location;
+		OutResult.Rotation = Aim.IsNearlyZero() ? View : Aim.Rotation();
+		OutResult.PerspectiveNearClipPlane = 2.f * CarScale;
 		return;
 	}
+	DrivingCameraVehicle.Reset();
 	if (IsCelebrating())
 	{
 		const FVector Focus = GetActorLocation() + FVector(0, 0, BaseEyeHeight * .5f);
@@ -941,6 +992,8 @@ void ATBCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 		    FQuat::Slerp(CarryBlendFrom.Rotation.Quaternion(), OutResult.Rotation.Quaternion(), Alpha).Rotator();
 		OutResult.FOV = FMath::Lerp(CarryBlendFrom.FOV, OutResult.FOV, Alpha);
 	}
+	// Keep the standing look direction on the controller for when the toy gets up.
+	if (IsToyFallen()) OutResult.Rotation = FRotator(90.f, GetControlRotation().Yaw, 0.f);
 	LastView = OutResult;
 	bHasLastView = true;
 }
@@ -985,6 +1038,7 @@ void ATBCharacter::Tick(float DeltaSeconds)
 	if (EscapeVehicle && VehicleExitStarted >= 0 &&
 	    GetWorld()->GetTimeSeconds() - VehicleExitStarted >= FMath::Max(.1f, EscapeVehicle->Data().ExitHoldSeconds))
 	{
+		VehicleExitStarted = -1;
 		EscapeVehicle->Leave(this);
 	}
 	auto* ToyPlayerInfo = TBPS();
@@ -1185,6 +1239,16 @@ void ATBCharacter::ServerVehicleInput_Implementation(FVector2D Input)
 	if (IsValid(EscapeVehicle) && CanAct()) EscapeVehicle->SetDrivingInput(this, Input);
 }
 
+void ATBCharacter::RequestLeaveVehicle()
+{
+	if (IsValid(EscapeVehicle)) ServerLeaveVehicle(EscapeVehicle);
+}
+
+void ATBCharacter::ServerLeaveVehicle_Implementation(ATBEscapeVehicle* Vehicle)
+{
+	if (IsValid(Vehicle) && EscapeVehicle == Vehicle && CanAct()) Vehicle->Leave(this);
+}
+
 void ATBCharacter::ServerDrop_Implementation()
 {
 	if (TB::Playing(GetWorld()))
@@ -1326,7 +1390,7 @@ void ATBCharacter::Right(float InputValue)
 // 運ばれている間は移動できないが、人間の周りを左右に回り込める。
 void ATBCharacter::Yaw(float InputValue)
 {
-	if (!IsMovementLocked() || Carrier || EscapeVehicle || (IsToyFallen() && !IsGazeFrozen()))
+	if (!IsMovementLocked() || Carrier)
 	{
 		AddControllerYawInput(InputValue * LookScale().X);
 	}
@@ -1342,7 +1406,7 @@ FVector2D ATBCharacter::LookScale()
 // 運ばれている間の見下ろし角は掴まれた時点の値で固定する。
 void ATBCharacter::Pitch(float InputValue)
 {
-	if (!IsMovementLocked() || EscapeVehicle || (IsToyFallen() && !IsGazeFrozen()))
+	if (!IsMovementLocked())
 	{
 		AddControllerPitchInput(InputValue * LookScale().Y);
 	}
@@ -1433,6 +1497,7 @@ void ATBCharacter::EmotePressed(ETBEmoteKind Kind)
 void ATBCharacter::SetupPlayerInputComponent(UInputComponent* Input)
 {
 	Super::SetupPlayerInputComponent(Input);
+	Input->BindKey(EKeys::Q, IE_Pressed, this, &ATBCharacter::RequestLeaveVehicle).bConsumeInput = false;
 	FInputKeyBinding SecretDance(FInputChord(EKeys::Zero), IE_Pressed);
 	SecretDance.bConsumeInput = false;
 	SecretDance.KeyDelegate.GetDelegateForManualSet().BindUObject(this, &ATBCharacter::EmotePressed, ETBEmoteKind::WildDance);

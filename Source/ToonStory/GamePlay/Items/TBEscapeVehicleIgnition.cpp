@@ -68,12 +68,13 @@ void ATBEscapeVehicle::CalcCamera(float DeltaTime, FMinimalViewInfo& Out)
 void ATBEscapeVehicle::StartIgnitionEffects(float Elapsed, USoundBase* Sound)
 {
 	LampRig = NewObject<USceneComponent>(this);
-	LampRig->SetupAttachment(GetRootComponent());
-	LampRig->SetRelativeLocation(ShotCenter);
-	LampRig->SetVisibility(false);
+	LampRig->SetupAttachment(Mesh);
+	// The reflector coordinates were measured in parked vehicle space.
+	LampRig->SetRelativeTransform(FTransform(ShotCenter).GetRelativeTransform(Mesh->GetRelativeTransform()));
 	LampRig->RegisterComponent();
 	const float Scale = GetActorScale3D().GetAbsMin();
 	LensGlow = UMaterialInstanceDynamic::Create(LensMaterial, this);
+	if (LensGlow) LensGlow->SetScalarParameterValue(TEXT("Brightness"), 0.f);
 	for (float Side : {-1.f, 1.f})
 	{
 		// Outline of the two inset reflectors on SM_ToyCar_01, in vehicle space.
@@ -88,7 +89,6 @@ void ATBEscapeVehicle::StartIgnitionEffects(float Elapsed, USoundBase* Sound)
 		Lens->SetRelativeLocation(FVector(52.88,Side*16.32,-1.55));
 		Lens->SetRelativeRotation(FRotationMatrix::MakeFromXY(Across, Down).Rotator());
 		Lens->SetRelativeScale3D(FVector(Across.Size()/100., Down.Size()/100., 1.));
-		Lens->SetVisibility(false);
 		Lens->RegisterComponent();
 
 		auto* Light = NewObject<USpotLightComponent>(this);
@@ -101,7 +101,6 @@ void ATBEscapeVehicle::StartIgnitionEffects(float Elapsed, USoundBase* Sound)
 		Light->SetLightColor(FLinearColor(1,.81,.53));
 		Light->SetCastShadows(false);
 		Light->SetIntensity(0);
-		Light->SetVisibility(false);
 		Light->RegisterComponent();
 		Headlights.Add(Light);
 	}
@@ -135,9 +134,6 @@ void ATBEscapeVehicle::UpdateIgnitionEffects(const ATBGameState* Match)
 		Kick < 0. ? 0. : .28 * FMath::Sin(Kick * .95) * FMath::Exp(-Kick / 14.);
 	const FVector Shift(Roll(Frame), 0, Bounce);
 	Mesh->SetRelativeLocation(ParkedMeshLocation + Shift);
-	LampRig->SetRelativeLocation(ShotCenter + Shift);
-	const bool bLightsOn = Level > .001;
-	if (LampRig->GetVisibleFlag() != bLightsOn) LampRig->SetVisibility(bLightsOn, true);
 	if (LensGlow) LensGlow->SetScalarParameterValue(TEXT("Brightness"), 4.5f * Level);
 	const float Intensity = 170.f * Level * FMath::Square(GetActorScale3D().GetAbsMin());
 	for (USpotLightComponent* Lamp : Headlights) Lamp->SetIntensity(Intensity);

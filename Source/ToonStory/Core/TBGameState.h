@@ -65,8 +65,10 @@ public:
 	int32 PlayerLimit = 0;
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	int32 SelectedStage = 1;
-	UPROPERTY(Replicated, BlueprintReadOnly)
+	UPROPERTY(ReplicatedUsing=OnRep_TravelPending, BlueprintReadOnly)
 	bool bTravelPending = false;
+	UFUNCTION()
+	void OnRep_TravelPending();
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	FTBSettings Settings;
 	UPROPERTY(Replicated, BlueprintReadOnly)

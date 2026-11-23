@@ -104,8 +104,8 @@ void ATBGameMode::BeginPlay()
 	{
 		const FString Map = GetWorld()->GetMapName();
 		MatchInfo->PlayerLimit = GameSession ? GameSession->MaxPlayers : 0;
-		MatchInfo->StageName = Map.Contains(TEXT("StylizedHouse")) ? TEXT("Stylized House")
-		                       : Map.Contains(TEXT("ToyWorldDemo")) ? TEXT("ToyWorld Demo")
+		MatchInfo->StageName = Map.Contains(TEXT("StylizedHouse")) ? TBLobbySettings::StageDisplayName(TBLobbySettings::HouseStageId)
+		                       : Map.Contains(TEXT("ToyWorldDemo")) ? TBLobbySettings::StageDisplayName(TBLobbySettings::DemoStageId)
 		                       : Map.Contains(TEXT("ToyWorld"))   ? TEXT("紙のひみつクラブ")
 		                                                          : TEXT("Test Arena");
 		TActorIterator<ATBBox> It(GetWorld());

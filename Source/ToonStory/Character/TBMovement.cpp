@@ -69,7 +69,7 @@ void UTBMovement::SweepPushableProps(float DeltaSeconds)
 		if (Hit.bStartPenetrating) Contact.ImpactPoint = Part->Bounds.Origin;
 		// The object query excludes static walls; check occlusion before applying contact effects.
 		if (!TB::ClearPath(CharacterOwner, Hit.GetActor(), Start, Contact.ImpactPoint)) continue;
-		bBrushingProp = true;
+		bBrushingProp |= Part->GetCollisionResponseToChannel(ECC_GameTraceChannel1) == ECR_Block;
 		ApplyImpactPhysicsForces(Contact, Acceleration, Approach);
 	}
 }

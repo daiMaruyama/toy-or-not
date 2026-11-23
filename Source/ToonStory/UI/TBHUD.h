@@ -74,7 +74,6 @@ private:
 	              bool ScalePosition = false, bool Outlined = false);
 	void DrawResults(const class ATBGameState& MatchState);
 	void DrawMatch(const class ATBGameState& MatchState, class ATBController& Controller);
-	TWeakObjectPtr<class ATBEscapeVehicle> EscapeGuideVehicle;
 	TWeakObjectPtr<class ATBEscapeExit> EscapeGuideExit;
 	void DrawLobby();
 	void DrawRoomPanel(float X, float Y, float W, float H, float Unit, FLinearColor Fill);

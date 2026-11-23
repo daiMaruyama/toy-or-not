@@ -504,6 +504,8 @@ namespace
 			    !Test->TestNull(TEXT("Direction fixture does not replace an authored active mom event"),
 			        ATBMomArrivalZone::FindActive(World.Get()))) return false;
 			OldNavigationBox = State->Box;
+			// The review freezes the match clock before the mom event's opening delay elapses.
+			State->HidePreparation.EndsAt = State->GetServerWorldTimeSeconds() - TB::Rules().Events.Mom.InitialDelaySeconds - 1.;
 			OldCarriedToy = Body->CarriedToy;
 			OldCarriedDummy = Body->CarriedDummy;
 			OldStoreStarted = Body->StoreStarted;

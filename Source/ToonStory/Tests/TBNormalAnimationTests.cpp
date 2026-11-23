@@ -1164,6 +1164,7 @@ bool FTBToyFallTest::RunTest(const FString&)
 	    Toy->bIsCrouched && FVector::Dist2D(BeforeFirstFall, Toy->GetActorLocation()) < .01 &&
 	    Move->Velocity.Size2D() < .01 && Move->Velocity.Z <= 0 && !Toy->bPressedJump);
 	Toy->UnCrouch(); Move->UnCrouch(false);
+	Controller->SetControlRotation(FRotator(-18.f, 37.f, 0.f));
 	for (int32 Index = 0; Index < Toy->ToyCatalogue.Num(); ++Index)
 	{
 		Toy->SelectedToyIndex = Index; Toy->RefreshToyPresentation();
@@ -1215,11 +1216,17 @@ bool FTBToyFallTest::RunTest(const FString&)
 		    FVector::Dist2D(Before, Toy->GetActorLocation()) < .01 && Move->Velocity.Size2D() < .01 && Move->Velocity.Z <= 0);
 		Controller->RotationInput = FRotator::ZeroRotator;
 		Toy->Yaw(1.f); Toy->Pitch(1.f);
-		TestTrue(TEXT("A fallen toy can look around before being frozen"),
-		    !FMath::IsNearlyZero(Controller->RotationInput.Yaw) && !FMath::IsNearlyZero(Controller->RotationInput.Pitch));
+		TestTrue(TEXT("Look input is ignored while lying down"), Controller->RotationInput.IsNearlyZero());
+		const FRotator StandingLook = Controller->GetControlRotation();
+		FMinimalViewInfo FallenView;
+		Toy->CalcCamera(.016f, FallenView);
+		TestTrue(TEXT("The fallen toy looks straight up"), FallenView.Rotation.Vector().Equals(FVector::UpVector, .001));
 		const FVector BeforeStanding = Toy->GetActorLocation();
 		Toy->CrouchReleased(); Move->PerformMovement(.016f); Toy->Tick(.2f);
 		TestFalse(TEXT("Releasing the held action stands up"), Toy->IsToyFallen() || Move->bWantsToCrouch);
+		FMinimalViewInfo StandingView;
+		Toy->CalcCamera(.016f, StandingView);
+		TestTrue(TEXT("Standing restores the original look direction"), StandingView.Rotation.Equals(StandingLook, .01));
 		TestTrue(TEXT("Standing never expands the toy to the human capsule or teleports it"),
 		    Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() == Half && Toy->GetActorLocation().Equals(BeforeStanding, .01));
 		TestTrue(TEXT("Standing restores orientation and movement"), Toy->ToyVisual->GetRelativeRotation().IsNearlyZero(.01) && Move->GetMaxSpeed() > 0);

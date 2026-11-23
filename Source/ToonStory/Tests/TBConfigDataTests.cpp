@@ -68,6 +68,7 @@ bool FTBConfigDataTest::RunTest(const FString& Parameters)
 	auto* Settings = NewObject<UTBGameUserSettings>();
 	// 新しく作っても、この PC に保存した値を引き継ぐ。どの PC でも「まだ選んでいない」から始める。
 	Settings->SetToDefaults();
+	TestEqual(TEXT("Unchosen resolution scale starts at 65%"), Settings->GetResolutionScalePercent(), 65.f);
 	TestEqual(TEXT("Unchosen volume follows the data default"), Settings->GetVolume(ETBVolume::Music), .65f);
 	Settings->StepVolume(ETBVolume::Music, 1);
 	TestEqual(TEXT("A step from between marks stops at the next mark"), Settings->GetVolume(ETBVolume::Music), .7f);
@@ -97,6 +98,8 @@ bool FTBConfigDataTest::RunTest(const FString& Parameters)
 	Settings->SetResolutionScaleValueEx(100.f);
 	Settings->StepResolutionScale(-1);
 	TestEqual(TEXT("Resolution scale steps by the data step"), Settings->GetResolutionScalePercent(), 95.f);
+	Settings->SetQualityPreset(2);
+	TestEqual(TEXT("Changing quality preserves the chosen scale"), Settings->GetResolutionScalePercent(), 95.f);
 	for (int32 Step = 0; Step < 10; ++Step)
 	{
 		Settings->StepBrightness(1);
@@ -109,6 +112,7 @@ bool FTBConfigDataTest::RunTest(const FString& Parameters)
 	Settings->SetRayTracingOn(false);
 	TestFalse(TEXT("Ray tracing can be turned off"), Settings->IsRayTracingOn());
 	Settings->ResetDisplay();
+	TestEqual(TEXT("Reset display restores 65%"), Settings->GetResolutionScalePercent(), 65.f);
 	TestTrue(TEXT("Reset display restores ray tracing"), Settings->IsRayTracingOn() == Display.bDefaultRayTracing);
 
 	// 操作。上下反転は縦だけ逆にする。

@@ -17,7 +17,7 @@ struct FImage;
 struct FWorldContext;
 
 /**
- * ロード画面を出し入れする。ほかの処理は変えず、読むだけでつなぐ。
+ * 現在の画面にカーテンを閉じてから移動を開始し、到着までロード画面を維持する。
  * - マップを丸ごと読み直す移動（タイトル ↔ ロビー）は、読み込みの開始・終了の通知で MoviePlayer に出させる。
  * - 裏で切り替える移動（ロビー ↔ 試合）は、コントローラーが画面を黒くしている間、その上にかぶせる。
  * どちらも、自分のキャラが出てくるまで出しておき、短く薄れて消える。
@@ -33,8 +33,14 @@ public:
 
 	virtual void Tick(float DeltaTime) override;
 	bool IsCoveringViewport() const { return bHardLoad || Overlay.IsValid(); }
+#if WITH_DEV_AUTOMATION_TESTS
+	bool IsViewportMoviePlayingForReview() const;
+#endif
 	static bool IsCovering(const UGameInstance* Instance);
 	static bool IsClosingOverDeparture(const UWorld* World);
+	static void BeginReplicatedDeparture(UWorld* World);
+	// Returns true when the local viewport takes ownership of the travel callback.
+	static bool DeferForCurtain(UWorld* World, const FString& URL, FSimpleDelegate Travel, bool bSeamless = false);
 	// 移動の向きの文字を決める部品。移動の行き先（URLから取ったマップ名）がわかっていればそれを優先し、なければGameStateから決めた値を使う。
 	static FString MapNameFromURL(const FString& URL);
 	static bool IsReturningLabel(const FString& DestMap, bool bReturningFromState);
@@ -45,6 +51,8 @@ public:
 	virtual ETickableTickType GetTickableTickType() const override { return ETickableTickType::Conditional; }
 
 private:
+	FSimpleDelegate PendingDeparture;
+	void SealDeparture(UWorld* World);
 	void PreLoadMap(const FWorldContext& Context, const FString& MapName);
 	void PostLoadMap(UWorld* World);
 	void Failed(UWorld* World, UNetDriver* Driver, ENetworkFailure::Type Type, const FString& Error);
@@ -63,6 +71,7 @@ private:
 
 	// MoviePlayer に渡す絵と、ゲーム画面にかぶせる絵。同じ部品を2か所に付けないよう分ける。
 	TSharedPtr<STBLoadingScreen> MovieScreen;
+	double NativeFilmStartedAt = 0.;
 	// The same film still covers decoder startup and devices without a supported movie player.
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTexture2D>> FilmPosters;

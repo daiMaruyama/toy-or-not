@@ -126,6 +126,7 @@ void STBLoadingScreen::SetViewportPoster(UTexture2D* Texture)
 
 void STBLoadingScreen::SetMovieVisible(bool bVisible, double MovieStartedAt)
 {
+	bViewportMovieVisible = bVisible;
 	bStartMovieWhenReady = bVisible;
 	ResumeMovieFrom = MovieStartedAt;
 	if (!bVisible && Player.IsValid() && Player->IsPlaying()) Player->Pause();
@@ -190,9 +191,26 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	if (W <= 0 || H <= 0 || Exit >= 1.f) return Layer;
 	const FSlateBrush* White = FCoreStyle::Get().GetBrush("WhiteBrush");
 	// Full coverage at the midpoint hides the switch between the film and the world.
-	const float In = Settings->FadeInSeconds > 0.f
-	                     ? FMath::Clamp(float(FPlatformTime::Seconds() - ShownAt) / Settings->FadeInSeconds, 0.f, 1.f)
+	const double Now = FPlatformTime::Seconds();
+	float In = Settings->FadeInSeconds > 0.f
+	                     ? FMath::Clamp(float(Now - ShownAt) / Settings->FadeInSeconds, 0.f, 1.f)
 	                     : 1.f;
+	if (bHoldClosed && In >= .5f)
+	{
+		bPaintedClosed = true;
+		return PaintStageCurtain(Out, Geometry, Layer, 0.f);
+	}
+	if (In >= .5f && Exit <= 0.f && Backdrop != ETBLoadingBackdrop::Illustrations)
+	{
+		const double Duration = Settings->FadeInSeconds * .5;
+		// The game thread can stall for a whole opening during travel. Resume at the last
+		// visible position and limit long frame steps so the cloth still moves on screen.
+		const double Step = LastRevealPaint > 0. ? FMath::Clamp(Now - LastRevealPaint, 0., Duration / 6.) : 0.;
+		LastRevealPaint = Now;
+		const float Reveal = Duration > 0. ? FMath::Min(1.f, GetFilmReveal() + float(Step / Duration)) : 1.f;
+		FilmReveal.Store(Reveal);
+		In = .5f + Reveal * .5f;
+	}
 	auto Rectangle = [&](int32 At, float X, float Y, float Width, float Height, FLinearColor Color)
 	{
 		if (Width <= 0 || Height <= 0) return;
@@ -230,7 +248,7 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 			FSlateDrawElement::MakeBox(Out, Layer++, Geometry.ToPaintGeometry(), White, ESlateDrawEffect::None,
 			                           FLinearColor::FromSRGBColor(FColor(35, 30, 24)));
 			const FSlateBrush* Frame = Poster.IsValid() ? &PosterBrush : nullptr;
-			if (Film.IsValid() && Film->GetWidth() > 2 && Film->GetHeight() > 2) Frame = &FilmBrush;
+			if (bViewportMovieVisible && Film.IsValid() && Film->GetWidth() > 2 && Film->GetHeight() > 2) Frame = &FilmBrush;
 			if (Frame)
 			{
 				const FVector2f FilmSize(1280 * S, 720 * S);

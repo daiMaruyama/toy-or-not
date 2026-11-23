@@ -114,6 +114,8 @@ public:
 	TObjectPtr<ATBEscapeVehicle> EscapeVehicle;
 	UFUNCTION(Server, Unreliable)
 	void ServerVehicleInput(FVector2D Input);
+	UFUNCTION(Server, Reliable)
+	void ServerLeaveVehicle(ATBEscapeVehicle* Vehicle);
 	double VehicleExitStarted = -1;
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void SetSprintRequested(bool bRequested);
@@ -257,12 +259,19 @@ private:
 	void Move(const FInputActionValue& Value);
 	void EmotePressed(ETBEmoteKind Kind);
 	void Look(const FInputActionValue& Value);
+	void RequestLeaveVehicle();
 	void Yaw(float V);
 	void Pitch(float V);
 	static FVector2D LookScale();
 	void JumpPressed();
 	void JumpReleased();
 	void UpdateCarryCamera();
+	TWeakObjectPtr<ATBEscapeVehicle> DrivingCameraVehicle;
+	FVector LastDrivingCameraOrigin = FVector::ZeroVector;
+	FVector DrivingCameraOffset = FVector::ZeroVector;
+	float DrivingCameraAimBlend = 1.f;
+	float DrivingCameraSwitchTime = 0.f;
+	bool bDrivingCameraBlocked = false;
 	void CrouchPressed();
 	void CrouchReleased();
 	void SprintPressed();

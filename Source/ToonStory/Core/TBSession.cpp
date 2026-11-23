@@ -23,6 +23,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/CoreDelegates.h"
 #include "UI/TBUIText.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 
 namespace
 {
@@ -181,7 +182,12 @@ void UTBSession::Created(FName Name, bool bSucceeded)
 		Message(TEXT("Lobby map is not installed. Opening test arena."));
 		LobbyMap = TEXT("/Game/Maps/Arena");
 	}
-	UGameplayStatics::OpenLevel(GetGameInstance(), FName(LobbyMap), true, TEXT("listen"));
+	auto OpenLobby = FSimpleDelegate::CreateWeakLambda(this, [this, Map = FName(LobbyMap)]()
+	{
+		if (CurrentOperation != ESessionOperation::Closing)
+			UGameplayStatics::OpenLevel(GetGameInstance(), Map, true, TEXT("listen"));
+	});
+	if (!UTBLoadingScreenSubsystem::DeferForCurtain(GetWorld(), LobbyMap, OpenLobby)) OpenLobby.Execute();
 }
 
 // 同じビルド識別子の部屋を検索する。表示用文字列と参加用結果は分けて保持する。
@@ -398,7 +404,12 @@ void UTBSession::Joined(FName Name, EOnJoinSessionCompleteResult::Type Result)
 		return;
 	}
 	Message(TEXT("Connecting to host..."));
-	PlayerController->ClientTravel(URL, TRAVEL_Absolute);
+	auto Connect = FSimpleDelegate::CreateWeakLambda(this, [this, URL, Controller = TWeakObjectPtr<APlayerController>(PlayerController)]()
+	{
+		if (CurrentOperation != ESessionOperation::Closing && Controller.IsValid())
+			Controller->ClientTravel(URL, TRAVEL_Absolute);
+	});
+	if (!UTBLoadingScreenSubsystem::DeferForCurtain(GetWorld(), URL, Connect)) Connect.Execute();
 }
 
 // 入れなかったときに残ったセッションを、タイトルに留まったまま片付ける。残すと作る・探す・入るが全部断られる。
@@ -509,7 +520,11 @@ void UTBSession::ReturnOffline()
 	// Do not browse from a net-driver/session callback. Give the close RPC time to flush.
 	GetGameInstance()->GetTimerManager().SetTimer(CloseTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
-		UGameplayStatics::OpenLevel(GetGameInstance(), FName(TEXT("/Game/Maps/Title")), true);
+		auto OpenTitle = FSimpleDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (bReturningOffline) UGameplayStatics::OpenLevel(GetGameInstance(), FName(TEXT("/Game/Maps/Title")), true);
+		});
+		if (!UTBLoadingScreenSubsystem::DeferForCurtain(GetWorld(), TEXT("/Game/Maps/Title"), OpenTitle)) OpenTitle.Execute();
 	}), .25f, false);
 }
 

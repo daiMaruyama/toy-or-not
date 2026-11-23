@@ -32,16 +32,6 @@
 
 static TAutoConsoleVariable<int32> CVarTBDebugHUD(TEXT("tb.DebugHUD"), 0, TEXT("Show detailed match diagnostics."));
 
-// Each escape stage has one car and one gate. Keep weak references so driving only updates
-// the projected position, and a streamed-out or replaced actor is discovered again.
-template <typename T>
-static T* ResolveEscapeGuideActor(UWorld* World, TWeakObjectPtr<T>& Cached)
-{
-	if (Cached.IsValid() && Cached->GetWorld() == World) return Cached.Get();
-	TActorIterator<T> It(World);
-	Cached = It ? *It : nullptr;
-	return Cached.Get();
-}
 
 void ATBHUD::BeginStageDraft()
 {
@@ -244,7 +234,11 @@ void ATBHUD::DrawLobby()
 	auto Dots = [&](float PX, float PY, float W, float H, FLinearColor Dot)
 	{
 		if (const auto* Tile = ArtTextures.Find(TEXT("RoomHalftone")); Tile && *Tile)
-			DrawTexture(Tile->Get(), X + PX * S, Y + PY * S, W * S, H * S, 0, 0, W / 6.f, H / 6.f, Dot);
+		{
+			// Keep print dots far enough apart to resolve on small output viewports.
+			const float Pitch = FMath::Max(4.f, 6.f * S);
+			DrawTexture(Tile->Get(), X + PX * S, Y + PY * S, W * S, H * S, 0, 0, W * S / Pitch, H * S / Pitch, Dot);
+		}
 	};
 	auto Label = [&](const FString& Copy, float PX, float CY, float W, float FontSize,
 	                 FLinearColor Color = PrintInk, bool Center = false)
@@ -285,7 +279,7 @@ void ATBHUD::DrawLobby()
 			DrawTexture(Entry->Get(), X + (PX + 2) * S, Y + (PY + 2) * S, PW * S, PH * S,
 			    (1 - U) * .5f, (1 - V) * .5f, U, V);
 		}
-		const FString Name = TBText::String(Random ? TEXT("Stage.Random") : House ? TEXT("Stage.House") : TEXT("Stage.Demo"));
+		const FString Name = TBLobbySettings::StageDisplayName(Stage);
 		float TW = 0, TH = 0;
 		GetTextSize(Name, TW, TH, HeadingFont, FS);
 		const float NameW = FMath::Min(W - 4.f, TW + 24.f), NameH = TH + 9.f;
@@ -766,22 +760,15 @@ void ATBHUD::DrawMatch(const ATBGameState& MatchState, ATBController& Controller
 		if (Storing) InteractionProgress(TEXT("Canvas.StoreProgress"), Elapsed / Duration);
 	}
 	if (MatchState.bEscapePhase && !MatchState.IsPreparing() && Player && Player->Team == ETBTeam::Toy &&
-	    Player->ToyState == ETBToyState::Free && LocalCharacter && !LocalCharacter->Carrier)
+	    Player->ToyState == ETBToyState::Free && LocalCharacter && !LocalCharacter->Carrier && IsValid(LocalCharacter->EscapeVehicle))
 	{
-		if (IsValid(LocalCharacter->EscapeVehicle))
+		if (!EscapeGuideExit.IsValid() || EscapeGuideExit->GetWorld() != GetWorld())
 		{
-			const auto* Exit = ResolveEscapeGuideActor(GetWorld(), EscapeGuideExit);
-			if (Exit && IsValid(Exit->ExitArea))
-				DirectionCue(Exit->ExitArea->GetComponentLocation(), TEXT("Canvas.ExitDestination"),
-				    Gold, .52f, false);
+			TActorIterator<ATBEscapeExit> It(GetWorld());
+			EscapeGuideExit = It ? *It : nullptr;
 		}
-		else
-		{
-			const auto* Car = ResolveEscapeGuideActor(GetWorld(), EscapeGuideVehicle);
-			if (Car && IsValid(Car->BoardingArea))
-				DirectionCue(Car->BoardingArea->GetComponentLocation(), TEXT("Canvas.VehicleDestination"),
-				    Gold, .52f, false);
-		}
+		if (EscapeGuideExit.IsValid() && IsValid(EscapeGuideExit->ExitArea))
+			DirectionCue(EscapeGuideExit->ExitArea->GetComponentLocation(), TEXT("Canvas.ExitDestination"), Gold, .52f, false);
 	}
 	if (Controller.bStuckHint)
 	{
@@ -873,8 +860,10 @@ void ATBHUD::DrawText(const FString& Text, FLinearColor Color, float X, float Y,
 	// Rasterize at the displayed size, instead of enlarging a cached 14pt glyph.
 	// Keep the authored baseline and dimensions used by the fitted-text layout.
 	const float Points = Face->LegacyFontSize * Scale;
-	const int32 RasterPoints = FMath::Max(1, FMath::RoundToInt(Points));
-	FCanvasTextItem Item(FVector2D(X, Y - 10.f * Scale), FText::FromString(Text),
+	// Small Japanese glyphs lose strokes if hinted into a tiny atlas cell. Sample a
+	// larger glyph at the same layout size and align the baseline to an output pixel.
+	const int32 RasterPoints = FMath::Max(Face->LegacyFontSize, FMath::RoundToInt(Points));
+	FCanvasTextItem Item(FVector2D(FMath::RoundToFloat(X), FMath::RoundToFloat(Y - 10.f * Scale)), FText::FromString(Text),
 	    FSlateFontInfo(Face, RasterPoints), Color);
 	Item.Scale = FVector2D(Points / RasterPoints);
 	if (bDrawingMatchSubtitles)

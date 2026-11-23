@@ -15,6 +15,7 @@
 #include "GamePlay/TBPushableProps.h"
 #include "GamePlay/TBRoomLighting.h"
 #include "Net/UnrealNetwork.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 
 ATBGameState::ATBGameState()
 {
@@ -87,10 +88,7 @@ void ATBGameState::ConfigureStageActors(ULevel* Level, UWorld* World)
 		auto* Part = Prop->GetStaticMeshComponent();
 		if (!Part || !Part->ComponentHasTag(TEXT("TBPushable"))) continue;
 		// World geometry still supports the prop. A character cannot use it as a moving floor.
-		Part->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-		Part->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
-		Part->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-		Part->CanCharacterStepUpOn = ECB_No;
+		if (!bInitialized) TBPushableProps::ConfigureCharacterCollision(*Part);
 		if (HasAuthority() && Part->IsSimulatingPhysics() && !PropPeakHeights.Contains(Part))
 		{
 			Prop->SetReplicates(true);
@@ -169,6 +167,13 @@ float ATBGameState::HideRemaining() const
 {
 	return IsPreparing() && HidePreparation.bValid
 	    ? FMath::Max(0., HidePreparation.EndsAt - GetServerWorldTimeSeconds()) : 0.f;
+}
+
+void ATBGameState::OnRep_TravelPending()
+{
+	// The destination stage also replicates pending while waiting for the players to arrive.
+	if (bTravelPending && (TBLobbySettings::IsLobby(GetWorld()) || Phase == ETBPhase::Results || Phase == ETBPhase::Aborted))
+		UTBLoadingScreenSubsystem::BeginReplicatedDeparture(GetWorld());
 }
 
 void ATBGameState::OnRep_Ignition()
