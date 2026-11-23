@@ -435,7 +435,7 @@ void ATBHUD::DrawResults(const ATBGameState& MatchState)
 		DrawFittedText(TBText::TranslateNotice(MatchState.LobbyReturnError), TBPaper::Danger, X + 24 * S, 112 * S, 632 * S, .9f * S);
 		if (MatchState.IsLobbyReturnStopped() && GetOwningPlayerController()->HasAuthority())
 		{
-			DrawButton(TEXT("RetryLobbyReturn"), TBText::Literal(TEXT("Canvas.RetryLobby")), X + 24 * S, 155 * S, 632 * S, 44 * S);
+			DrawLobbyRetryButton(X + 24 * S, 155 * S, S);
 		}
 		else
 		{
@@ -897,76 +897,29 @@ void ATBHUD::DrawFittedText(const FString& Text, FLinearColor Color, float X, fl
 	DrawText(Text, Color, X + (Center ? (Width - TW * Fit) * .5f : 0.f), Y, Font, Scale * Fit, false, Outlined);
 }
 
-void ATBHUD::DrawCheck(float X, float Y, float Size, FLinearColor Color)
+void ATBHUD::DrawLobbyRetryButton(float X, float Y, float Scale)
 {
-	auto Point = [&](float U, float V) { return FVector2D(X + U * Size, Y + V * Size); };
-	DrawSmoothPolygon({Point(0, .52f), Point(.13f, .38f), Point(.39f, .64f), Point(.39f, .91f)}, Color);
-	DrawSmoothPolygon({Point(.39f, .64f), Point(.87f, .13f), Point(1, .26f), Point(.39f, .91f)}, Color);
-}
-
-void ATBHUD::DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
-                      bool Enabled, bool Selected, bool Destructive)
-{
-	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	float MX = 0, MY = 0;
+	const FName Id(TEXT("RetryLobbyReturn"));
+	const float Width = 632 * Scale, Height = 44 * Scale;
+	float MouseX = 0, MouseY = 0;
 	const auto* PC = GetOwningPlayerController();
-	const bool Hovered = Enabled && PC && PC->GetMousePosition(MX, MY) &&
-	    MX >= X && MX < X + W && MY >= Y && MY < Y + H;
-	const double Age = GetWorld()->GetTimeSeconds() - LastButtonClickTime;
+	const bool Hovered = PC && PC->GetMousePosition(MouseX, MouseY) &&
+	    MouseX >= X && MouseX < X + Width && MouseY >= Y && MouseY < Y + Height;
 	const bool Pressed = Hovered && PC->IsInputKeyDown(EKeys::LeftMouseButton);
-	const float Lift = Enabled ? (Pressed || (Id == LastClickedButton && Age >= 0 && Age < .14)
-	    ? -1.5f : Hovered ? 1.25f : 0.f) * S : 0.f;
-	const bool ReadyAction = Id == TEXT("Ready"), StartAction = Id == TEXT("Start");
-	FLinearColor Active = Destructive ? TBPaper::Danger : Id == TEXT("Child") ? TBPaper::HumanBlue :
-	    Id == TEXT("Toy") ? TBPaper::Accent : TBPaper::Teal;
-	if (ReadyAction || StartAction)
-	{
-		const FLinearColor Fill = !Enabled ? TBPaper::Paper : StartAction ? TBPaper::Gold :
-		    Selected ? TBPaper::Cream : TBPaper::Teal;
-		PaperSign(Hovered ? FMath::Lerp(Fill, TBPaper::Paper, .16f) : Fill, X, Y - Lift, W, H);
-		const bool ShowKey = Enabled && PC;
-		const FString ActionLabel = ReadyAction ? Selected ? TBText::Literal(TEXT("Canvas.Unready")) : TBText::Literal(TEXT("Canvas.Ready")) :
-		    Enabled ? TBText::Literal(TEXT("Canvas.Start")) : PC && !PC->HasAuthority() ? Label : TBText::String(TEXT("Canvas.Waiting"));
-		const FString Key = ShowKey ? TB::KeyLabel(PC, ReadyAction ? TB::Keys::LobbyReady : TB::Keys::LobbyStart) : FString();
-		float LabelW = 0, LabelH = 0, KeyW = 0, KeyH = 0;
-		GetTextSize(ActionLabel, LabelW, LabelH, HeadingFont, S);
-		if (ShowKey) GetTextSize(Key, KeyW, KeyH, HeadingFont, .8f * S);
-		const float Chip = ShowKey ? FMath::Clamp(KeyW + 12 * S, 20 * S, W * .32f) : 0.f;
-		const float Leading = ShowKey ? Chip + 7 * S : 0.f;
-		const float Fit = FMath::Min(1.f, (W - 22 * S - Leading) / FMath::Max(LabelW, 1.f));
-		const float Left = X + (W - Leading - LabelW * Fit) * .5f;
-		if (ShowKey) DrawKeycap(Key, Left, Y + (H - 22 * S) * .5f - Lift, Chip, 22 * S);
-		DrawText(ActionLabel, Enabled ? TBPaper::Ink : TBPaper::Muted, Left + Leading,
-		    Y + H * .5f - Lift + (10 * S - LabelH * .5f) * Fit, HeadingFont, S * Fit);
-	}
-	else
-	{
-		const bool Primary = Id == TEXT("ChangeStage") || Id == TEXT("Resume") || Id == TEXT("RetryLobbyReturn") ||
-		    Id == TEXT("DraftNextStage");
-		const bool Secondary = Id == TEXT("CloseSettings") || Id == TEXT("OpenOptions");
-		const bool Confirm = Id == TEXT("ConfirmKick") || Id == TEXT("ConfirmLeave");
-		const FLinearColor Base = !Enabled ? TBPaper::Paper : Confirm ? FLinearColor::FromSRGBColor(FColor(243, 163, 136)) : Selected ? Active :
-		    Primary ? TBPaper::Gold : Secondary ? TBPaper::Teal : TBPaper::Cream;
-		const FLinearColor Fill = Hovered && !Pressed ? FMath::Lerp(Base, TBPaper::Paper, .16f) : Base;
-		PaperSign(Fill, X, Y - Lift, W, H);
-		float TextScale = FMath::Min(1.05f, H / (40 * S)) * S;
-		if (H < 30 * S)
-		{
-			TextScale = FMath::Max(.75f * S, TextScale);
-		}
-		const bool Heading = H >= 30 * S;
-		float TW = 0, TH = 0;
-		GetTextSize(Label, TW, TH, Heading ? HeadingFont.Get() : PaperFont.Get(), TextScale);
-		const float LeftInset = 12.f * S;
-		const float TextWidth = W - LeftInset - 12 * S;
-		const float Fit = FMath::Min(1.f, TextWidth / FMath::Max(1.f, TW));
-		const float TextY = Y + (H - TH * Fit) * .5f + 10 * TextScale * Fit - Lift;
-		const bool LightText = Selected && (Id == TEXT("Child") || Id == TEXT("Toy") || Destructive);
-		DrawFittedText(Label, !Enabled ? TBPaper::Muted : LightText ? TBPaper::Paper :
-		    Destructive && !Confirm ? TBPaper::Danger : TBPaper::Ink,
-		    X + LeftInset, TextY, TextWidth, TextScale, Heading, true);
-	}
-	if (Enabled) AddHitBox(FVector2D(X, Y), FVector2D(W, H), Id, true);
+	const double Age = GetWorld()->GetTimeSeconds() - LastButtonClickTime;
+	const bool JustClicked = LastClickedButton == Id && Age >= 0 && Age < .14;
+	const float Lift = (Pressed || JustClicked ? -1.5f : Hovered ? 1.25f : 0.f) * Scale;
+	const FLinearColor Fill = Hovered && !Pressed ? FMath::Lerp(TBPaper::Gold, TBPaper::Paper, .16f) : TBPaper::Gold;
+	PaperSign(Fill, X, Y - Lift, Width, Height);
+
+	const FString Label = TBText::Literal(TEXT("Canvas.RetryLobby"));
+	const float TextScale = 1.05f * Scale;
+	float TextWidth = 0, TextHeight = 0;
+	GetTextSize(Label, TextWidth, TextHeight, HeadingFont, TextScale);
+	const float Fit = FMath::Min(1.f, (Width - 24 * Scale) / FMath::Max(1.f, TextWidth));
+	DrawText(Label, TBPaper::Ink, X + (Width - TextWidth * Fit) * .5f,
+	    Y + (Height - TextHeight * Fit) * .5f + 10 * TextScale * Fit - Lift, HeadingFont, TextScale * Fit);
+	AddHitBox(FVector2D(X, Y), FVector2D(Width, Height), Id, true);
 }
 
 void ATBHUD::DrawProgress(float Value, float X, float Y, float W, float H, FLinearColor Color)
@@ -1177,13 +1130,4 @@ void ATBHUD::RoundedPanel(FLinearColor Fill, float X, float Y, float W, float H,
 	const float B = FMath::Min(Border * S, FMath::Min(W, H) * .25f);
 	if (B > 0.f) Layer(Outline, X, Y, W, H, Radius * S);
 	Layer(Fill, X + B, Y + B, W - 2 * B, H - 2 * B, FMath::Max(0.f, Radius * S - B));
-}
-
-void ATBHUD::DrawKeycap(const FString& Key, float X, float Y, float W, float H)
-{
-	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	const float Lip = FMath::Min(3.f * S, H * .12f);
-	RoundedPanel(TBPaper::Muted, X, Y, W, H, 6, 1.8f);
-	RoundedPanel(TBPaper::Paper, X, Y, W, H - Lip, 6, 1.8f);
-	DrawFittedText(Key, TBPaper::Ink, X + 5 * S, Y + (H - Lip) * .5f - 6 * S, W - 10 * S, .95f * S, true, true);
 }

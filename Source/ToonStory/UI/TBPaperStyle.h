@@ -7,7 +7,6 @@
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
-#include "Brushes/SlateImageBrush.h"
 
 namespace TBPaper
 {
@@ -35,9 +34,6 @@ namespace TBPaper
 	inline const FLinearColor Paper = FLinearColor::FromSRGBColor(FColor(255, 237, 207));
 	inline const FLinearColor Teal = FLinearColor::FromSRGBColor(FColor(89, 189, 181));
 	inline const FLinearColor HumanBlue = FLinearColor::FromSRGBColor(FColor(44, 126, 152));
-	inline const FLinearColor ReadyGreen = FLinearColor::FromSRGBColor(FColor(56, 160, 126));
-	inline const FLinearColor StartOrange = FLinearColor::FromSRGBColor(FColor(216, 122, 48));
-	inline const FLinearColor Lavender = FLinearColor::FromSRGBColor(FColor(211, 204, 229));
 	inline const FLinearColor Gold = FLinearColor::FromSRGBColor(FColor(255, 214, 91));
 	inline const FLinearColor Danger = FLinearColor::FromSRGBColor(FColor(166, 48, 40));
 	inline const FLinearColor Outline = FLinearColor::FromSRGBColor(FColor(59, 27, 9));
@@ -121,83 +117,16 @@ namespace TBPaper
 		return LoadObject<UTexture2D>(nullptr,
 		    *FString::Printf(TEXT("/Game/UI/Designer/Imported/T_UI_%s.T_UI_%s"), Name, Name));
 	}
-	inline FSlateBrush ImageBrush(UTexture2D* Texture)
-	{
-		FSlateBrush Result;
-		Result.SetResourceObject(Texture);
-		Result.DrawAs = ESlateBrushDrawType::Image;
-		if (Texture) Result.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-		return Result;
-	}
-	inline FSlateBrush Brush(UTexture2D* Texture, FLinearColor Tint = FLinearColor::White)
-	{
-		FSlateBrush Result;
-		Result.SetResourceObject(Texture);
-		Result.DrawAs = ESlateBrushDrawType::Box;
-		Result.Margin = FMargin(.25f);
-		Result.ImageSize = FVector2D(128);
-		Result.TintColor = Tint;
-		return Result;
-	}
-	// 紙のボタン。Secondary は少し暗い紙。
-	inline FButtonStyle ButtonStyle(UTexture2D* Texture, bool Secondary = false)
-	{
-		FButtonStyle Style;
-		Style.SetNormal(Brush(Texture, Secondary ? Cream : Paper));
-		Style.SetHovered(Brush(Texture, Gold));
-		Style.SetPressed(Brush(Texture, Lavender));
-		Style.SetDisabled(Brush(Texture, FLinearColor(.55f, .49f, .40f, .65f)));
-		Style.SetNormalPadding(FMargin(12, 6));
-		Style.SetPressedPadding(FMargin(12, 9, 12, 3));
-		return Style;
-	}
 	// Small interactive controls need solid corners; the paper texture is for large cards.
-	inline FButtonStyle CompactButtonStyle(bool Secondary = false)
+	inline FButtonStyle CompactButtonStyle()
 	{
 		FButtonStyle Style;
-		Style.SetNormal(FSlateRoundedBoxBrush(Secondary ? Cream : Paper, 9.f, Outline, 2.5f));
+		Style.SetNormal(FSlateRoundedBoxBrush(Paper, 9.f, Outline, 2.5f));
 		Style.SetHovered(FSlateRoundedBoxBrush(Gold, 9.f, Outline, 3.f));
 		Style.SetPressed(FSlateRoundedBoxBrush(Teal, 9.f, Outline, 3.f));
 		Style.SetDisabled(FSlateRoundedBoxBrush(Cream, 9.f, Muted, 2.f));
 		Style.SetNormalPadding(FMargin(6, 2));
 		Style.SetPressedPadding(FMargin(6, 4, 6, 0));
-		return Style;
-	}
-
-	// Preserve the supplied frame corners while only stretching the plain center and straight edges.
-	inline FSlateBrush SlicedArtwork(UTexture2D* Texture, FVector2D LayoutSize, FMargin UVBorder)
-	{
-		FSlateBrush Result = Brush(Texture);
-		Result.ImageSize = LayoutSize;
-		Result.Margin = UVBorder;
-		return Result;
-	}
-
-	inline FButtonStyle ArtButtonStyle(const FSlateBrush& Face, FLinearColor Tint = FLinearColor::White)
-	{
-		FButtonStyle Style = CompactButtonStyle();
-		if (!Face.GetResourceObject() && Face.GetResourceName().IsNone()) return Style;
-		FSlateBrush Normal = Face, Hovered = Face, Pressed = Face, Disabled = Face;
-		Normal.TintColor = Tint;
-		Hovered.TintColor = FMath::Lerp(Tint, FLinearColor::White, .5f) * FLinearColor(1.f, .92f, .74f, 1.f);
-		Pressed.TintColor = Tint * FLinearColor(.79f, .79f, .79f, 1.f);
-		Disabled.TintColor = FLinearColor(.57f, .51f, .45f, .7f);
-		Style.SetNormal(Normal).SetHovered(Hovered).SetPressed(Pressed).SetDisabled(Disabled);
-		return Style;
-	}
-
-	// Rasterize the entire printed edge at the button's actual size. Slicing the curve
-	// into corners and strips introduces visible steps where the pieces meet.
-	inline FButtonStyle SignButtonStyle(FLinearColor Tint)
-	{
-		static const FSlateVectorImageBrush Face(FPaths::ProjectContentDir() / TEXT("UI/PaperClub/Sign.svg"),
-		    FVector2D(144, 42));
-		if (Tint == Teal) Tint = FLinearColor::FromSRGBColor(FColor(150, 218, 198));
-		else if (Tint == Gold) Tint = FLinearColor::FromSRGBColor(FColor(255, 220, 118));
-		else if (Tint == Paper) Tint = FLinearColor::FromSRGBColor(FColor(255, 246, 222));
-		FButtonStyle Style = ArtButtonStyle(Face, Tint);
-		Style.SetNormalPadding(FMargin(8, 4, 8, 6));
-		Style.SetPressedPadding(FMargin(8, 5, 8, 5));
 		return Style;
 	}
 } // namespace TBPaper

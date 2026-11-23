@@ -56,9 +56,7 @@ private:
 	UPROPERTY(Transient)
 	TMap<FName, TObjectPtr<class UTexture2D>> ArtTextures;
 	void DrawArt(FName Name, float X, float Y, float W, float H, FLinearColor Tint = FLinearColor::White);
-	void DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
-	                bool Enabled = true, bool Selected = false, bool Destructive = false);
-	void DrawCheck(float X, float Y, float Size, FLinearColor Color);
+	void DrawLobbyRetryButton(float X, float Y, float Scale);
 	void DrawProgress(float Value, float X, float Y, float W, float H, FLinearColor Color);
 	void DrawFittedText(const FString& Text, FLinearColor Color, float X, float Y, float Width, float Scale,
 	                    bool Heading = false, bool Center = false, bool Outlined = false);
@@ -72,7 +70,6 @@ private:
 	void DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color, bool ShadePaper = false);
 	void RoundedPanel(FLinearColor Fill, float X, float Y, float W, float H, float Radius = 24.f,
 	                  float Border = 4.f, FLinearColor Outline = FLinearColor::Transparent);
-	void DrawKeycap(const FString& Key, float X, float Y, float W, float H);
 	void DrawText(const FString& Text, FLinearColor Color, float X, float Y, UFont* Font = nullptr, float Scale = 1.f,
 	              bool ScalePosition = false, bool Outlined = false);
 	void DrawResults(const class ATBGameState& MatchState);

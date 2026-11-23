@@ -27,7 +27,7 @@
 
 `ToonStory.UI.VisualReview.LoadingFilm` を `-UIReviewScreenshots` 付きの描画ありStandaloneで実行すると、各動画の再生・ループとマップ移動時の表示を確認できる。
 
-小さな操作部品は `CompactButtonStyle`、大きい紙カードは `Brush` / `PaperPanel`、HUDの丸角枠は `RoundedPanel` を使う。目標・タイマー・収集カウンター・長押しゲージは支給の構成に合わせる。固定キーを画像に追加せず、既存のKeyLabelを使う。Canvas文字は描画サイズに合わせてラスタライズする。マップ編集は不要。
+小さな操作部品は `CompactButtonStyle`、大きい紙カードは `PaperPanel`、HUDの丸角枠は `RoundedPanel` を使う。目標・タイマー・収集カウンター・長押しゲージは支給の構成に合わせる。固定キーを画像に追加せず、既存のKeyLabelを使う。Canvas文字は描画サイズに合わせてラスタライズする。マップ編集は不要。
 
 操作割当は設定の「操作」で確認できる。試合中は対象に近づくと操作と長押しの進捗を表示する。
 

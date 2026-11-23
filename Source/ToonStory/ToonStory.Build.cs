@@ -47,7 +47,6 @@ public class ToonStory : ModuleRules
 		PrivateDefinitions.Add("WITH_TB_STEAM=" + (bSteam ? "1" : "0"));
 		if (Target.ProjectFile != null)
 		{
-			RuntimeDependencies.Add("$(ProjectDir)/Content/UI/PaperClub/Sign.svg", StagedFileType.NonUFS);
 			// The media decoder and its first-frame fallback both open loose files.
 			foreach (string Edition in new[] { "ComicDuck", "ComicDinosaur", "ComicCar" })
 			{
