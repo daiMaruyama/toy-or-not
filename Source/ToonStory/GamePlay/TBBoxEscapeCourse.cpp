@@ -8,6 +8,8 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBGameHelpers.h"
+#include "Audio/TBAudioEvents.h"
+#include "Data/TBPresentationData.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/TriggerBox.h"
@@ -232,13 +234,47 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 		if (Contains(CourseBounds, Toy) && Toy->GetActorLocation().Z + Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() < GoalVolume->Bounds.GetBox().Min.Z)
 			Attempt.bDescendedBelowGoal = true;
 		if (Contains(CourseBounds, Toy)) Toy->SetFrozen(false);
-		if (!Attempt.bDescendedBelowGoal || !IsAtGoalHeight(Toy, Supports)) continue;
-		// Server deadlines and the current capture token still govern release.
+		if (!Attempt.bDescendedBelowGoal) continue;
+		const bool bAtGoal = IsAtGoalHeight(Toy, Supports);
+		// 出口が塞がって失敗したあとは、ゴールの高さからいったん離れて、もう一度届いたときだけやり直す。
+		// やり直しも新しい頭突きとして、ふたを開き直してから、遅らせて移す。居続けても毎フレームは出さない。
+		if (Attempt.bFailed)
+		{
+			if (!bAtGoal) { Attempt.bLeftGoal = true; continue; }
+			if (!Attempt.bLeftGoal) continue;
+			Attempt.bFailed = false;
+			Attempt.bLeftGoal = false;
+			Attempt.bBumped = false;
+		}
+		if (!Attempt.bBumped)
+		{
+			if (!bAtGoal) continue;
+			// Server deadlines and the current capture token still govern release.
+			if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
+			if (!Eligible(Toy) || State->Phase != ETBPhase::Playing) continue;
+			// ゴールの瞬間に、頭でふたを押し上げる。出口へ移すのは少し遅らせる。
+			Attempt.bBumped = true;
+			Attempt.ReleaseIn = TB::PresentationData().Lid.EscapeReleaseDelay;
+			Box->PlayEscapeBump();
+		}
+		else Attempt.ReleaseIn -= DeltaSeconds;
+		if (Attempt.ReleaseIn > 0.f) continue;
+		// 遅らせた間に試合が終わる・抜ける・捕まり直すことがあるので、移す時点で期限とキャプチャをもう一度確かめる。
 		if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
-		if (!Eligible(Toy) || State->Phase != ETBPhase::Playing) continue;
+		if (!Eligible(Toy) || State->Phase != ETBPhase::Playing || Box->CaptureGeneration(Toy) != Attempt.Generation) continue;
 		TArray<FTransform> Exits;
 		for (const auto& Exit : ExitPoints)
 			if (SafeExitPoint(Exit->GetActorLocation(), Toy)) Exits.Add(Exit->GetActorTransform());
-		if (Box->ReleasePrisoner(Toy, Capture, Exits)) Attempts.Remove(Toy);
+		// ふたは頭突きの時点で開いているので、ここでは救助・収納のふたの合図を出さない。
+		if (Box->ReleasePrisoner(Toy, Attempt.Generation, Exits, false))
+		{
+			UTBAudioEvents::Emit(this, ETBSoundEvent::RescueComplete, Toy->TBPS(), Box->InteractionPoint->GetComponentLocation());
+			Attempts.Remove(Toy);
+		}
+		else
+		{
+			Attempt.bFailed = true;
+			Attempt.bLeftGoal = false;
+		}
 	}
 }
