@@ -51,6 +51,9 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	const ETBWinner OldWinner = Match->Winner;
 	const FString OldReason = Match->Reason;
 	const FVector OldLocation = Toy->GetActorLocation();
+	// Run the scenario near map startup regardless of test order; restore the world clock on exit.
+	constexpr double StartTime = 2.0;
+	TGuardValue<double> TestClock(World->TimeSeconds, StartTime);
 	TBTest::FPlayingScope Playing(*Match, Match->GetServerWorldTimeSeconds() + 5.0);
 	Info->Team = ETBTeam::Toy; Info->ToyState = ETBToyState::Free; Info->bFrozen = false;
 	Match->bEscapePhase = false;
@@ -82,10 +85,16 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	TestTrue(TEXT("Human is held during the shot"), Toy->IsMovementLocked() && !Toy->CanAct());
 	Info->Team = ETBTeam::Toy;
 	TestFalse(TEXT("Cannot board during ignition"), Car->Board(Toy));
-	// Move both timestamps together, as if the shot had started 4.625 seconds earlier.
-	Match->Ignition.StartsAt -= FTBEscapeIgnition::Duration;
-	Match->EndTime -= FTBEscapeIgnition::Duration;
-	Mode->Tick(.016f);
+	constexpr double EndOfShot = StartTime + FTBEscapeIgnition::Duration;
+	constexpr float LastFrame = 1.f / 64.f;
+	World->TimeSeconds = EndOfShot - LastFrame;
+	Mode->Tick(LastFrame);
+	TestTrue(TEXT("Ignition still holds the toy on the last frame"), Match->IsIgniting() && Toy->IsMovementLocked());
+	TestFalse(TEXT("Cannot board just before ignition ends"), Car->Board(Toy));
+	TestTrue(TEXT("Escape clock stays frozen throughout ignition"), FMath::IsNearlyEqual(Match->Remaining(), 30.f, .05f));
+	World->TimeSeconds = EndOfShot;
+	Mode->Tick(LastFrame);
+	if (!TestTrue(TEXT("Ignition ends and opens boarding at the deadline"), !Match->IsIgniting() && Match->bEscapePhase)) return false;
 	TestFalse(TEXT("Movement resumes after ignition"), Toy->IsMovementLocked());
 	TestTrue(TEXT("Escape clock resumes with the full minimum"), FMath::IsNearlyEqual(Match->Remaining(), 30.f, .05f));
 	TestTrue(TEXT("Toy boards"), Car->Board(Toy));

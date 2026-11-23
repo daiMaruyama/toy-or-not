@@ -70,6 +70,7 @@ void ATBEscapeVehicle::StartIgnitionEffects(float Elapsed, USoundBase* Sound)
 	LampRig = NewObject<USceneComponent>(this);
 	LampRig->SetupAttachment(GetRootComponent());
 	LampRig->SetRelativeLocation(ShotCenter);
+	LampRig->SetVisibility(false);
 	LampRig->RegisterComponent();
 	const float Scale = GetActorScale3D().GetAbsMin();
 	LensGlow = UMaterialInstanceDynamic::Create(LensMaterial, this);
@@ -100,6 +101,7 @@ void ATBEscapeVehicle::StartIgnitionEffects(float Elapsed, USoundBase* Sound)
 		Light->SetLightColor(FLinearColor(1,.81,.53));
 		Light->SetCastShadows(false);
 		Light->SetIntensity(0);
+		Light->SetVisibility(false);
 		Light->RegisterComponent();
 		Headlights.Add(Light);
 	}
@@ -134,13 +136,17 @@ void ATBEscapeVehicle::UpdateIgnitionEffects(const ATBGameState* Match)
 	const FVector Shift(Roll(Frame), 0, Bounce);
 	Mesh->SetRelativeLocation(ParkedMeshLocation + Shift);
 	LampRig->SetRelativeLocation(ShotCenter + Shift);
-	LampRig->SetVisibility(Level > .001, true);
+	const bool bLightsOn = Level > .001;
+	if (LampRig->GetVisibleFlag() != bLightsOn) LampRig->SetVisibility(bLightsOn, true);
 	if (LensGlow) LensGlow->SetScalarParameterValue(TEXT("Brightness"), 4.5f * Level);
 	const float Intensity = 170.f * Level * FMath::Square(GetActorScale3D().GetAbsMin());
 	for (USpotLightComponent* Lamp : Headlights) Lamp->SetIntensity(Intensity);
 	if (IsValid(MotorAudio))
 		if (const auto* Audio = GetGameInstance()->GetSubsystem<UTBAudioSubsystem>())
-			MotorAudio->SetVolumeMultiplier(Audio->GetCategoryVolume(ETBAudioCategory::Effects));
+		{
+			const float Volume = Audio->GetCategoryVolume(ETBAudioCategory::Effects);
+			if (MotorAudio->VolumeMultiplier != Volume) MotorAudio->SetVolumeMultiplier(Volume);
+		}
 }
 
 void ATBEscapeVehicle::StopIgnitionEffects()

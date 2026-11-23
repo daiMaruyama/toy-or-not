@@ -80,7 +80,7 @@ Staticライトの焼き込み光は実行中に消せない。全体のSkyLight
 - `ToonStory.Items.LightSwitch`: 共通の対象選択、部屋未設定の拒否、両チームの切り替え、
   無効化・凍結・範囲外・未知のアクションで状態が変わらないこと、DAによる操作距離の変更。
 - `ToonStory.Data.Lighting`: 既定値・共有スイッチDAの存在。
-- `ToonStory.Lighting.AuthoredStage`: 上記各マップをStandaloneで起動して実行。
+- `ToonStory.Lighting.AuthoredStage` は `/Game/Maps/TB_ToyWorldDemoExpanded` を Standalone で起動して実行する。
   保存した参照、ライトのMobility、重複割り当て、スイッチ数、人間・おもちゃの体格で
   壁や家具と重ならない床上の操作位置、共通対象選択、操作による消灯・再点灯を確認する。
   スイッチ付近の到達性を検証するもので、開始地点からの経路全体は検証しない。
