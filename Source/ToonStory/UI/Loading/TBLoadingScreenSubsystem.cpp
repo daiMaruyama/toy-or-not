@@ -219,6 +219,11 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FWorldContext& Context, const F
 	{
 		MovieScreen->ShowNativePoster();
 	}
+	else
+	{
+		NativeFilmStartedAt = FPlatformTime::Seconds();
+		if (Screen) Screen->SetMovieVisible(false);
+	}
 }
 
 // 読み終わったら、同じ絵をゲーム画面にかぶせ直し、キャラが出るまで待ってから薄れさせる。
@@ -249,6 +254,7 @@ void UTBLoadingScreenSubsystem::EndFailedTravel(UWorld* World)
 	if (World ? World->GetGameInstance() != GetGameInstance() : GetGameInstance()->GetWorld() != nullptr) return;
 	TravelDestMap.Reset();
 	StopMovie();
+	NativeFilmStartedAt = 0.;
 	PendingDeparture.Unbind();
 	if (Screen) Screen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
 	bFilmSelected = false;
@@ -281,7 +287,7 @@ void UTBLoadingScreenSubsystem::ShowOverlay()
 		Screen->Restart();
 		if (bHardLoad && MovieScreen) Screen->ContinueFrom(*MovieScreen);
 		if (bHardLoad) Screen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
-		Screen->SetMovieVisible(true, bHardLoad && MovieScreen ? MovieScreen->GetShownAt() : 0.);
+		Screen->SetMovieVisible(NativeFilmStartedAt <= 0.);
 	}
 	Overlay = SNew(SWeakWidget).PossiblyNullContent(Screen);
 	// チャットやメニューより手前、確認用の表示より奥。
@@ -376,6 +382,11 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	}
 	else if (bHardLoad)
 	{
+		if (NativeFilmStartedAt > 0.)
+		{
+			if (Screen) Screen->SetMovieVisible(true, NativeFilmStartedAt);
+			NativeFilmStartedAt = 0.;
+		}
 		if (MovieScreen && Screen) Screen->ContinueFilmReveal(*MovieScreen);
 		// キャラのいない画面（タイトル）は待たずに明ける。
 		// 待つ上限は、コントローラーがいなくても効かせる。出てこないままだと、画面がずっと覆われてしまう。

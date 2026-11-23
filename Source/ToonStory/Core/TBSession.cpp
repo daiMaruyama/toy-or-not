@@ -184,7 +184,8 @@ void UTBSession::Created(FName Name, bool bSucceeded)
 	}
 	auto OpenLobby = FSimpleDelegate::CreateWeakLambda(this, [this, Map = FName(LobbyMap)]()
 	{
-		UGameplayStatics::OpenLevel(GetGameInstance(), Map, true, TEXT("listen"));
+		if (CurrentOperation != ESessionOperation::Closing)
+			UGameplayStatics::OpenLevel(GetGameInstance(), Map, true, TEXT("listen"));
 	});
 	if (!UTBLoadingScreenSubsystem::DeferForCurtain(GetWorld(), LobbyMap, OpenLobby)) OpenLobby.Execute();
 }
@@ -403,9 +404,10 @@ void UTBSession::Joined(FName Name, EOnJoinSessionCompleteResult::Type Result)
 		return;
 	}
 	Message(TEXT("Connecting to host..."));
-	auto Connect = FSimpleDelegate::CreateWeakLambda(PlayerController, [PlayerController, URL]()
+	auto Connect = FSimpleDelegate::CreateWeakLambda(this, [this, URL, Controller = TWeakObjectPtr<APlayerController>(PlayerController)]()
 	{
-		PlayerController->ClientTravel(URL, TRAVEL_Absolute);
+		if (CurrentOperation != ESessionOperation::Closing && Controller.IsValid())
+			Controller->ClientTravel(URL, TRAVEL_Absolute);
 	});
 	if (!UTBLoadingScreenSubsystem::DeferForCurtain(GetWorld(), URL, Connect)) Connect.Execute();
 }

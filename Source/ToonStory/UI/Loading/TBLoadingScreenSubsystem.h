@@ -67,6 +67,7 @@ private:
 
 	// MoviePlayer に渡す絵と、ゲーム画面にかぶせる絵。同じ部品を2か所に付けないよう分ける。
 	TSharedPtr<STBLoadingScreen> MovieScreen;
+	double NativeFilmStartedAt = 0.;
 	// The same film still covers decoder startup and devices without a supported movie player.
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTexture2D>> FilmPosters;
