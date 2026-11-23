@@ -93,35 +93,19 @@ void UTBTitleMenu::BuildPaperLayout()
 		L->SetAutoWrapText(true);
 		return L;
 	};
-	// Keep the level sequence visible through the transparent aperture in the printed cover.
+	// Only the logo and controls slide in over the title sequence.
 	Canvas->ClearChildren();
-	auto Rim = [&](float Inset, float Weight, FLinearColor Ink)
-	{
-		auto* Border = WidgetTree->ConstructWidget<UBorder>();
-		Border->SetBrush(FSlateRoundedBoxBrush(FLinearColor::Transparent, 0.f, Ink, Weight));
-		Border->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Place(Border, Inset, Inset, 1600 - 2 * Inset, 900 - 2 * Inset);
-	};
-	Rim(0, 11.f, FLinearColor::FromSRGBColor(FColor(246, 232, 202)));
-	Rim(10.5f, 3.5f, TBPaper::PrintInk);
-	Rim(14.f, 2.f, TBPaper::PrintCream.CopyWithNewOpacity(.45f));
+	Canvas->SetClipping(EWidgetClipping::ClipToBounds);
 	auto* Sheet = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Place(Sheet, 0, 0, 1600, 900);
 	TitlePrintSheet = Sheet;
 	Canvas = Sheet;
-	auto* Cover = WidgetTree->ConstructWidget<UImage>();
-	Cover->SetBrushFromTexture(TBPaper::Art(TEXT("TitleComicCover")));
-	Cover->SetVisibility(ESlateVisibility::HitTestInvisible);
-	FSlateBrush Plate = Cover->GetBrush();
-	Plate.SetUVRegion(FBox2f(FVector2f(14.f/1600, 14.f/900), FVector2f(680.f/1600, 886.f/900)));
-	Cover->SetBrush(Plate);
-	Place(Cover, 14, 14, 666, 872);
 	if (!LogoImage) LogoImage = WidgetTree->ConstructWidget<UImage>();
 	LogoImage->SetRenderTransform(FWidgetTransform());
 	LogoImage->SetColorAndOpacity(FLinearColor::White);
 	LogoImage->SetBrushFromTexture(TBPaper::Art(TEXT("TitleSteamMark")));
 	LogoImage->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(LogoImage, 61, 76, 500, 358);
+	Place(LogoImage, 63, 63, 415, 297);
 
 	auto AddButton = [&](const TCHAR* Name, const FText& Text, float X, float Y, float W)
 	{
@@ -157,7 +141,7 @@ void UTBTitleMenu::BuildPaperLayout()
 	};
 	auto CoverChoice = [&](UButton* Bound, const TCHAR* Name, const TCHAR* Key, float Y, FLinearColor Color)
 	{
-		constexpr float X = 70, W = 390, H = 61;
+		constexpr float X = 80, W = 390, H = 61;
 		auto* Shadow = Rect(Canvas, X + 4, Y + 5, W, H, TBPaper::PrintInk);
 		Shadow->SetRenderShear(FVector2D(-5, 0));
 		FButtonStyle Style = TBPaper::PrintButtonStyle(Color);
@@ -185,11 +169,11 @@ void UTBTitleMenu::BuildPaperLayout()
 		Place(Button, X, Y, W, H);
 		return Button;
 	};
-	HostButton = CoverChoice(HostButton, TEXT("HostButton"), TEXT("Root.Title.Host"), 493, TBPaper::PrintHoney);
-	FindButton = CoverChoice(FindButton, TEXT("FindButton"), TEXT("Root.Title.Find"), 566, TBPaper::PrintCream);
-	HelpButton = CoverChoice(HelpButton, TEXT("HelpButton"), TEXT("Root.Title.Help"), 639, TBPaper::PrintCream);
+	HostButton = CoverChoice(HostButton, TEXT("HostButton"), TEXT("Root.Title.Host"), 540, TBPaper::PrintHoney);
+	FindButton = CoverChoice(FindButton, TEXT("FindButton"), TEXT("Root.Title.Find"), 613, TBPaper::PrintCream);
+	HelpButton = CoverChoice(HelpButton, TEXT("HelpButton"), TEXT("Root.Title.Help"), 686, TBPaper::PrintCream);
 	auto* Utilities = WidgetTree->ConstructWidget<UHorizontalBox>();
-	Place(Utilities, 72, 806, 360, 39);
+	Place(Utilities, 80, 798, 360, 39);
 	auto Utility = [&](UButton* Bound, const TCHAR* Name, const TCHAR* Key)
 	{
 		FButtonStyle Style;
@@ -199,6 +183,12 @@ void UTBTitleMenu::BuildPaperLayout()
 		auto* Button = TitleButton(Bound, Name, Style);
 		auto* Caption = Label(TBText::Get(Key), 14, TBPaper::PrintCream);
 		Caption->SetAutoWrapText(false);
+		auto Font = Caption->GetFont();
+		Font.OutlineSettings.OutlineSize = 1;
+		Font.OutlineSettings.OutlineColor = TBPaper::PrintInk;
+		Caption->SetFont(Font);
+		Caption->SetShadowColorAndOpacity(TBPaper::PrintInk);
+		Caption->SetShadowOffset(FVector2D(0, 1));
 		auto* CaptionSlot = CastChecked<UButtonSlot>(Button->SetContent(Caption));
 		CaptionSlot->SetPadding(FMargin(0));
 		CaptionSlot->SetVerticalAlignment(VAlign_Center);
@@ -220,7 +210,7 @@ void UTBTitleMenu::BuildPaperLayout()
 	StatusText = Label(FText::FromString(TEXT("")), 17, TBPaper::Paper);
 	StatusText->SetShadowColorAndOpacity(TBPaper::Ink);
 	StatusText->SetShadowOffset(FVector2D(1, 2));
-	Place(StatusText, 85, 742, 359, 59);
+	Place(StatusText, 80, 752, 390, 46);
 	HostButton->OnClicked.AddDynamic(this, &ThisClass::Host);
 	FindButton->OnClicked.AddDynamic(this, &ThisClass::Find);
 	QuitButton->OnClicked.AddDynamic(this, &ThisClass::AskQuit);

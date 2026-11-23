@@ -764,7 +764,19 @@ namespace
 					return true;
 				});
 			}
-			for (const TCHAR* Art : {TEXT("TitleSteamMark"), TEXT("TitleComicCover"), TEXT("Frame_Settings"),
+			bool bHasSteamLogo = false;
+			bool bHasCover = false;
+			Title->WidgetTree->ForEachWidget([&](UWidget* Widget)
+			{
+				const auto* Image = Cast<UImage>(Widget);
+				if (!Image) return;
+				const FName Art = GetFNameSafe(Image->GetBrush().GetResourceObject());
+				bHasSteamLogo |= Art == TEXT("T_UI_TitleSteamMark");
+				bHasCover |= Art == TEXT("T_UI_TitleComicCover");
+			});
+			bValid &= Test->TestTrue(TEXT("Title displays the Steam logo"), bHasSteamLogo);
+			bValid &= Test->TestFalse(TEXT("Left cover no longer obscures the title sequence"), bHasCover);
+			for (const TCHAR* Art : {TEXT("Frame_Settings"),
 			    TEXT("Icon_Hourglass"), TEXT("Icon_BatteryPickup"), TEXT("StagePreview_Demo"), TEXT("StagePreview_House")})
 			{
 				auto* Texture = TBPaper::Art(Art);
