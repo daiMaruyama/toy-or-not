@@ -12,6 +12,7 @@
 #include "Tests/TBTestMatch.h"
 #include "AIController.h"
 #include "Components/BoxComponent.h"
+#include "Components/InputComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -143,7 +144,18 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	Car->SetDrivingInput(Toy, FVector2D(0, 1));
 	Car->Tick(.1f);
 	TestTrue(TEXT("Driver advances the vehicle"), Car->GetActorLocation().X > Before.X);
-	TestTrue(TEXT("Passenger leaves"), Car->Leave(Toy));
+	Toy->ServerLeaveVehicle(Car);
+	TestTrue(TEXT("Without a nearby floor the driver stays aboard"), Car->IsDriver(Toy));
+	auto* Platform = World->SpawnActor<AActor>();
+	if (!TestNotNull(TEXT("Exit platform"), Platform)) return false;
+	ON_SCOPE_EXIT { Platform->Destroy(); };
+	auto* Floor = NewObject<UBoxComponent>(Platform);
+	Platform->SetRootComponent(Floor);
+	Floor->SetBoxExtent(FVector(300, 300, 5));
+	Floor->SetCollisionProfileName(TEXT("BlockAll"));
+	Floor->RegisterComponent();
+	Platform->SetActorLocation(Car->GetActorLocation() - FVector::UpVector * (Car->Collision->Bounds.BoxExtent.Z + 5.));
+	Toy->ServerLeaveVehicle(Car);
 	TestNull(TEXT("Vehicle reference cleared"), Toy->EscapeVehicle.Get());
 	TestTrue(TEXT("Driving passes to the next passenger"), Car->IsDriver(Passenger));
 	Exit = World->SpawnActor<ATBEscapeExit>(Car->GetActorLocation(), FRotator::ZeroRotator, Params);
@@ -280,6 +292,16 @@ bool FTBParkedVehicleTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("Third-person boarding view frames the entire car"), bBodyInFrame);
 	AddInfo(FString::Printf(TEXT("Boarding view: %s, %s, FOV %.2f"), *View.Location.ToString(), *View.Rotation.ToString(), View.FOV));
+	const auto* Input = Toy->FindComponentByClass<UInputComponent>();
+	const auto* ExitKey = Input ? Input->KeyBindings.FindByPredicate([](const FInputKeyBinding& Binding)
+	{
+		return Binding.Chord == FInputChord(EKeys::Q) && Binding.KeyEvent == IE_Pressed;
+	}) : nullptr;
+	if (!TestNotNull(TEXT("Q press is bound on the toy"), ExitKey)) return false;
+	ExitKey->KeyDelegate.Execute(EKeys::Q);
+	if (!TestNull(TEXT("A single exit request releases the toy at the parking spot"), Toy->EscapeVehicle.Get())) return false;
+	TestFalse(TEXT("The exit is outside the auto-boarding area"), Car->BoardingArea->IsOverlappingActor(Toy));
+	if (!TestTrue(TEXT("Toy can board the same car again"), Car->Board(Toy))) return false;
 	for (int32 Frame = 0; Frame < 35; ++Frame)
 	{
 		Toy->ServerVehicleInput(FVector2D(0, 1));
@@ -288,16 +310,51 @@ bool FTBParkedVehicleTest::RunTest(const FString&)
 	AddInfo(FString::Printf(TEXT("Parked %s, camera %s, driven %s"), *Start.ToString(), *View.Location.ToString(), *Car->GetActorLocation().ToString()));
 	TestTrue(TEXT("Driver can pull forward out of the parking spot"), FVector::DotProduct(Car->GetActorLocation() - Start, Car->GetActorForwardVector()) > 10.);
 	Car->SetActorLocation(FVector(20000, 20000, 10000), false, nullptr, ETeleportType::TeleportPhysics);
-	const FRotator FreeLook(19.f, -64.f, 0.f);
-	PC->SetControlRotation(FreeLook);
 	Toy->CalcCamera(.016f, View);
-	const FVector ExpectedEye = Car->GetActorLocation() + FVector::UpVector * 45. - FreeLook.Vector() * 250.;
-	TestTrue(TEXT("Open driving view follows the player's yaw and pitch"),
-		View.Rotation.Equals(FreeLook, .01f) && View.Location.Equals(ExpectedEye, .1));
+	const FMinimalViewInfo Straight = View;
+	const FVector ChaseOffset = Car->GetActorTransform().InverseTransformVectorNoScale(View.Location - Car->GetActorLocation());
+	TestTrue(TEXT("Open driving view sits above and behind the car"), ChaseOffset.X < -180. && ChaseOffset.Z > 45.);
+	PC->SetControlRotation(FRotator(19.f, -64.f, 0.f));
+	Toy->CalcCamera(.016f, View);
+	TestTrue(TEXT("Player look direction does not move the driving camera"),
+		View.Location.Equals(Straight.Location, .1) && View.Rotation.Equals(Straight.Rotation, .01f));
 	Car->AddActorWorldRotation(FRotator(0, 75, 0));
 	Toy->CalcCamera(.016f, View);
-	TestTrue(TEXT("Steering does not rotate the player's view"),
-		View.Rotation.Equals(FreeLook, .01f) && View.Location.Equals(ExpectedEye, .1));
+	TestTrue(TEXT("Camera follows the turn at the same offset"),
+		ChaseOffset.Equals(Car->GetActorTransform().InverseTransformVectorNoScale(View.Location - Car->GetActorLocation()), .1) &&
+		View.Rotation.Equals(Straight.Rotation + FRotator(0, 75, 0), .01f));
+	const FMinimalViewInfo ClearView = View;
+	auto* Obstacle = World->SpawnActor<AActor>();
+	if (!TestNotNull(TEXT("Camera obstruction fixture"), Obstacle)) return false;
+	ON_SCOPE_EXIT { Obstacle->Destroy(); };
+	auto* Blocker = NewObject<UBoxComponent>(Obstacle);
+	Obstacle->SetRootComponent(Blocker);
+	Blocker->SetBoxExtent(FVector(12.));
+	Blocker->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Blocker->SetCollisionResponseToChannel(ECC_Camera, ECR_Block);
+	Blocker->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Blocker->RegisterComponent();
+	Obstacle->SetActorLocation(FMath::Lerp(Car->Mesh->Bounds.Origin, ClearView.Location, .5));
+	Toy->CalcCamera(.016f, View);
+	TestTrue(TEXT("Brief contact does not jerk the camera"), View.Location.Equals(ClearView.Location, .1) &&
+		View.Rotation.Equals(ClearView.Rotation, .01f));
+	double LargestStep = 0.;
+	for (int32 Frame = 0; Frame < 90; ++Frame)
+	{
+		const FVector Previous = View.Location;
+		Toy->CalcCamera(.016f, View);
+		LargestStep = FMath::Max(LargestStep, FVector::Distance(Previous, View.Location));
+	}
+	const FMinimalViewInfo BlockedView = View;
+	const double Travel = FVector::Distance(BlockedView.Location, ClearView.Location);
+	TestTrue(TEXT("Sustained obstruction is corrected across multiple frames"), Travel > 20. && LargestStep < Travel * .2);
+	Blocker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Toy->CalcCamera(.016f, View);
+	TestTrue(TEXT("A one-frame opening preserves the settled view"), View.Location.Equals(BlockedView.Location, .1) &&
+		View.Rotation.Equals(BlockedView.Rotation, .01f));
+	for (int32 Frame = 0; Frame < 120; ++Frame) Toy->CalcCamera(.016f, View);
+	TestTrue(TEXT("Clear road restores the rear view"), View.Location.Equals(ClearView.Location, .1) &&
+		View.Rotation.Equals(ClearView.Rotation, .01f));
 	return !HasAnyErrors();
 }
 

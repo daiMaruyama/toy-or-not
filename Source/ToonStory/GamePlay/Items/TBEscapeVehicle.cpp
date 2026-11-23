@@ -133,30 +133,51 @@ bool ATBEscapeVehicle::Board(ATBCharacter* Toy)
 	return true;
 }
 
+bool ATBEscapeVehicle::FindExitSpot(ATBCharacter* Toy, FVector& Destination) const
+{
+	const auto* Capsule = Toy->GetCapsuleComponent();
+	const float Radius = Capsule->GetScaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const FCollisionShape Shape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+	const auto Channel = Capsule->GetCollisionObjectType();
+	const FCollisionResponseParams Responses(Capsule->GetCollisionResponseToChannels());
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(TBEscapeVehicleLeave), false, Toy);
+	Query.AddIgnoredActor(this);
+	const FBox Area = BoardingArea->Bounds.GetBox() + Collision->Bounds.GetBox();
+	const FVector Seat = Area.GetCenter();
+	const FVector Extent = Area.GetExtent();
+	const double FloorZ = Collision->Bounds.GetBox().Min.Z;
+	const double Step = Toy->GetCharacterMovement()->MaxStepHeight;
+	const FVector Up = FVector::UpVector;
+	const float Angles[] = {90.f, -90.f, 180.f, 0.f, 45.f, -45.f, 135.f, -135.f};
+	for (const float Extra : {0.f, 2.f * Radius})
+	{
+		for (const float Angle : Angles)
+		{
+			const FVector Direction = FRotator(0, GetActorRotation().Yaw + Angle, 0).Vector();
+			const double Clearance = FVector::DotProduct(Direction.GetAbs(), Extent) + Radius + 3. + Extra;
+			FVector Probe = Seat + Direction * Clearance;
+			Probe.Z = FloorZ + HalfHeight + Step + 2.;
+			FHitResult Floor;
+			if (!GetWorld()->SweepSingleByChannel(Floor, Probe, Probe - Up * (Step + 2. * HalfHeight + 4.),
+				FQuat::Identity, Channel, Shape, Query, Responses) || Floor.bStartPenetrating ||
+				!Toy->GetCharacterMovement()->IsWalkable(Floor)) continue;
+			const FVector Standing = Floor.Location + Up * 2.;
+			const FVector Start(Seat.X, Seat.Y, FMath::Max(Standing.Z, FloorZ + HalfHeight + 2.));
+			if (GetWorld()->SweepTestByChannel(Start, Standing, FQuat::Identity, Channel, Shape, Query, Responses) ||
+				GetWorld()->OverlapBlockingTestByChannel(Standing, FQuat::Identity, Channel, Shape, Query, Responses)) continue;
+			Destination = Standing;
+			return true;
+		}
+	}
+	return false;
+}
+
 bool ATBEscapeVehicle::Leave(ATBCharacter* Toy)
 {
 	if (!HasAuthority() || !IsValid(Toy) || !Passengers.Contains(Toy)) return false;
-	const auto* Capsule = Toy->GetCapsuleComponent();
-	if (!Capsule) return false;
-	const float Radius = Capsule->GetScaledCapsuleRadius();
-	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-	const FVector Directions[] = {GetActorRightVector(), -GetActorRightVector(), -GetActorForwardVector(), GetActorForwardVector()};
-	FCollisionQueryParams Query(SCENE_QUERY_STAT(TBEscapeVehicleLeave), false, Toy);
-	Query.AddIgnoredActor(this);
 	FVector Destination;
-	bool bFoundDestination = false;
-	for (const FVector& Direction : Directions)
-	{
-		const FVector Candidate = GetActorLocation() + Direction * (90.f + Radius) + FVector(0, 0, HalfHeight + 5.f);
-		if (!GetWorld()->OverlapBlockingTestByChannel(Candidate, FQuat::Identity, ECC_Pawn,
-		    FCollisionShape::MakeCapsule(Radius, HalfHeight), Query))
-		{
-			Destination = Candidate;
-			bFoundDestination = true;
-			break;
-		}
-	}
-	if (!bFoundDestination) return false;
+	if (!FindExitSpot(Toy, Destination)) return false;
 	const bool bWasDriver = IsDriver(Toy);
 	Passengers.Remove(Toy);
 	Toy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -267,10 +288,11 @@ void ATBEscapeVehicle::ReleasePassengers()
 			{
 				Passengers.Pop();
 				Toy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-				Toy->EscapeVehicle = nullptr;
 				Toy->VehicleExitStarted = -1;
 				Toy->SetActorHiddenInGame(false);
 				Toy->SetActorEnableCollision(true);
+				// Restoring collision inside the boarding area can trigger a synchronous overlap.
+				Toy->EscapeVehicle = nullptr;
 				Toy->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
 				Toy->ForceNetUpdate();
 			}
