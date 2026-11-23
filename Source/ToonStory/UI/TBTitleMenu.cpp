@@ -274,7 +274,7 @@ void UTBTitleMenu::NativeTick(const FGeometry& Geometry, float DeltaTime)
 	if (LanguageRevision != TBText::GetRevision())
 	{
 		LanguageRevision = TBText::GetRevision();
-		RefreshHelpText();
+		if (HelpOverlay->IsVisible()) RefreshHelpText();
 		Refresh();
 	}
 	if (State == EState::Story && StoryActor.IsValid())

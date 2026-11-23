@@ -145,7 +145,6 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpSpeech;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitleContent;
 	UPROPERTY(Transient) TObjectPtr<UWidget> HelpOverlay;
-	UPROPERTY(Transient) TObjectPtr<UButton> CloseHelpButton;
 	// オプション画面（UTBOptionsMenu）を開く。ロビー・試合中のメニューと同じ画面。
 	UFUNCTION() void OpenOptions();
 	TWeakObjectPtr<class UTBOptionsMenu> Options;

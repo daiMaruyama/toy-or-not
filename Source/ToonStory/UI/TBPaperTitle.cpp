@@ -8,6 +8,7 @@
 #include "Components/Border.h"
 #include "Components/ScrollBox.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/VerticalBox.h"
@@ -16,7 +17,6 @@
 #include "Components/SizeBox.h"
 #include "Engine/GameInstance.h"
 #include "TBPaperStyle.h"
-#include "TBPaperButton.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ScaleBox.h"
@@ -356,13 +356,12 @@ void UTBTitleMenu::BuildPaperLayout()
 		Line->SetJustification(ETextJustify::Center);
 		HelpSpeech.Add(Line);
 		// Keep all lines inside the oval even when a translation needs more horizontal space.
-		auto* SpeechFit = FitLabel(Line, bPhotoOnRight ? 434 : 968, Top + 48, 178, 87, HAlign_Center);
+		auto* SpeechFit = FitLabel(Line, bPhotoOnRight ? 443 : 977, Top + 56.5f, 160, 70, HAlign_Center);
 		SpeechFit->SetRenderTransformAngle(bPhotoOnRight ? 3.f : -3.f);
 	}
-	CloseHelpButton = DialogButton(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 1100, 714, 86, TBPaper::PrintCream);
+	auto* CloseHelpButton = DialogButton(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 1100, 714, 86, TBPaper::PrintCream);
 	CloseHelpButton->OnClicked.AddDynamic(this, &ThisClass::CloseHelp);
 	HelpOverlay->SetVisibility(ESlateVisibility::Collapsed);
-	RefreshHelpText();
 }
 
 void UTBTitleMenu::AskQuit()
@@ -437,10 +436,11 @@ FReply UTBTitleMenu::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKe
 		return FReply::Handled();
 	}
 	NoteInput();
+	const FKey Key = KeyEvent.GetKey();
+	const bool bBack = Key == EKeys::Escape || Key == EKeys::Gamepad_FaceButton_Right;
 	if (HelpOverlay && HelpOverlay->GetVisibility() == ESlateVisibility::Visible)
 	{
-		const FKey Key = KeyEvent.GetKey();
-		if (Key == EKeys::Escape)
+		if (bBack)
 		{
 			CloseHelp();
 			return FReply::Handled();
@@ -451,12 +451,12 @@ FReply UTBTitleMenu::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKe
 			if (Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Right) { ShowHumanHelp(); return FReply::Handled(); }
 		}
 	}
-	if (QuitOverlay->GetVisibility() == ESlateVisibility::Visible && KeyEvent.GetKey() == EKeys::Escape)
+	if (QuitOverlay->GetVisibility() == ESlateVisibility::Visible && bBack)
 	{
 		CancelQuit();
 		return FReply::Handled();
 	}
-	if (bRoomCardsShown && KeyEvent.GetKey() == EKeys::Escape)
+	if (bRoomCardsShown && bBack)
 	{
 		CloseFinder();
 		return FReply::Handled();

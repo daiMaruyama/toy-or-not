@@ -287,7 +287,8 @@ namespace
 						for (FVector2D Corner : {FVector2D::ZeroVector, FVector2D(Size.X,0), Size, FVector2D(0,Size.Y)})
 						{
 							const FVector2D Offset = Page.AbsoluteToLocal(Line.LocalToAbsolute(Corner)) - Center;
-							if (!Test->TestTrue(TEXT("Dialogue fits within the balloon"),
+							if (!Test->TestTrue(*FString::Printf(TEXT("%s panel %d dialogue corner (%.1f, %.1f) fits within the balloon"),
+							    *Art->GetName(), Panel, Offset.X, Offset.Y),
 							    FMath::Square(Offset.X / 114.) + FMath::Square(Offset.Y / 58.) < 1.)) return true;
 						}
 					}

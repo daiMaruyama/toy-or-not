@@ -838,20 +838,13 @@ void ATBHUD::BeginPlay()
 		ArtTextures.Add(TEXT("RoomHalftone"), Tile);
 	}
 	PaperTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/PaperClub/Panel.Panel"));
-	const TCHAR* Names[] = {TEXT("Icon_Stage"), TEXT("Icon_Settings"), TEXT("Icon_PlayerRatio"),
-	    TEXT("Icon_Npc"), TEXT("Icon_Hourglass"), TEXT("Icon_Crown"), TEXT("Icon_Check"),
-	    TEXT("Icon_Battery"), TEXT("Icon_BatteryPickup"), TEXT("Icon_ToyBoxEmpty"), TEXT("Icon_ToyBoxFull"),
-	    TEXT("Tape_Cream"), TEXT("Tag_Toy"), TEXT("Tag_Human"),
-	    TEXT("Tag_Any"), TEXT("Burst_Yellow"), TEXT("Burst_Teal"), TEXT("TitleLogo"),
+	const TCHAR* Names[] = {TEXT("Icon_Hourglass"), TEXT("Icon_Crown"), TEXT("Icon_BatteryPickup"),
+	    TEXT("Icon_ToyBoxEmpty"), TEXT("Icon_ToyBoxFull"), TEXT("Tape_Cream"),
 	    TEXT("PauseReset"), TEXT("PauseResume"), TEXT("PausePlayers"),
-	    TEXT("Button_Gear"), TEXT("Button_Leave"), TEXT("Mark_TriangleBrown"), TEXT("Mark_TriangleYellow"), TEXT("Label_You"),
-	    TEXT("Frame_SquareBrown"), TEXT("Frame_SquareLavender"), TEXT("Gauge_Green"), TEXT("Gauge_Orange"), TEXT("Gauge_Gray"),
 	    TEXT("StagePreview_Demo"), TEXT("StagePreview_House")};
 	for (const TCHAR* Name : Names)
 	{
-		const FString Asset = FString::Printf(TEXT("T_UI_%s"), Name);
-		if (auto* Texture = LoadObject<UTexture2D>(nullptr,
-		    *FString::Printf(TEXT("/Game/UI/Designer/Imported/%s.%s"), *Asset, *Asset)))
+		if (auto* Texture = TBPaper::Art(Name))
 			ArtTextures.Add(FName(Name), Texture);
 	}
 }
