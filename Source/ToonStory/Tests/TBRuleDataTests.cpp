@@ -43,11 +43,13 @@ bool FTBRuleDataTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Gaze freeze delay"), Defaults->Gaze.FreezeDelaySeconds, .3f);
 	TestEqual(TEXT("Gazed toy speed ratio"), Defaults->Gaze.GazedToySpeedRatio, .3f);
 	TestFalse(TEXT("Frozen toy stays frozen while seen"), Defaults->Gaze.bReleaseWhenGazeEnds);
-	// 演出の初期値。影は茶色、止まったら色を抜いて暖色にする。
+	// 影は茶色、止まった本人の画面は暗めのモノクロに寄せる。
 	TestTrue(TEXT("Seen shadow is warm brown"),
 	         Defaults->Gaze.SeenShadowColor.R > Defaults->Gaze.SeenShadowColor.B);
 	TestEqual(TEXT("Toy shadow strength"), Defaults->Gaze.ToyShadowStrength, 1.f);
 	TestTrue(TEXT("Frozen view loses color"), Defaults->Gaze.FrozenSaturation < 1.f);
+	TestTrue(TEXT("Frozen view uses a dim, nearly neutral tint"), Defaults->Gaze.FrozenTint.R < .9f &&
+	    FMath::Abs(Defaults->Gaze.FrozenTint.R - Defaults->Gaze.FrozenTint.B) < .05f);
 	TestEqual(TEXT("Human edge strength"), Defaults->Gaze.HumanEdgeStrength, 1.f);
 
 	// プロジェクト設定でアセットを選んでいれば、初期値ではなくそのアセットを使う。

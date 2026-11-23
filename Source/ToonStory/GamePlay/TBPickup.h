@@ -9,6 +9,8 @@
 class USphereComponent;
 class UStaticMeshComponent;
 class UStaticMesh;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class ATBCharacter;
 class ATBPickup;
 
@@ -21,9 +23,13 @@ public:
 	ATBPickup();
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	// 保存済みマップと検証用Arenaで同じ収集物を使用する。
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Appearance")
 	TSoftObjectPtr<UStaticMesh> PickupMesh;
+	// Depth-tested rim: identify collectibles without revealing them through walls.
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Appearance")
+	TSoftObjectPtr<UMaterialInterface> PickupRimMaterial;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	TObjectPtr<USphereComponent> Contact;
 	// 回収にかかる秒数はマスターデータ（TB::Rules().Pickup）にある。
@@ -39,4 +45,12 @@ public:
 
 private:
 	void RefreshAppearance();
+	void UpdateLocalHighlight();
+	float HighlightWeight(const ATBCharacter* Observer, const FVector& Eye, const FVector& Forward) const;
+	void ApplyHighlight(float Weight);
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> RimMaterial;
+	FLinearColor RimColor = FLinearColor::White;
+	float AppliedHighlight = -1.f;
+	friend class FTBBatteryHighlightTest;
 };

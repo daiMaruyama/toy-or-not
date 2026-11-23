@@ -6,6 +6,7 @@
 
 class UBoxComponent;
 class ALight;
+class ULevel;
 
 /** Explicit room bounds and server-owned lighting. Unassigned space keeps the original gaze rules. */
 UCLASS()
@@ -29,6 +30,8 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Room")
 	void SetLightsOn(bool bOn);
 	void ResetLighting();
+	/** Limit the reach of the reviewed fixtures when their authored stage is loaded. */
+	static void ApplyStageLightRanges(ULevel& Level);
 	bool Contains(const FVector& Position) const;
 	// Overlapping volumes use the most restrictive rule: a lit room always wins.
 	static bool ProtectsFromGaze(const UWorld* World, const FVector& ToyPosition, const FVector& HumanPosition);

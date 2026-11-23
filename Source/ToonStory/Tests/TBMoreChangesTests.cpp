@@ -217,12 +217,13 @@ bool FTBLobbyVisibleTest::RunTest(const FString& Parameters)
 		          FString(TEXT("/Game/Maps/TB_ToyWorldDemoExpanded")));
 		TestEqual(TEXT("Stylized House occupies stable stage ID 3"), FString(TBLobbySettings::StagePath(3)),
 		          FString(TEXT("/Game/Maps/TB_StylizedHouse")));
-		// Retained IDs are stable; retired/invalid selections safely resolve to Demo ID 1.
+		// Retained IDs and Random are stable; other retired/invalid selections fall back to Demo.
 		for (const int32 Requested : {1, 3, 0, 2, -1, 4, MIN_int32, MAX_int32})
 		{
-			const int32 ExpectedId = Requested == 3 ? 3 : 1;
-			const FString ExpectedName = TBText::String(ExpectedId == 3 ? TEXT("Stage.House") : TEXT("Stage.Demo"));
-			const int32 ExpectedItems = ExpectedId == 3 ? 8 : 10;
+			const int32 ExpectedId = Requested == 0 ? 0 : Requested == 3 ? 3 : 1;
+			const FString ExpectedName = TBText::String(ExpectedId == 0 ? TEXT("Stage.Random") :
+			    ExpectedId == 3 ? TEXT("Stage.House") : TEXT("Stage.Demo"));
+			const int32 ExpectedItems = ExpectedId == 1 ? 10 : 8;
 			PC->ServerSelectStage(Requested);
 			TestEqual(TEXT("Selected stage retains its stable ID or falls back to Demo"),
 			          World->GetGameState<ATBGameState>()->SelectedStage, ExpectedId);
@@ -230,8 +231,11 @@ bool FTBLobbyVisibleTest::RunTest(const FString& Parameters)
 			          ExpectedName);
 			TestTrue(TEXT("All stage selections retain the lobby pawn"), PC->GetPawn() == OriginalPawn);
 			TestEqual(TEXT("Selected stage item limit"), TBLobbySettings::AvailableItems(World), ExpectedItems);
-			TestEqual(TEXT("Stage path follows the same stable ID and fallback policy"),
-			          FString(TBLobbySettings::StagePath(Requested)), FString(TBLobbySettings::StagePath(ExpectedId)));
+			if (ExpectedId == TBLobbySettings::RandomStageId)
+				TestNull(TEXT("Random is a preference, not an already selected map"), TBLobbySettings::StagePath(Requested));
+			else
+				TestEqual(TEXT("Stage path follows the same stable ID and fallback policy"),
+				          FString(TBLobbySettings::StagePath(Requested)), FString(TBLobbySettings::StagePath(ExpectedId)));
 			auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
 			Pending->SelectedStage = Requested;
 			TBLobbySettings::Restore(Mode);

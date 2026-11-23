@@ -8,15 +8,14 @@
 class UButton;
 class UFont;
 class UTextBlock;
-class UTexture2D;
 
-/** オプション画面のキー設定の1行。表示名と、今のキー名を出し、「変える」でPressedを呼ぶ。 */
+/** A key binding row. Pressing the key cap opens the remapping prompt. */
 UCLASS()
 class TOONSTORY_API UTBKeyRow : public UUserWidget
 {
 	GENERATED_BODY()
 public:
-	void Build(const FText& Label, FName InMappingName, UFont* Font, UTexture2D* Paper);
+	void Build(const FText& Label, FName InMappingName, UFont* Font, UFont* HeadingFont);
 	// 割り当ては変わるので、毎回キー名を引き直す。
 	void Refresh();
 	FName GetMappingName() const
@@ -41,4 +40,6 @@ private:
 	TObjectPtr<UTextBlock> KeyText;
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ChangeButton;
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> ResetButton;
 };

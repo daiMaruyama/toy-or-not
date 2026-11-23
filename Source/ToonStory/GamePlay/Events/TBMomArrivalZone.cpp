@@ -10,6 +10,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Controller.h"
@@ -27,6 +28,8 @@ ATBMomArrivalZone::ATBMomArrivalZone()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	Marker->SetStaticMesh(Cube.Object);
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Plain(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	NeutralBoundaryMaterial=Plain.Object;
+	BoundaryMaterial=Plain.Object;
 	Marker->SetMaterial(0,Plain.Object);
 	Marker->SetRelativeLocation(FVector(0,0,12));
 	Marker->SetRelativeScale3D(FVector(.24));
@@ -44,17 +47,35 @@ void ATBMomArrivalZone::BuildBoundary(float Radius)
 {
 	DisplayRadius=Radius;
 	Boundary->ClearInstances();
-	if (BoundaryMaterial) Boundary->SetMaterial(0,BoundaryMaterial);
+	// Keep the serialized component/property names for placed Blueprint compatibility.
+	// Only the old emergency-red material adopts the new look; authored custom materials still work.
+	const bool UsePaper=!BoundaryMaterial || BoundaryMaterial==NeutralBoundaryMaterial ||
+	    BoundaryMaterial->GetPathName()==TEXT("/Game/Events/Mom/M_MomBoundary.M_MomBoundary");
+	if (UsePaper && NeutralBoundaryMaterial)
+	{
+		if (!BoundaryTint) BoundaryTint=UMaterialInstanceDynamic::Create(NeutralBoundaryMaterial,this);
+		BoundaryTint->SetVectorParameterValue(TEXT("Color"),FLinearColor(.78f,.64f,.38f));
+		float Roughness=0;
+		if (NeutralBoundaryMaterial->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Roughness")),Roughness))
+			BoundaryTint->SetScalarParameterValue(TEXT("Roughness"),.9f);
+		Boundary->SetMaterial(0,BoundaryTint);
+	}
+	else if (BoundaryMaterial) Boundary->SetMaterial(0,BoundaryMaterial);
 	// 描画用の寸法。判定は同じ半径の円柱で、Actorの回転・拡大率には依存しない。
 	Boundary->SetUsingAbsoluteRotation(true);
 	Boundary->SetUsingAbsoluteScale(true);
-	constexpr int32 Dashes=48;
-	for (int32 I=0;I<Dashes;++I)
+	// A thin, matte paper ribbon lies just inside the actual standing radius.
+	// Slightly overlapping tangent pieces form a smooth continuous ring, without warning-style gaps.
+	constexpr int32 Segments=96;
+	const float Width=FMath::Min(3.f,Radius*.08f);
+	const float RingRadius=Radius-Width*.5f;
+	const float Length=2*PI*RingRadius/Segments*1.04f;
+	for (int32 I=0;I<Segments;++I)
 	{
-		const float Angle=2*PI*I/Dashes;
-		const FVector Position(Radius*FMath::Cos(Angle),Radius*FMath::Sin(Angle),2);
+		const float Angle=2*PI*I/Segments;
+		const FVector Position(RingRadius*FMath::Cos(Angle),RingRadius*FMath::Sin(Angle),1);
 		Boundary->AddInstance(FTransform(FRotator(0,FMath::RadiansToDegrees(Angle)+90,0),Position,
-		    FVector(2*PI*Radius/Dashes*.55f/100, .025, .015)));
+		    FVector(Length/100,Width/100,.002)));
 	}
 }
 
@@ -70,6 +91,8 @@ void ATBMomArrivalZone::BeginPlay()
 	// Existing placed instances may still serialize the old visible placeholder defaults.
 	Marker->SetHiddenInGame(true);
 	Marker->SetCastShadow(false);
+	// Rebuild even if a placed instance serialized the old radius and 48-dash instance data.
+	DisplayRadius=-1;
 	OnRep_State();
 }
 
@@ -94,12 +117,22 @@ ATBMomArrivalZone* ATBMomArrivalZone::FindActive(UWorld* World)
 	return nullptr;
 }
 
+bool ATBMomArrivalZone::HasPassedOpeningDelay(UWorld* World)
+{
+	const auto* Match = TB::GS(World);
+	const float Delay = TB::Rules().Events.Mom.InitialDelaySeconds;
+	return Match && Match->HidePreparation.bValid && !Match->IsPreparing() &&
+	       FMath::IsFinite(Delay) && Delay >= 0 && FMath::IsFinite(Match->HidePreparation.EndsAt) &&
+	       Match->GetServerWorldTimeSeconds() - Match->HidePreparation.EndsAt >= Delay;
+}
+
 bool ATBMomArrivalZone::StartEvent()
 {
 	const auto* Match=TB::GS(GetWorld());
 	const auto& Rules=TB::Rules().Events.Mom;
 	if (!HasAuthority() || !bEnabled || !TB::Playing(GetWorld()) || !Match || Match->IsPreparing() ||
-	    !Rules.IsValid() || !HasHumanPlayer(GetWorld()) || FindActive(GetWorld())) return false;
+	    !Rules.IsValid() || !HasPassedOpeningDelay(GetWorld()) ||
+	    !HasHumanPlayer(GetWorld()) || FindActive(GetWorld())) return false;
 	Round=Match->HidePreparation.Round;
 	State=FTBMomArrivalState();
 	State.bActive=true;

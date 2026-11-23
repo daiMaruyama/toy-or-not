@@ -5,6 +5,7 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBLobbySettings.h"
+#include "UI/TBUIText.h"
 #include "Core/TBSession.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -51,6 +52,29 @@ bool FTBTravelRecovery::RunTest(const FString&)
 	State->Phase = ETBPhase::Lobby;
 	Pending->bStageSelected = false;
 	TestFalse(TEXT("Direct arena startup remains available for rule tests"), TBLobbySettings::ShouldTravelToStage(World));
+	TBLobbySettings::SelectStage(PC, TBLobbySettings::RandomStageId);
+	TestEqual(TEXT("Random remains unresolved while editing the lobby"), Pending->ResolvedStage, INDEX_NONE);
+	TestEqual(TEXT("Random uses the smaller collectible limit"), TBLobbySettings::AvailableItems(World), 8);
+	TBLobbySettings::ResolveStageForStart(World);
+	const int32 DrawnStage = Pending->ResolvedStage;
+	TestTrue(TEXT("Random draws only a retained playable stage"),
+	    DrawnStage == TBLobbySettings::DemoStageId || DrawnStage == TBLobbySettings::HouseStageId);
+	for (int32 Repeat = 0; Repeat < 32; ++Repeat) TBLobbySettings::ResolveStageForStart(World);
+	TestEqual(TEXT("Repeated start resolution cannot redraw this round"), Pending->ResolvedStage, DrawnStage);
+	TestEqual(TEXT("Drawing a stage preserves the Random preference"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	Pending->PendingMap = TBLobbySettings::StagePath(DrawnStage);
+	State->bTravelPending = true;
+	TBLobbySettings::SelectStage(PC, TBLobbySettings::DemoStageId);
+	TestEqual(TEXT("In-flight selection cannot change the draw"), Pending->ResolvedStage, DrawnStage);
+	TestEqual(TEXT("In-flight selection cannot change Random"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	TBLobbySettings::CancelTravel(World);
+	TestEqual(TEXT("Cancellation releases the random destination"), Pending->ResolvedStage, INDEX_NONE);
+	TestEqual(TEXT("Cancellation preserves Random for retry"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	TestEqual(TEXT("Cancellation restores the Random label"), State->StageName, TBText::String(TEXT("Stage.Random")));
+	State->Phase = ETBPhase::Playing;
+	TestFalse(TEXT("An unresolved random destination cannot silently travel to Demo outside the lobby"), TBLobbySettings::TryTravel(Mode, true).IsEmpty());
+	TestTrue(TEXT("Refusing unresolved random leaves travel empty"), Pending->PendingMap.IsEmpty());
+	State->Phase = ETBPhase::Lobby;
 	TBLobbySettings::SelectStage(PC, TBLobbySettings::HouseStageId);
 	TestTrue(TEXT("Explicit stage selection from Arena schedules selected stage at start"), TBLobbySettings::ShouldTravelToStage(World));
 	TestEqual(TEXT("House item limit is used before travel"), TBLobbySettings::AvailableItems(World), 8);

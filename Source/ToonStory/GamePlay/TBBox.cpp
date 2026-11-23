@@ -287,6 +287,7 @@ void ATBBox::Tick(float DeltaSeconds)
 		Rescuers = 0;
 		return;
 	}
+	if (const auto* Match = TB::GS(GetWorld()); Match && Match->IsIgniting()) return;
 	const bool bHasPlayers = HasPrisoners();
 	int32 RescueCount = 0;
 	for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It)
@@ -432,4 +433,16 @@ void ATBBox::ReleasePrisoners()
 void ATBBox::MulticastOpened_Implementation()
 {
 	OnOpened.Broadcast();
+}
+
+void ATBBox::PlayEscapeBump()
+{
+	if (!HasAuthority()) return;
+	UTBAudioEvents::Emit(this, ETBSoundEvent::LidBump, nullptr, InteractionPoint->GetComponentLocation());
+	MulticastEscapeOpened();
+}
+
+void ATBBox::MulticastEscapeOpened_Implementation()
+{
+	OnEscapeOpened.Broadcast();
 }

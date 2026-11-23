@@ -112,10 +112,12 @@ namespace
 				PC->SyncInputContexts();
 				break;
 			case PressToyInteractFrame:
+				NoticeBeforeToyInteract = PC->Notice;
 				SendActionKey(PC.Get(), EKeys::E, IE_Pressed);
 				break;
 			case CheckToyInteractFrame:
 				Test->TestTrue(TEXT("Toy: E starts the held interaction"), Body->bHoldingInteract);
+				Test->TestEqual(TEXT("Toy: interacting without a target adds no HUD hint"), PC->Notice, NoticeBeforeToyInteract);
 				SendActionKey(PC.Get(), EKeys::E, IE_Released);
 				break;
 			case ReleaseCheckToyInteractFrame:
@@ -197,6 +199,7 @@ namespace
 		bool bOriginalFixedStep = false;
 		double OriginalFixedDelta = 1.0 / 60.0;
 		ETBTeam OriginalTeam = ETBTeam::None;
+		FString NoticeBeforeToyInteract;
 		TOptional<TBTest::FPlayingScope> Playing;
 	};
 } // namespace

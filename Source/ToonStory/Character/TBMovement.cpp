@@ -2,6 +2,7 @@
 
 #include "TBMovement.h"
 #include "Character/TBCharacter.h"
+#include "Character/TBCharacterGeometry.h"
 #include "Character/TBNPCController.h"
 #include "Data/TBCharacterData.h"
 #include "Data/TBRuleData.h"
@@ -27,12 +28,24 @@ void UTBMovement::ApplyImpactPhysicsForces(const FHitResult& Impact, const FVect
 	if (!CharacterOwner || !CharacterOwner->HasAuthority() || !Part->IsSimulatingPhysics()) return;
 	const FVector Direction = FVector(ImpactVelocity.X, ImpactVelocity.Y, 0).GetSafeNormal();
 	const auto* Pawn = Cast<ATBCharacter>(CharacterOwner);
-	if (!Pawn || !Pawn->IsHuman()) return;
-	const float DesiredSpeed = FMath::Min(float(ImpactVelocity.Size2D()) * 1.25f, 360.f);
+	if (!Pawn) return;
+	const bool bHuman = Pawn->IsHuman();
+	const float DesiredSpeed = FMath::Min(float(ImpactVelocity.Size2D()) * (bHuman ? 1.25f : .8f), bHuman ? 360.f : 100.f);
 	const float CurrentSpeed = FVector::DotProduct(Part->GetPhysicsLinearVelocity(), Direction);
-	const float DeltaSpeed = FMath::Clamp(DesiredSpeed - CurrentSpeed, 0.f, 280.f);
+	const float DeltaSpeed = FMath::Clamp(DesiredSpeed - CurrentSpeed, 0.f, bHuman ? 280.f : 65.f);
 	if (!Direction.IsNearlyZero() && DeltaSpeed > 0)
+	{
+		// Sweep and blocking-impact callbacks can report the same contact before
+		// Chaos consumes its queued impulse. Do not apply that push twice.
+		if (PropPushFrame != GFrameCounter)
+		{
+			PropPushFrame = GFrameCounter;
+			PushedPropsThisFrame.Reset();
+		}
+		if (PushedPropsThisFrame.Contains(Part)) return;
+		PushedPropsThisFrame.Add(Part);
 		Part->AddImpulseAtLocation(Direction * Part->GetMass() * DeltaSpeed, Impact.ImpactPoint);
+	}
 }
 
 void UTBMovement::SweepPushableProps(float DeltaSeconds)
@@ -118,6 +131,50 @@ namespace
 	};
 } // namespace
 
+bool UTBMovement::CanCrouchInCurrentState() const
+{
+	const auto* Pawn = Cast<ATBCharacter>(CharacterOwner);
+	// Frozen custom movement must preserve the established toy pose. It cannot
+	// start a new fall while watched, and human crouching keeps the engine rules.
+	if (Pawn && Pawn->TBPS() && Pawn->TBPS()->Team == ETBTeam::Toy && Pawn->IsGazeFrozen() &&
+	    !Pawn->IsPhysicsLocked() && Pawn->bIsCrouched && MovementMode == MOVE_Custom && CustomMovementMode == 1)
+		return true;
+	return Super::CanCrouchInCurrentState();
+}
+
+void UTBMovement::Crouch(bool bClientSimulation)
+{
+	const auto* Pawn = Cast<ATBCharacter>(CharacterOwner);
+	if (Pawn && Pawn->TBPS() && Pawn->TBPS()->Team == ETBTeam::Toy)
+	{
+		if (!HasValidData() || (!bClientSimulation && !CanCrouchInCurrentState())) return;
+		// Reuse the networked stance flag without the human capsule resize or mesh smoothing offset.
+		if (!bClientSimulation) CharacterOwner->SetIsCrouched(true);
+		CharacterOwner->OnStartCrouch(0, 0);
+		return;
+	}
+	Super::Crouch(bClientSimulation);
+}
+
+void UTBMovement::UnCrouch(bool bClientSimulation)
+{
+	const auto* Pawn = Cast<ATBCharacter>(CharacterOwner);
+	// Keep the visible frozen pose, but never overwrite bWantsToCrouch: release must
+	// reach the server and complete as soon as the toy thaws. Replication still applies.
+	if (!bClientSimulation && Pawn && Pawn->TBPS() && Pawn->TBPS()->Team == ETBTeam::Toy &&
+	    Pawn->IsGazeFrozen() && !Pawn->IsPhysicsLocked() && Pawn->bIsCrouched) return;
+	if (HasValidData() && Pawn && Pawn->TBPS() &&
+	    (Pawn->TBPS()->Team == ETBTeam::Toy ||
+	     FMath::IsNearlyEqual(CharacterOwner->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(), TBCharacterGeometry::ToyHalfHeight)))
+	{
+		// CDO dimensions describe a human; growing a toy back to those dimensions would pop it upward.
+		if (!bClientSimulation) CharacterOwner->SetIsCrouched(false);
+		CharacterOwner->OnEndCrouch(0, 0);
+		return;
+	}
+	Super::UnCrouch(bClientSimulation);
+}
+
 float UTBMovement::GetMaxSpeed() const
 {
 	const auto* Character = Cast<ATBCharacter>(CharacterOwner);
@@ -173,6 +230,8 @@ void UTBMovement::PerformMovement(float DeltaSeconds)
 	if (ToyCharacter && ToyCharacter->IsGazeFrozen())
 	{
 		// 移動予測・補正を維持し、凍結中は鉛直方向だけ動かす。
+		if (ToyCharacter->TBPS() && ToyCharacter->TBPS()->Team == ETBTeam::Toy && !CharacterOwner->bIsCrouched)
+			bWantsToCrouch = false;
 		if (MovementMode != MOVE_Custom || CustomMovementMode != 1)
 		{
 			SetMovementMode(MOVE_Custom, 1);
@@ -183,6 +242,12 @@ void UTBMovement::PerformMovement(float DeltaSeconds)
 	else if (MovementMode == MOVE_Custom && CustomMovementMode == 1)
 	{
 		SetMovementMode(MOVE_Falling);
+	}
+	if (ToyCharacter && ToyCharacter->IsToyFallen())
+	{
+		Acceleration = FVector::ZeroVector;
+		Velocity.X = Velocity.Y = 0;
+		CharacterOwner->StopJumping();
 	}
 	SweepPushableProps(DeltaSeconds);
 	Super::PerformMovement(DeltaSeconds);
@@ -240,8 +305,22 @@ void UTBMovement::MoveAutonomous(float ClientTimeStamp, float DeltaSeconds, uint
 	if (ToyCharacter && ToyCharacter->IsGazeFrozen())
 	{
 		// 凍結でジャンプ入力は捨てるが、押し続けているダッシュ入力は復帰後へ保持する。
-		Super::MoveAutonomous(ClientTimeStamp, DeltaSeconds, Flags & FSavedMove_Character::FLAG_Custom_0,
-		                      FVector::ZeroVector);
+		// A frozen toy may release an established hold, but cannot begin a new one.
+		const bool KeepFall = ToyCharacter->TBPS() && ToyCharacter->TBPS()->Team == ETBTeam::Toy &&
+		    CharacterOwner->bIsCrouched && bWantsToCrouch;
+		const uint8 FrozenFlags = (Flags & FSavedMove_Character::FLAG_Custom_0) |
+		    (KeepFall ? Flags & FSavedMove_Character::FLAG_WantsToCrouch : 0);
+		Super::MoveAutonomous(ClientTimeStamp, DeltaSeconds, FrozenFlags, FVector::ZeroVector);
+		return;
+	}
+	const bool StartsToyFall = ToyCharacter && ToyCharacter->TBPS() && ToyCharacter->TBPS()->Team == ETBTeam::Toy &&
+	    (Flags & FSavedMove_Character::FLAG_WantsToCrouch) != 0;
+	if (ToyCharacter && (ToyCharacter->IsToyFallen() || StartsToyFall))
+	{
+		// Super checks jump before PerformMovement, so reject it even on the first fall packet.
+		// Keep the held crouch flag (including release), but discard jump and horizontal movement.
+		Super::MoveAutonomous(ClientTimeStamp, DeltaSeconds, Flags & ~FSavedMove_Character::FLAG_JumpPressed,
+		    FVector::ZeroVector);
 		return;
 	}
 	Super::MoveAutonomous(ClientTimeStamp, DeltaSeconds, Flags, NewAcceleration);

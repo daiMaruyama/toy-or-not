@@ -23,6 +23,7 @@ namespace TB::Keys
 	inline const FName HumanInteract(TEXT("Human_Interact"));
 	inline const FName HumanDrop(TEXT("Human_Drop"));
 	inline const FName HumanGaze(TEXT("Human_Gaze"));
+	inline const FName ToyFall(TEXT("Toy_Fall"));
 	inline const FName ToySprint(TEXT("Toy_Sprint"));
 	inline const FName ToyInteract(TEXT("Toy_Interact"));
 inline const FName ToyPush(TEXT("Toy_Push"));
@@ -41,13 +42,12 @@ inline const FName ToyPush(TEXT("Toy_Push"));
  */
 namespace TB::Notices
 {
-	inline constexpr const TCHAR* ItemsAutoCollect = TEXT("Items collect automatically while touching. {Toy_Interact} is for rescue.");
 	inline constexpr const TCHAR* ReadyRequired = TEXT("Every player must press {Lobby_Ready} to be ready.");
 
 	/** 上の全部 */
 	inline TArray<const TCHAR*> All()
 	{
-		return {ItemsAutoCollect, ReadyRequired};
+		return {ReadyRequired};
 	}
 }
 

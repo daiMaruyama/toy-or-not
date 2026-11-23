@@ -240,6 +240,8 @@ bool FTBRetainedStagePresentationTest::RunTest(const FString& Parameters)
 		++Pickups;
 		TestTrue(TEXT("Collectible uses the configured battery mesh"),
 		         It->PickupMesh.Get() && It->Mesh->GetStaticMesh() == It->PickupMesh.Get());
+		TestTrue(TEXT("Battery rim material is available in the retained stage"),
+		         It->PickupRimMaterial.Get() != nullptr);
 		TestTrue(TEXT("Battery has visible real-world scale"),
 		         FMath::IsNearlyEqual(It->Mesh->Bounds.BoxExtent.Z * 2, 16.0, .5));
 	}

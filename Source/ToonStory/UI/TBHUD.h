@@ -19,9 +19,13 @@ public:
 	bool IsStagePickerOpen() const { return bStagePickerOpen; }
 	// 設定・参加者一覧・オプションを開いている間は、チャットを出さない。
 	bool IsChatBlocked() const;
+	bool DismissConfirmation();
 	virtual void NotifyHitBoxBeginCursorOver(FName BoxName) override;
 
 private:
+	bool bConfirmingLeave = false;
+	void DrawPause();
+	void DrawConfirmation(const FString& Question, const FString& Detail, FName Cancel, FName Confirm, const FString& Action);
  bool bPlayersOpen = false;
  TWeakObjectPtr<class APlayerState> KickSelection;
  void DrawPlayers();
@@ -52,31 +56,37 @@ private:
 	UPROPERTY(Transient)
 	TMap<FName, TObjectPtr<class UTexture2D>> ArtTextures;
 	void DrawArt(FName Name, float X, float Y, float W, float H, FLinearColor Tint = FLinearColor::White);
-	void DrawButton(FName Id, const FString& Label, float X, float Y, float W, float H,
-	                bool Enabled = true, bool Selected = false, bool Destructive = false);
+	void DrawLobbyRetryButton(float X, float Y, float Scale);
 	void DrawProgress(float Value, float X, float Y, float W, float H, FLinearColor Color);
 	void DrawFittedText(const FString& Text, FLinearColor Color, float X, float Y, float Width, float Scale,
-	                    bool Heading = false, bool Center = false);
+	                    bool Heading = false, bool Center = false, bool Outlined = false);
 	void PaperPanel(FLinearColor Tint, float X, float Y, float W, float H);
-	void FramePanel(float X, float Y, float W, float H);
+	enum class ESubtitleShade : uint8 { Center, Uniform };
+	UPROPERTY(Transient)
+	TObjectPtr<class UTexture2D> MatchSubtitleMask;
+	bool bDrawingMatchSubtitles = false;
+	void DrawSubtitleShade(float X, float Y, float W, float H, ESubtitleShade Shade = ESubtitleShade::Center);
 	void PaperSign(FLinearColor Fill, float X, float Y, float W, float H);
-	void DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color);
+	void DrawSmoothPolygon(const TArray<FVector2D>& Points, FLinearColor Color, bool ShadePaper = false);
 	void RoundedPanel(FLinearColor Fill, float X, float Y, float W, float H, float Radius = 24.f,
 	                  float Border = 4.f, FLinearColor Outline = FLinearColor::Transparent);
-	void DrawKeycap(const FString& Key, float X, float Y, float W, float H);
 	void DrawText(const FString& Text, FLinearColor Color, float X, float Y, UFont* Font = nullptr, float Scale = 1.f,
-	              bool ScalePosition = false);
+	              bool ScalePosition = false, bool Outlined = false);
 	void DrawResults(const class ATBGameState& MatchState);
-	void DrawResultCover(const class ATBGameState& MatchState);
-	void DrawMomBubble(const class ATBGameState& MatchState, float CenterX, float CenterY, float Width, float Height, float Alpha);
 	void DrawMatch(const class ATBGameState& MatchState, class ATBController& Controller);
+	TWeakObjectPtr<class ATBEscapeVehicle> EscapeGuideVehicle;
+	TWeakObjectPtr<class ATBEscapeExit> EscapeGuideExit;
 	void DrawLobby();
+	void DrawRoomPanel(float X, float Y, float W, float H, float Unit, FLinearColor Fill);
+	void DrawRoomButton(FName Id, const FString& Caption, float X, float Y, float W, float H, float Unit,
+	                    FLinearColor Fill, bool Enabled = true, bool Interactive = true, float TextScale = .92f);
 	void DrawDebugHUD();
-	// 凝視の演出。おもちゃには迫る紙の影と「ドキッ」、人間には暗くなる端と集中線。本人の画面にだけ出す。
+	// 凝視の演出。おもちゃには脈打つ周辺の影、人間にはズームに連動する影。本人の画面にだけ出す。
 	void DrawGazeEffects(class ATBController& Controller);
 	void DrawEdgeShade(FLinearColor Color, float Thickness, float Alpha);
 	float GazeShadow = 0;
-	// 前の描画で凝視されているか止まっていたか。入った瞬間だけ「ドキッ」を出す。
+	float GazePulsePhase = 0;
+	TWeakObjectPtr<class ATBCharacter> GazeEffectPawn;
+	// 前の描画で凝視されているか止まっていたか。入った瞬間だけ既存の警告音を鳴らす。
 	bool bWasCaught = false;
-	double DokiStarted = -1;
 };

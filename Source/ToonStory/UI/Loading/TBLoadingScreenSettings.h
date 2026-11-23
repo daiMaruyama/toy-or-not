@@ -7,7 +7,7 @@
 
 class UTexture2D;
 
-/** ロード画面。暗い子ども部屋で、おもちゃが積み木の陰から箱の陰へこっそり走る。プロジェクト設定の「ロード画面」で変える */
+/** ロード映像と、イラスト表示用の演出設定。 */
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "ロード画面"))
 class TOONSTORY_API UTBLoadingScreenSettings : public UDeveloperSettings
 {
@@ -20,11 +20,11 @@ public:
 	/** 背景が透明で、右を向いた絵。1周ごとにランダムに替える */
 	UPROPERTY(Config, EditAnywhere, Category = "おもちゃ", meta = (DisplayName = "おもちゃの絵"))
 	TArray<TSoftObjectPtr<UTexture2D>> Toys;
-	/** 画面の高さに対する、おもちゃの絵（正方形）の高さ */
+	/** 基準画面の高さに対する、おもちゃの絵の高さ。場面内に収まるよう縮小して描画する */
 	UPROPERTY(Config, EditAnywhere, Category = "おもちゃ",
 	          meta = (DisplayName = "おもちゃの大きさ", ClampMin = "0.05", ClampMax = "0.6"))
 	float ToyHeight = .32f;
-	/** おもちゃの絵にかける色。暗い部屋になじませる。白なら絵のまま */
+	/** おもちゃの絵にかける色。背景になじませる。白なら絵のまま */
 	UPROPERTY(Config, EditAnywhere, Category = "おもちゃ", meta = (DisplayName = "おもちゃの色味"))
 	FLinearColor ToyTint = FLinearColor(.9f, .88f, .86f);
 
@@ -45,14 +45,18 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "試合の切り替えで見せる時間", Units = "s", ClampMin = "0"))
 	float MatchSwitchSeconds = 1.5f;
-	/** 出しはじめに、黒から明けるまで */
+	/** 移動中の最低上映時間。試合に入る際は最後の参加者が到着してから確保し、隠れる時間を守る。 */
+	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
+	          meta = (DisplayName = "移動中の映像を見せる最短時間", Units = "s", ClampMin = "0"))
+	float MinimumTravelSeconds = 4.f;
+	/** 前のシーンから、幕が閉じて映像に開ききるまで */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "出るときの暗転", Units = "s", ClampMin = "0"))
-	float FadeInSeconds = .2f;
-	/** ロードが終わってから、いったん真っ黒に落とし、ゲーム画面が明けて見えきるまで */
+	float FadeInSeconds = 1.04f;
+	/** ロード画面に幕が閉じ、次のシーンへ開ききるまで */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "消えるときの暗転", Units = "s", ClampMin = "0"))
-	float FadeOutSeconds = .45f;
+	float FadeOutSeconds = 1.15f;
 	/** ロード後、自分のキャラが出てくるのを待つ上限。キャラのいない画面（タイトルなど）はこの時間で消える */
 	UPROPERTY(Config, EditAnywhere, Category = "切り替え",
 	          meta = (DisplayName = "キャラを待つ上限", Units = "s", ClampMin = "0"))

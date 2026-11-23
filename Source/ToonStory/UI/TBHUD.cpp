@@ -2,6 +2,7 @@
 
 #include "TBHUD.h"
 #include "UI/TBGameViewportClient.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "Core/TBLobbySettings.h"
 #include "TBPaperStyle.h"
 #include "TBUIText.h"
@@ -16,14 +17,16 @@
 #include "GamePlay/TBBox.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Canvas.h"
-#include "CanvasItem.h"
-#include "GlobalRenderResources.h"
+#include "CanvasTypes.h"
+#include "Math/RotationMatrix.h"
+#include "Math/TranslationMatrix.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
 
 void ATBHUD::NotifyHitBoxClick(FName Name)
 {
+	if (UTBLoadingScreenSubsystem::IsCovering(GetGameInstance())) return;
 	Super::NotifyHitBoxClick(Name);
 	LastClickedButton = Name;
 	LastButtonClickTime = GetWorld()->GetTimeSeconds();
@@ -42,6 +45,16 @@ void ATBHUD::NotifyHitBoxClick(FName Name)
 		    Name != TEXT("LessTime") && Name != TEXT("MoreTime") && Name != TEXT("FewerBatteries") && Name != TEXT("MoreBatteries"))
 			Audio->PlaySoundEvent(Name == TEXT("Resume") || Name == TEXT("Leave") || Name == TEXT("CloseSettings") || Name == TEXT("CancelStage") ? ETBSoundEvent::UIBack : ETBSoundEvent::UIClick);
 	}
+	if (bConfirmingLeave)
+	{
+		if (Name == TEXT("CancelLeave")) bConfirmingLeave = false;
+		else if (Name == TEXT("ConfirmLeave") && !State->bTravelPending)
+		{
+			bConfirmingLeave = false;
+			PC->TBLeave();
+		}
+		return;
+	}
 	if (HandleSafetyClick(Name)) return;
 	if (Name == TEXT("OpenOptions"))
 	{
@@ -53,9 +66,9 @@ void ATBHUD::NotifyHitBoxClick(FName Name)
 		PC->ToggleLeaveMenu();
 		return;
 	}
-	if (Name == TEXT("Leave"))
+	if (Name == TEXT("Leave") && !State->bTravelPending && (State->Phase == ETBPhase::Lobby || PC->IsLeaveMenuOpen()))
 	{
-		PC->TBLeave();
+		bConfirmingLeave = true;
 		return;
 	}
 	if (Name == TEXT("RetryLobbyReturn") && State->IsLobbyReturnStopped() && PC->HasAuthority())
@@ -100,11 +113,26 @@ void ATBHUD::NotifyHitBoxClick(FName Name)
 	}
 }
 
+bool ATBHUD::DismissConfirmation()
+{
+	if (bConfirmingLeave)
+	{
+		bConfirmingLeave = false;
+		return true;
+	}
+	if (bPlayersOpen)
+	{
+		NotifyHitBoxClick(KickSelection.IsValid() ? TEXT("CancelKick") : TEXT("ClosePlayers"));
+		return true;
+	}
+	return false;
+}
+
 bool ATBHUD::IsChatBlocked() const
 {
 	// 設定の開閉はロビーを離れても残るので、ロビーの間だけ見る。
 	const auto* State = TB::GS(GetWorld());
-	return bPlayersOpen || (bLobbySettingsOpen && State && State->Phase == ETBPhase::Lobby) ||
+	return bConfirmingLeave || bPlayersOpen || (bLobbySettingsOpen && State && State->Phase == ETBPhase::Lobby) ||
 	       (Options.IsValid() && Options->IsInViewport());
 }
 
@@ -132,12 +160,36 @@ void ATBHUD::DrawHUD()
 	if (State->Phase == ETBPhase::Results || State->Phase == ETBPhase::Aborted ||
 	    (State->Phase == ETBPhase::Playing && !PC->IsLeaveMenuOpen()))
 	{
+		bConfirmingLeave = false;
 		bPlayersOpen = false;
 		KickSelection.Reset();
 		if (Options.IsValid() && Options->IsInViewport())
 		{
 			Options->Dismiss();
 		}
+	}
+	if (State->IsIgniting())
+	{
+		const float Bar = Canvas->ClipY * (41.f / 720.f);
+		DrawRect(FLinearColor::Black, 0, 0, Canvas->ClipX, Bar);
+		DrawRect(FLinearColor::Black, 0, Canvas->ClipY - Bar, Canvas->ClipX, Bar);
+		const double Elapsed = State->IgnitionElapsed();
+		const float Fade = 1.f - FMath::Clamp(6. * FMath::Min(Elapsed, FTBEscapeIgnition::Duration - Elapsed), 0., 1.);
+		if (Fade > 0.f) DrawRect(FLinearColor(0, 0, 0, Fade), 0, 0, Canvas->ClipX, Canvas->ClipY);
+		return;
+	}
+	if (State->bTravelPending) bConfirmingLeave = false;
+	if ((bConfirmingLeave || bPlayersOpen) && State->Phase == ETBPhase::Lobby)
+	{
+		DrawLobby();
+	}
+	if (bConfirmingLeave)
+	{
+		const bool Host = PC->HasAuthority();
+		DrawConfirmation(TBText::String(Host ? TEXT("Root.Room.ConfirmClose") : TEXT("Root.Room.ConfirmLeave")),
+		    Host ? TBText::String(TEXT("Root.Room.CloseDetail")) : FString(), TEXT("CancelLeave"), TEXT("ConfirmLeave"),
+		    TBText::String(Host ? TEXT("Root.Room.Close") : TEXT("Stage.Leave")));
+		return;
 	}
 	if (bPlayersOpen)
 	{
@@ -152,117 +204,107 @@ void ATBHUD::DrawHUD()
 	if (State->Phase == ETBPhase::Results || State->Phase == ETBPhase::Aborted)
 	{
 		DrawResults(*State);
-		DrawResultCover(*State);
 	}
 	else
 	{
 		DrawMatch(*State, *PC);
-		if (PC->IsLeaveMenuOpen())
-		{
-			const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-			const float X = Canvas->ClipX * .5f - 360 * S, Y = Canvas->ClipY * .5f - 344 * S;
-			DrawRect(FLinearColor(0, 0, 0, .48f), 0, 0, Canvas->ClipX, Canvas->ClipY);
-			FramePanel(X, Y, 720 * S, 688 * S);
-			PaperSign(TBPaper::Teal, X + 190 * S, Y + 55 * S, 340 * S, 91 * S);
-			DrawRect(TBPaper::Ink, X + 216 * S, Y + 83 * S, 8 * S, 30 * S);
-			DrawRect(TBPaper::Ink, X + 232 * S, Y + 83 * S, 8 * S, 30 * S);
-			DrawFittedText(TBText::String(TEXT("Canvas.PauseTitle")), TBPaper::Ink,
-			    X + 256 * S, Y + 83 * S, 234 * S, 1.65f * S, true, true);
-			// The transparent bear is separate from the editable heading; no pixel-bound crop.
-			DrawArt(TEXT("PauseHeader"), X + 490 * S, Y + 78 * S, 124 * S, 96 * S);
-			DrawFittedText(TBText::Literal(TEXT("Canvas.OnlineContinues")), TBPaper::Muted,
-			    X + 145 * S, Y + 183 * S, 430 * S, 1.05f * S, true, true);
-			DrawArt(TEXT("Underline_Coral"), X + 150 * S, Y + 211 * S, 420 * S, 13 * S);
-			float MX = 0, MY = 0;
-			PC->GetMousePosition(MX, MY);
-			const FName Ids[] = {TEXT("Unstuck"), TEXT("Resume"), TEXT("Players")};
-			const TCHAR* First[] = {TBText::Literal(TEXT("Canvas.ResetLine1")), TBText::Literal(TEXT("Canvas.ResumeLine1")), TBText::Literal(TEXT("Canvas.PlayersLine1"))};
-			const TCHAR* Second[] = {TBText::Literal(TEXT("Canvas.ResetLine2")), TBText::Literal(TEXT("Canvas.ResumeLine2")), TBText::Literal(TEXT("Canvas.PlayersLine2"))};
-			for (int32 Index = 0; Index < 3; ++Index)
-			{
-				const float CX = X + (37 + Index * 216) * S, CY = Y + 253 * S;
-				const bool Hover = MX >= CX && MX < CX + 198 * S && MY >= CY && MY < CY + 242 * S;
-				const float Lift = Hover ? 4 * S : 0;
-				DrawArt(Hover ? TEXT("Card_HangingActive") : TEXT("Card_Hanging"), CX, CY - Lift, 198 * S, 242 * S);
-				DrawArt(TEXT("Tape_Brown"), CX + 86 * S, CY - 28 * S - Lift, 28 * S, 56 * S);
-				if (Index == 0)
-				{
-					// Clockwise loop and arrowhead: the reset-position action, independent of any key binding.
-					const FVector2D Center(CX + 99 * S, CY + 77 * S - Lift);
-					for (int32 Pass = 0; Pass < 2; ++Pass)
-					{
-						const FLinearColor Color = Pass == 0 ? TBPaper::Outline : TBPaper::Gold;
-						const float Thickness = (Pass == 0 ? 8 : 4) * S;
-						constexpr int32 Segments = 48;
-						constexpr float Feather = .65f;
-						const float Radius = 23 * S, AngleFeather = Feather / Radius;
-						const float Start = -135.f * PI / 180.f, End = 153.f * PI / 180.f;
-						const float Radii[] = {Radius - Thickness * .5f - Feather, Radius - Thickness * .5f + Feather,
-						    Radius + Thickness * .5f - Feather, Radius + Thickness * .5f + Feather};
-						TArray<FVector2D, TInlineAllocator<51>> Directions;
-						for (int32 Step = 0; Step <= Segments + 2; ++Step)
-						{
-							const float Angle = Step == 0 ? Start - AngleFeather : Step == 1 ? Start + AngleFeather :
-							    Step == Segments + 1 ? End - AngleFeather : Step == Segments + 2 ? End + AngleFeather :
-							    FMath::Lerp(Start, End, float(Step - 1) / Segments);
-							Directions.Emplace(FMath::Cos(Angle), FMath::Sin(Angle));
-						}
-						TArray<FCanvasUVTri> Triangles;
-						Triangles.Reserve((Segments + 2) * 6);
-						auto Position = [&](int32 Step, int32 Band)
-						{ return Center + Directions[Step] * Radii[Band]; };
-						auto Coverage = [&](int32 Step, int32 Band)
-						{ return Color.CopyWithNewOpacity(Step == 0 || Step == Segments + 2 || Band == 0 || Band == 3 ? 0.f : Color.A); };
-						auto Add = [&](int32 AStep, int32 ABand, int32 BStep, int32 BBand, int32 CStep, int32 CBand)
-						{
-							FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
-							Triangle.V0_Pos = Position(AStep, ABand); Triangle.V0_Color = Coverage(AStep, ABand);
-							Triangle.V1_Pos = Position(BStep, BBand); Triangle.V1_Color = Coverage(BStep, BBand);
-							Triangle.V2_Pos = Position(CStep, CBand); Triangle.V2_Color = Coverage(CStep, CBand);
-							Triangle.V0_UV = Triangle.V1_UV = Triangle.V2_UV = FVector2D::ZeroVector;
-						};
-						// Shared radial edges prevent seams between segments; only the stroke perimeter fades.
-						for (int32 Segment = 0; Segment < Segments + 2; ++Segment)
-							for (int32 Band = 0; Band < 3; ++Band)
-							{
-								Add(Segment, Band, Segment + 1, Band, Segment + 1, Band + 1);
-								Add(Segment, Band, Segment + 1, Band + 1, Segment, Band + 1);
-							}
-						FCanvasTriangleItem Arc(FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector, GWhiteTexture);
-						Arc.TriangleList = MoveTemp(Triangles);
-						Arc.BlendMode = SE_BLEND_Translucent;
-						Canvas->DrawItem(Arc);
-					}
-					auto ArrowStroke = [&](FVector2D A, FVector2D B)
-					{
-						const FVector2D Direction = (B - A).GetSafeNormal();
-						const FVector2D Side(Direction.Y * 3.5f * S, -Direction.X * 3.5f * S);
-						DrawSmoothPolygon({A - Side, B - Side, B + Side, A + Side}, TBPaper::Outline);
-					};
-					ArrowStroke(Center + FVector2D(-22, -20) * S, Center + FVector2D(-23, -3) * S);
-					ArrowStroke(Center + FVector2D(-23, -3) * S, Center + FVector2D(-5, -8) * S);
-				}
-				else if (Index == 1)
-					DrawArt(TEXT("Mark_TriangleBrown"), CX + 76 * S, CY + 53 * S - Lift, 46 * S, 54 * S);
-				else DrawArt(TEXT("Icon_PlayerRatio"), CX + 58 * S, CY + 50 * S - Lift, 82 * S, 70 * S);
-				DrawFittedText(First[Index], TBPaper::Ink, CX + 16 * S, CY + 139 * S - Lift, 166 * S, 1.6f * S, true, true);
-				DrawFittedText(Second[Index], TBPaper::Ink, CX + 16 * S, CY + 174 * S - Lift, 166 * S, 1.6f * S, true, true);
-				if (Index == 0) DrawFittedText(TBText::Literal(TEXT("Canvas.ResetWait")), TBPaper::Muted, CX + 16 * S, CY + 211 * S - Lift, 166 * S, .68f * S, true, true);
-				if (Index == 1) DrawKeycap(TEXT("Esc"), CX + 116 * S, CY + 198 * S - Lift, 57 * S, 26 * S);
-				AddHitBox(FVector2D(CX, CY), FVector2D(198 * S, 242 * S), Ids[Index], true);
-			}
-			auto IconButton = [&](FName Id, FName Art, float PX)
-			{
-				const float IX = X + PX * S, IY = Y + 539 * S;
-				const bool Hover = MX >= IX && MX < IX + 112 * S && MY >= IY && MY < IY + 112 * S;
-				DrawArt(Art, IX, IY - (Hover ? 4 * S : 0), 112 * S, 112 * S,
-				    Hover ? FLinearColor(1.15f, 1.15f, 1.15f, 1) : FLinearColor::White);
-				AddHitBox(FVector2D(IX, IY), FVector2D(112 * S, 112 * S), Id, true);
-			};
-			IconButton(TEXT("OpenOptions"), TEXT("Button_Gear"), 392);
-			IconButton(TEXT("Leave"), TEXT("Button_Leave"), 534);
-		}
+		if (PC->IsLeaveMenuOpen()) DrawPause();
 	}
+}
+
+void ATBHUD::DrawPause()
+{
+	const float U = FMath::Min(Canvas->ClipX / 1600.f, Canvas->ClipY / 900.f);
+	const float X = (Canvas->ClipX - 768 * U) * .5f, Y = (Canvas->ClipY - 493 * U) * .5f;
+	const FLinearColor Ink = FLinearColor::FromSRGBColor(FColor(33, 59, 58));
+	const FLinearColor Page = FLinearColor::FromSRGBColor(FColor(255, 242, 212));
+	const FLinearColor Tape = FLinearColor::FromSRGBColor(FColor(225, 203, 159));
+	DrawRect(FLinearColor::FromSRGBColor(FColor(24, 43, 44, 199)), 0, 0, Canvas->ClipX, Canvas->ClipY);
+	auto Rectangle = [&](float Left, float Top, float Width, float Height, FLinearColor Color)
+	{
+		const float L = X + Left * U, T = Y + Top * U;
+		const float R = L + Width * U, B = T + Height * U;
+		// Keep the coverage fringe in viewport pixels when the paper or tape is tilted.
+		DrawSmoothPolygon({{L, T}, {R, T}, {R, B}, {L, B}}, Color);
+	};
+	auto Frame = [&](float Left, float Top, float Width, float Height, float Border, FLinearColor Edge, FLinearColor Face)
+	{
+		Rectangle(Left, Top, Width, Height, Edge);
+		Rectangle(Left + Border, Top + Border, Width - 2 * Border, Height - 2 * Border, Face);
+	};
+	auto BeginTilt = [&](float CenterX, float CenterY, float Degrees)
+	{
+		const FVector Pivot(X + CenterX * U, Y + CenterY * U, 0);
+		Canvas->Canvas->PushRelativeTransform(FTranslationMatrix(-Pivot) *
+		    FRotationMatrix(FRotator(0, Degrees, 0)) * FTranslationMatrix(Pivot));
+	};
+	Rectangle(5, 7, 768, 493, TBPaper::Shadow);
+	Frame(0, 0, 768, 493, 2, Tape, Page);
+	Frame(12, 12, 744, 469, 3, Ink, Page);
+	BeginTilt(384, 68, -2);
+	Rectangle(238, 44, 300, 70, Tape);
+	Frame(234, 39, 300, 70, 2, Ink, FLinearColor::FromSRGBColor(FColor(35, 78, 80)));
+	Rectangle(254, 60, 5, 27, TBPaper::Gold);
+	Rectangle(265, 60, 5, 27, TBPaper::Gold);
+	DrawFittedText(TBText::String(TEXT("Canvas.PauseTitle")), Page, X + 279 * U, Y + 65 * U, 240 * U, 2.25f * U, true, true);
+	Canvas->Canvas->PopTransform();
+	DrawFittedText(TBText::String(TEXT("Canvas.OnlineContinues")), Ink, X + 42 * U, Y + 131 * U, 684 * U, .95f * U, false, true);
+
+	float MouseX = 0, MouseY = 0;
+	const bool HasMouse = GetOwningPlayerController()->GetMousePosition(MouseX, MouseY);
+	auto Hovered = [&](float Left, float Top, float Width, float Height)
+	{
+		return HasMouse && MouseX >= X + Left * U && MouseX < X + (Left + Width) * U &&
+		    MouseY >= Y + Top * U && MouseY < Y + (Top + Height) * U;
+	};
+	auto Hit = [&](FName Id, float Left, float Top, float Width, float Height)
+	{
+		AddHitBox({X + Left * U, Y + Top * U}, {Width * U, Height * U}, Id, true);
+	};
+	const FName Actions[] = {TEXT("Unstuck"), TEXT("Resume"), TEXT("Players")};
+	const FName Icons[] = {TEXT("PauseReset"), TEXT("PauseResume"), TEXT("PausePlayers")};
+	const TCHAR* Captions[] = {TEXT("Canvas.ResetPosition"), TEXT("Canvas.Resume"), TEXT("Canvas.PausePlayers")};
+	const float Angles[] = {-2.f, .6f, 2.5f};
+	for (int32 I = 0; I < UE_ARRAY_COUNT(Actions); ++I)
+	{
+		const float Left = 42.f + I * 234.f;
+		const bool Hot = Hovered(Left, 172, 216, 219);
+		const float Top = Hot ? 168.f : 172.f;
+		const FLinearColor Face = FLinearColor::FromSRGBColor(I == 1 ? FColor(162, 216, 200) : FColor(255, 228, 168));
+		BeginTilt(Left + 108, Top + 109, Hot ? 0.f : Angles[I]);
+		Rectangle(Left + 2, Top + 5, 216, 219, FLinearColor::FromSRGBColor(FColor(154, 130, 87)));
+		Frame(Left, Top, 216, 219, 3, Ink, Hot ? TBPaper::Gold : Face);
+		BeginTilt(Left + 108, Top, I == 1 ? 4.f : -4.f);
+		Rectangle(Left + 73, Top - 11, 70, 21, Tape.CopyWithNewOpacity(.91f));
+		Rectangle(Left + 73, Top + 8, 70, 2, TBPaper::Muted.CopyWithNewOpacity(.24f));
+		Canvas->Canvas->PopTransform();
+		DrawArt(Icons[I], X + (Left + 62) * U, Y + (Top + 52) * U, 92 * U, 80 * U);
+		DrawFittedText(TBText::String(Captions[I]), Ink, X + (Left + 8) * U, Y + (Top + 148) * U,
+		    200 * U, 1.16f * U, true, true);
+		if (I == 1)
+		{
+			Frame(Left + 164, Top + 192, 40, 18, 1, Ink, Page);
+			DrawFittedText(TEXT("Esc"), Ink, X + (Left + 166) * U, Y + (Top + 200) * U, 36 * U, .68f * U, true, true);
+		}
+		Canvas->Canvas->PopTransform();
+		Hit(Actions[I], Left, 172, 216, 219);
+	}
+	Rectangle(42, 415, 684, 1.5f, Tape);
+	auto FooterButton = [&](FName Id, const TCHAR* Caption, float Right)
+	{
+		const FString Label = TBText::String(Caption);
+		float TextW = 0.f, TextH = 0.f;
+		GetTextSize(Label, TextW, TextH, HeadingFont, .95f * U);
+		const float Width = FMath::Max(75.f, TextW / U + 30.f);
+		const float Left = Right - Width;
+		Rectangle(Left + 2, 432, Width, 37, TBPaper::Shadow);
+		Frame(Left, 429, Width, 37, 2, Ink, Hovered(Left, 429, Width, 37) ? TBPaper::Gold : Page);
+		DrawFittedText(Label, Ink, X + (Left + 5) * U, Y + 445 * U, (Width - 10) * U, .95f * U, true, true);
+		Hit(Id, Left, 429, Width, 37);
+		return Left - 14;
+	};
+	const float SettingsRight = FooterButton(TEXT("Leave"), TEXT("Stage.Leave"), 726);
+	FooterButton(TEXT("OpenOptions"), TEXT("Stage.Options"), SettingsRight);
 }
 
 // 通常HUDに内部状態だけを追加する。ロビー・結果画面の操作は置き換えない。

@@ -12,10 +12,10 @@ struct FTBHumanMovement
 	GENERATED_BODY()
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "人間",
 	          meta = (DisplayName = "歩く速さ", Units = "cm/s", ClampMin = "0"))
-	float WalkSpeed = 270.f;
+	float WalkSpeed = 255.f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "人間",
 	          meta = (DisplayName = "人形を担いでいるときの速さ", Units = "cm/s", ClampMin = "0"))
-	float CarrySpeed = 180.f;
+	float CarrySpeed = 170.f;
 	/** 歩く速さに対する割合 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "人間",
 	          meta = (DisplayName = "しゃがんでいるときの速さ", ClampMin = "0", ClampMax = "1"))

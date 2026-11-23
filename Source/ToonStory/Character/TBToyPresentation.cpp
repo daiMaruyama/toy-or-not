@@ -9,6 +9,9 @@
 #include "Animation/AnimSequence.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Engine/SkeletalMesh.h"
 #include "Misc/PackageName.h"
 #include "Animation/AnimInstanceProxy.h"
@@ -88,17 +91,42 @@ void TBToyPresentation::BuildEmotePose(const USkeletalMeshComponent* Mesh, const
 	const FVector Up = Mesh->GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector).GetSafeNormal();
 	if (Forward.ContainsNaN() || Forward.IsNearlyZero() || Right.IsNearlyZero() || Up.IsNearlyZero()) return;
 	const double Beat = Sample.Progress * 2 * PI;
-	auto Add = [&](FName Name, FVector Axis, double Degrees)
+	auto Add = [&](FName Name, FVector Axis, double Degrees, FVector BoneSpacePivot = FVector::ZeroVector)
 	{
-		if (!Name.IsNone()) Out.Bones.Add({Name, FQuat(Axis, FMath::DegreesToRadians(Degrees * Sample.Weight))});
+		if (!Name.IsNone()) Out.Bones.Add({Name, FQuat(Axis, FMath::DegreesToRadians(Degrees * Sample.Weight)), BoneSpacePivot});
 	};
 	const FName Torso = EmoteTorso(Ref), Head = EmoteHead(Ref);
 	const FString Name = Asset->GetName();
+	if (Name == TEXT("SK_TeddyBear") && (Sample.Kind == ETBEmoteKind::Wave || Sample.Kind == ETBEmoteKind::Surprise))
+	{
+		// The joints lie inside the paws. The imported skeleton has a 100x root
+		// scale, so convert the measured mesh-centimeter offsets to bone-local units.
+		const FVector LeftSeam = FVector(.06, .86, 1.48) * .01;
+		const FVector RightSeam = FVector(.29, .87, -1.53) * .01;
+		if (Sample.Kind == ETBEmoteKind::Wave)
+		{
+			Add(TEXT("arm_R"), Forward, -67 - 18 * FMath::Sin(Beat * 2), RightSeam);
+			Add(Head, Forward, -7);
+		}
+		else
+		{
+			const double Raise = 85. * (1. - FMath::SmoothStep(.35, 1., double(Sample.Progress)));
+			Add(TEXT("arm_L"), Forward, Raise, LeftSeam);
+			Add(TEXT("arm_R"), Forward, -Raise, RightSeam);
+		}
+		return;
+	}
 	if (Sample.Kind == ETBEmoteKind::Surprise)
 	{
 		// A sharp recoil, raised hands and a small settling tremble. Keep the
 		// collision/root and planted legs unchanged, including on toy meshes.
 		const double Recoil = 1. - FMath::SmoothStep(.35, 1., double(Sample.Progress));
+		if (Name == TEXT("SK_TinRobot"))
+		{
+			Add(TEXT("arm_L"), Forward, 145 * Recoil);
+			Add(TEXT("arm_R"), Forward, -145 * Recoil);
+			return;
+		}
 		const double Tremble = FMath::Sin(Beat * 7) * FMath::Exp(-4. * Sample.Progress);
 		if (Name == TEXT("SK_Duck"))
 		{
@@ -193,18 +221,36 @@ void TBToyPresentation::BuildEmotePose(const USkeletalMeshComponent* Mesh, const
 	}
 	if (Name == TEXT("SK_TinRobot"))
 	{
-		// Rigid shoulder hinges: hold the extremities briefly between changes of direction.
 		const double Step = FMath::Clamp(2.4 * Swing, -1., 1.);
-		if (Wave) { Add(UpperR, Forward, 65 + 19 * Step); Add(Head, Up, 10 * Step); }
-		else if (Cheer) { Add(UpperL, Forward, -52 - 19 * Step); Add(UpperR, Forward, 52 + 19 * Step); }
-		else { Add(Torso, Up, (Wild ? 26 : 13) * Step); Add(UpperR, Right, 28 * Step); Add(UpperL, Right, -28 * Step); }
+		// On this rig arm_L sits on +Right and arm_R on -Right. Open the hinges
+		// outwards first; pitching around Right then preserves that sideways clearance.
+		if (Wild)
+		{
+			const double Turn = 360. * FMath::SmoothStep(0., 1., double(Sample.Progress));
+			// The last full turn ends at rest, so the weight can fade without rewinding the spin.
+			const double ArmSpin = FMath::UnwindDegrees(6. * Turn);
+			Add(Head, Up, FMath::UnwindDegrees(4. * Turn));
+			Add(UpperL, Forward, 16); Add(UpperR, Forward, -16);
+			Add(UpperL, Right, ArmSpin); Add(UpperR, Right, -ArmSpin);
+		}
+		else if (Wave)
+		{
+			Add(UpperR, Forward, -78 - 18 * Step);
+			Add(Head, Up, 10 * Step);
+		}
+		else if (Cheer)
+		{
+			Add(UpperL, Forward, 27); Add(UpperR, Forward, -27);
+			const double Lift = -112 - 22 * Step;
+			Add(UpperL, Right, Lift); Add(UpperR, Right, Lift);
+		}
+		else { Add(Torso, Up, 13 * Step); Add(UpperR, Right, 28 * Step); Add(UpperL, Right, -28 * Step); }
 		return;
 	}
 	if (Name == TEXT("SK_TeddyBear"))
 	{
 		// Short plush arms have no elbow; small shoulder arcs keep the paws against the body.
-		if (Wave) { Add(UpperR, Forward, 34 + 15 * Swing); Add(Head, Forward, -9); }
-		else if (Cheer) { Add(UpperR, Right, -33 - 12 * Swing); Add(UpperL, Right, -33 - 12 * Swing); Add(Head, Right, 9 * Swing); }
+		if (Cheer) { Add(UpperR, Right, -33 - 12 * Swing); Add(UpperL, Right, -33 - 12 * Swing); Add(Head, Right, 9 * Swing); }
 		else { Add(Torso, Forward, (Wild ? 18 : 10) * Swing); Add(Head, Forward, -6 * Swing); Add(UpperR, Forward, 16 + 10 * Swing); Add(UpperL, Forward, -16 + 10 * Swing); }
 		return;
 	}
@@ -267,8 +313,14 @@ void TBToyPresentation::ApplyEmotePose(FPoseContext& Output, const FTBEmotePose&
 		FCSPose<FCompactPose> Current; Current.InitPose(Output.Pose);
 		const auto Parent = Output.Pose.GetBoneContainer().GetParentBoneIndex(Bone);
 		if (Parent == INDEX_NONE) continue; // Never move the skeleton root.
-		Output.Pose[Bone].SetRotation((Current.GetComponentSpaceTransform(Parent).GetRotation().Inverse() * Change.Rotation *
-		    Current.GetComponentSpaceTransform(Bone).GetRotation()).GetNormalized());
+		const FTransform& ParentCS = Current.GetComponentSpaceTransform(Parent);
+		const FTransform& BoneCS = Current.GetComponentSpaceTransform(Bone);
+		if (!Change.BoneSpacePivot.IsZero())
+		{
+			const FVector Offset = BoneCS.TransformVector(Change.BoneSpacePivot);
+			Output.Pose[Bone].AddToTranslation(ParentCS.InverseTransformVector(Offset - Change.Rotation.RotateVector(Offset)));
+		}
+		Output.Pose[Bone].SetRotation((ParentCS.GetRotation().Inverse() * Change.Rotation * BoneCS.GetRotation()).GetNormalized());
 	}
 }
 
@@ -477,6 +529,24 @@ void TBToyPresentation::Animate(AActor* Visual, float Speed, bool Frozen)
 	}
 }
 
+FRotator TBToyPresentation::FallRotation(AActor* Visual, float Angle)
+{
+	if (Visual)
+		for (const auto* Part : TInlineComponentArray<USkeletalMeshComponent*>(Visual))
+		{
+			const auto* Mesh = Part->GetSkeletalMeshAsset();
+			if (Part->LeaderPoseComponent.IsValid() || !Mesh) continue;
+			const FName Name = Mesh->GetFName();
+			// The rigid nutcracker's rifle projects behind its back. A 15-degree incline
+			// rests its heels and rifle on the floor without burying either surface.
+			if (Name == TEXT("SK_Nutcracker")) return FRotator(Angle * (75.f / 90.f), 0, 0);
+			if (Name == TEXT("SK_TeddyBear")) return FRotator(-Angle, 0, 0);
+			if (Name == TEXT("SK_ReconSoldier") || Name == TEXT("SK_TinRobot"))
+				return FRotator(Angle, 0, 0);
+		}
+	return FRotator(0, 0, Angle);
+}
+
 void TBToyPresentation::Ground(UChildActorComponent* Visual, float FloorZ)
 {
 	if (!Visual || !Visual->GetChildActor())
@@ -516,6 +586,67 @@ void TBToyPresentation::Ground(UChildActorComponent* Visual, float FloorZ)
 		Visual->AddWorldOffset(FVector(0, 0, Correction));
 		break;
 	}
+}
+
+void TBToyPresentation::GroundFallen(UChildActorComponent* Visual, float FloorZ, FTBFallenSupportCache& Cache)
+{
+	if (!Visual || !Visual->GetChildActor()) return;
+	bool bRebuild = Cache.Visual.Get() != Visual->GetChildActor();
+	for (const auto& Pair : Cache.Meshes)
+		bRebuild |= !Pair.Key.IsValid() || Pair.Key->GetSkeletalMeshAsset() != Pair.Value.Get();
+	if (bRebuild)
+	{
+		Cache = {};
+		Cache.Visual = Visual->GetChildActor();
+		const FTransform ToWorld = Visual->GetComponentTransform();
+		for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Visual->GetChildActor()))
+		{
+			if (!Part->IsVisible()) continue;
+			if (auto* Mesh = Cast<USkeletalMeshComponent>(Part))
+			{
+				// Fur follows the body; its inflated render box is not a supporting surface.
+				if (Mesh->LeaderPoseComponent.IsValid() || !Mesh->GetSkeletalMeshAsset()) continue;
+				Cache.Meshes.Add({Mesh, Mesh->GetSkeletalMeshAsset()});
+				const auto* Data = Mesh->GetSkeletalMeshRenderData();
+				const auto* Weights = Mesh->GetSkinWeightBuffer(0);
+				if (Data && Data->LODRenderData.IsValidIndex(0) && Weights &&
+				    Weights->GetDataVertexBuffer()->GetWeightData() &&
+				    Data->LODRenderData[0].StaticVertexBuffers.PositionVertexBuffer.GetVertexData())
+				{
+					// Freeze the idle pose before this call. This is CPU math on retained LOD0
+					// data, once per stance: no GPU readback or render-state recreation.
+					TArray<FMatrix44f> Matrices;
+					Mesh->CacheRefToLocalMatrices(Matrices);
+					TArray<FVector3f> Positions;
+					Mesh->ComputeSkinnedPositions(Mesh, Positions, Matrices, Data->LODRenderData[0], *Weights);
+					const FTransform PartToVisual = Mesh->GetComponentTransform().GetRelativeTransform(ToWorld);
+					for (const FVector3f& Point : Positions)
+						Cache.Points.Add(PartToVisual.TransformPosition(FVector(Point)));
+					if (!Positions.IsEmpty()) { ++Cache.SkinnedParts; continue; }
+				}
+				Cache.bMissingCPUData = true;
+			}
+			else if (!Part->IsA<UStaticMeshComponent>()) continue;
+			// Static car (or an unsupported future mesh without CPU data): keep a safe
+			// geometric fallback. The catalogue's skeletal toys must never use it.
+			const FBox Box = Part->CalcBounds(FTransform::Identity).GetBox();
+			const FTransform PartToVisual = Part->GetComponentTransform().GetRelativeTransform(ToWorld);
+			for (int32 Corner = 0; Corner < 8; ++Corner)
+				Cache.Points.Add(PartToVisual.TransformPosition(FVector(
+				    Corner & 1 ? Box.Max.X : Box.Min.X, Corner & 2 ? Box.Max.Y : Box.Min.Y,
+				    Corner & 4 ? Box.Max.Z : Box.Min.Z)));
+		}
+	}
+	if (Cache.Points.IsEmpty()) return;
+	const FTransform ToWorld = Visual->GetComponentTransform();
+	if (bRebuild || !Cache.Rotation.Equals(ToWorld.GetRotation()) || !Cache.Scale.Equals(ToWorld.GetScale3D()))
+	{
+		Cache.Rotation = ToWorld.GetRotation(); Cache.Scale = ToWorld.GetScale3D();
+		Cache.BottomOffset = MAX_flt;
+		for (const FVector& Point : Cache.Points)
+			Cache.BottomOffset = FMath::Min(Cache.BottomOffset, float(ToWorld.TransformVector(Point).Z));
+	}
+	Visual->AddWorldOffset(FVector(0, 0, FloorZ - ToWorld.GetLocation().Z - Cache.BottomOffset));
 }
 
 void TBToyPresentation::Grip(UChildActorComponent* Visual, const FVector& HandPosition, FTBGripCache& Cache)

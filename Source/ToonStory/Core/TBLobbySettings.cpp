@@ -6,6 +6,7 @@
 #include "TBPlayerState.h"
 #include "UI/TBUIText.h"
 #include "Data/TBRuleData.h"
+#include "UI/Loading/TBLoadingScreenSettings.h"
 #include "GamePlay/TBPickup.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -33,6 +34,10 @@ namespace
 		for (const auto& Stage : Stages) if (Stage.Id == Index) return &Stage;
 		return &Stages[0];
 	}
+	int32 NormalizeSelection(int32 Index)
+	{
+		return Index == TBLobbySettings::RandomStageId ? Index : FindStage(Index)->Id;
+	}
 } // namespace
 
 void UTBLobbySettings::Initialize(FSubsystemCollectionBase& Collection)
@@ -49,8 +54,10 @@ void UTBLobbySettings::Initialize(FSubsystemCollectionBase& Collection)
 			    bArrivalCancelled = false;
 			    bStageSelected = false;
 			    ArrivalDeadline = 0;
+			    StageRevealAt = 0;
 			    bDedicatedLobby = false;
 			    SelectedStage = 1;
+			    ResolvedStage = INDEX_NONE;
 		    }
 	    });
 }
@@ -62,12 +69,39 @@ void UTBLobbySettings::Deinitialize()
 
 const TCHAR* TBLobbySettings::StagePath(int32 Index)
 {
-	const auto* Stage = FindStage(Index);
-	return Stage ? Stage->Path : nullptr;
+	return Index == RandomStageId ? nullptr : FindStage(Index)->Path;
+}
+bool TBLobbySettings::IsStageAvailable(int32 Index)
+{
+	if (Index != RandomStageId) return FPackageName::DoesPackageExist(StagePath(Index));
+	for (const auto& Stage : Stages)
+		if (!FPackageName::DoesPackageExist(Stage.Path)) return false;
+	return true;
+}
+void TBLobbySettings::ResolveStageForStart(UWorld* World)
+{
+	if (!World || !World->GetAuthGameMode<ATBGameMode>()) return;
+	auto* State = World->GetGameState<ATBGameState>();
+	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
+	if (!State || State->Phase != ETBPhase::Lobby || State->bTravelPending ||
+	    State->SelectedStage != RandomStageId || Pending->ResolvedStage != INDEX_NONE) return;
+	Pending->ResolvedStage = Stages[FMath::RandRange(0, int32(UE_ARRAY_COUNT(Stages)) - 1)].Id;
+	State->StageName = StageDisplayName(Pending->ResolvedStage);
+	State->ForceNetUpdate();
+}
+void TBLobbySettings::ResetStageResolution(UWorld* World)
+{
+	if (!World || !World->GetGameInstance()) return;
+	World->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage = INDEX_NONE;
+	if (auto* State = World->GetGameState<ATBGameState>(); State && State->SelectedStage == RandomStageId)
+	{
+		State->StageName = StageDisplayName(RandomStageId);
+		State->ForceNetUpdate();
+	}
 }
 FString TBLobbySettings::StageDisplayName(int32 Index)
 {
-	return TBText::String(FindStage(Index)->NameKey);
+	return TBText::String(Index == RandomStageId ? TEXT("Stage.Random") : FindStage(Index)->NameKey);
 }
 int32 TBLobbySettings::StageIndex(const UWorld* World)
 {
@@ -82,7 +116,10 @@ int32 TBLobbySettings::StageIndex(const UWorld* World)
 }
 int32 TBLobbySettings::StageItemCount(int32 Index)
 {
-	return FindStage(Index)->ItemCount;
+	if (Index != RandomStageId) return FindStage(Index)->ItemCount;
+	int32 Count = MAX_int32;
+	for (const auto& Stage : Stages) Count = FMath::Min(Count, Stage.ItemCount);
+	return Count;
 }
 int32 TBLobbySettings::AvailableItems(UWorld* World)
 {
@@ -91,8 +128,7 @@ int32 TBLobbySettings::AvailableItems(UWorld* World)
 	if (ShouldTravelToStage(World))
 	{
 		const auto* State = World->GetGameState<ATBGameState>();
-		const auto* Stage = State ? FindStage(State->SelectedStage) : nullptr;
-		return Stage ? Stage->ItemCount : 1;
+		return State ? StageItemCount(State->SelectedStage) : 1;
 	}
 	int32 Count = 0;
 	for (TActorIterator<ATBPickup> It(World); It; ++It)
@@ -113,19 +149,19 @@ void TBLobbySettings::SelectStage(ATBController* Host, int32 Index)
 	auto* World = Host->GetWorld();
 	auto* Mode = World->GetAuthGameMode<ATBGameMode>();
 	auto* State = World->GetGameState<ATBGameState>();
-	Index = FindStage(Index)->Id;
-	const auto* Path = StagePath(Index);
+	Index = NormalizeSelection(Index);
 	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
-	if (!Mode || !Mode->IsHost(Host) || !State || State->Phase != ETBPhase::Lobby || State->bTravelPending || !Path ||
+	if (!Mode || !Mode->IsHost(Host) || !State || State->Phase != ETBPhase::Lobby || State->bTravelPending ||
 	    !Pending->PendingMap.IsEmpty())
 	{
 		return;
 	}
-	if (!FPackageName::DoesPackageExist(Path))
+	if (!IsStageAvailable(Index))
 	{
 		return;
 	}
 	Pending->bStageSelected = true;
+	Pending->ResolvedStage = INDEX_NONE;
 	Pending->SelectedStage = Index;
 	State->SelectedStage = Index;
 	State->Settings.RequiredItems = FMath::Min(State->Settings.RequiredItems, AvailableItems(World));
@@ -145,7 +181,10 @@ bool TBLobbySettings::ShouldTravelToStage(const UWorld* World)
 	if (!World || !World->GetGameInstance()) return false;
 	const auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
 	const auto* State = World->GetGameState<ATBGameState>();
-	return IsLobby(World) || (State && Pending->bStageSelected && StageIndex(World) != State->SelectedStage);
+	const int32 Destination = State && State->SelectedStage == RandomStageId
+	    ? Pending->ResolvedStage : State ? State->SelectedStage : INDEX_NONE;
+	return IsLobby(World) || (State && Pending->bStageSelected &&
+	    (Destination == INDEX_NONE || StageIndex(World) != Destination));
 }
 
 void TBLobbySettings::CancelTravel(UWorld* World)
@@ -153,9 +192,11 @@ void TBLobbySettings::CancelTravel(UWorld* World)
 	if (!World || !World->GetGameInstance()) return;
 	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
 	Pending->PendingMap.Reset();
+	ResetStageResolution(World);
 	Pending->bStartOnArrival = false;
 	Pending->bArrivalCancelled = false;
 	Pending->ArrivalDeadline = 0;
+	Pending->StageRevealAt = 0;
 	if (auto* State = World->GetGameState<ATBGameState>())
 	{
 		State->bTravelPending = false;
@@ -178,7 +219,10 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	{
 		return TEXT("別のマップ移動が処理中です。");
 	}
-	const TCHAR* Destination = StartMatch ? StagePath(State->SelectedStage) : TEXT("/Game/Maps/TB_Lobby");
+	if (StartMatch) ResolveStageForStart(World);
+	const int32 DestinationStage = State->SelectedStage == RandomStageId ? Pending->ResolvedStage : State->SelectedStage;
+	if (StartMatch && DestinationStage == INDEX_NONE) return TEXT("移動先がまだ決まっていません。");
+	const TCHAR* Destination = StartMatch ? StagePath(DestinationStage) : TEXT("/Game/Maps/TB_Lobby");
 	if (!Destination)
 	{
 		return TEXT("移動先が設定されていません。");
@@ -186,16 +230,18 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	const FString Path(Destination);
 	if (!FPackageName::DoesPackageExist(Path))
 	{
+		if (StartMatch) ResetStageResolution(World);
 		return TEXT("移動先のマップが見つかりません。");
 	}
-	State->SelectedStage = FindStage(State->SelectedStage)->Id;
-	if (StartMatch) State->StageName = StageDisplayName(State->SelectedStage);
+	State->SelectedStage = NormalizeSelection(State->SelectedStage);
+	if (StartMatch) State->StageName = StageDisplayName(DestinationStage);
 	Pending->PendingRules = State->Settings;
 	Pending->SelectedStage = State->SelectedStage;
 	Pending->ExpectedPlayers = State->PlayerArray.Num();
 	Pending->PendingMap = Path;
 	Pending->bStartOnArrival = StartMatch;
 	Pending->ArrivalDeadline = 0;
+	Pending->StageRevealAt = 0;
 	Pending->bArrivalCancelled = false;
 	State->bTravelPending = true;
 	Mode->bUseSeamlessTravel = true;
@@ -203,6 +249,7 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	{
 		State->bTravelPending = false;
 		Pending->PendingMap.Reset();
+		ResetStageResolution(World);
 		Pending->bStartOnArrival = false;
 		return TEXT("サーバーがマップ移動を開始できませんでした。");
 	}
@@ -240,6 +287,20 @@ void TBLobbySettings::TickArrival(ATBGameMode* Mode)
 		Pending->ArrivalDeadline = FPlatformTime::Seconds() + 60;
 	}
 	Ready &= !Pending->bArrivalCancelled;
+	if (Ready)
+	{
+		// Start the presentation clock only after the last client has loaded. Even a stalled
+		// editor or a slow disk gets a few real seconds of film before the round timer starts.
+		const double Now = FPlatformTime::Seconds();
+		const auto* Loading = GetDefault<UTBLoadingScreenSettings>();
+		if (Pending->StageRevealAt == 0.)
+			Pending->StageRevealAt = Now + (Loading->bEnabled ? Loading->MinimumTravelSeconds : 0.f);
+		if (Now < Pending->StageRevealAt) return;
+	}
+	else
+	{
+		Pending->StageRevealAt = 0;
+	}
 	if (!Ready && !Pending->bArrivalCancelled && FPlatformTime::Seconds() < Pending->ArrivalDeadline)
 	{
 		return;
@@ -260,7 +321,8 @@ void TBLobbySettings::TickArrival(ATBGameMode* Mode)
 			{
 				UE_LOG(LogTemp, Display, TEXT("[ToyBoxArrival] Before Start map=%s phase=%d players=%d reason=%s"),
 				    *World->GetMapName(), int32(State->Phase), State->PlayerArray.Num(), *State->Reason);
-				Mode->StartRound(It->Get());
+				const auto* Loading = GetDefault<UTBLoadingScreenSettings>();
+				Mode->StartRound(It->Get(), Loading->bEnabled ? Loading->FadeOutSeconds : 0.f);
 				const auto* PC = Cast<ATBController>(It->Get());
 				UE_LOG(LogTemp, Display, TEXT("[ToyBoxArrival] After Start map=%s phase=%d players=%d round=%u preparing=%d reason=%s notice=%s"),
 				    *World->GetMapName(), int32(State->Phase), State->PlayerArray.Num(), State->HidePreparation.Round,
@@ -292,18 +354,20 @@ void TBLobbySettings::Restore(ATBGameMode* Mode)
 	if (IsLobby(World))
 	{
 		Pending->bDedicatedLobby = true;
+		Pending->ResolvedStage = INDEX_NONE;
 	}
 	const int32 CurrentStage = StageIndex(World);
 	if (!Pending->bDedicatedLobby && !Pending->bStageSelected && Pending->PendingMap.IsEmpty() && CurrentStage != INDEX_NONE)
 	{
 		Pending->SelectedStage = CurrentStage;
 	}
-	Pending->SelectedStage = FindStage(Pending->SelectedStage)->Id;
+	Pending->SelectedStage = NormalizeSelection(Pending->SelectedStage);
 	State->SelectedStage = Pending->SelectedStage;
 	// Arenaなどの直接起動時は、GameModeが設定したマップ名を維持する。
 	if (Pending->bDedicatedLobby || CurrentStage != INDEX_NONE)
 	{
-		State->StageName = StageDisplayName(State->SelectedStage);
+		State->StageName = StageDisplayName(State->SelectedStage == RandomStageId && CurrentStage != INDEX_NONE
+		    ? CurrentStage : State->SelectedStage);
 	}
 	if (!Pending->PendingMap.IsEmpty() && World->GetMapName().EndsWith(FPackageName::GetShortName(Pending->PendingMap)))
 	{

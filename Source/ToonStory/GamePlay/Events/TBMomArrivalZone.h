@@ -7,6 +7,7 @@ class ATBCharacter;
 class UStaticMeshComponent;
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 
 /** 進行をまとめて複製し、参加途中のクライアントにも同じ残り時間を表示する。 */
 USTRUCT()
@@ -36,7 +37,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
 	UPROPERTY(EditAnywhere, Category="ママが来る！", meta=(DisplayName="この地点を候補にする"))
 	bool bEnabled = true;
-	UPROPERTY(EditAnywhere, Category="ママが来る！", meta=(DisplayName="赤い点線のマテリアル"))
+	UPROPERTY(EditAnywhere, Category="ママが来る！", meta=(DisplayName="床の目印のマテリアル"))
 	TObjectPtr<UMaterialInterface> BoundaryMaterial;
 	UPROPERTY(ReplicatedUsing=OnRep_State)
 	FTBMomArrivalState State;
@@ -46,9 +47,13 @@ public:
 	static ATBMomArrivalZone* FindActive(UWorld* World);
 	/** NPCだけでは対処不能になるため、人間陣営を操作中のプレイヤーが必要。 */
 	static bool HasHumanPlayer(UWorld* World);
+	/** 隠れる準備が終わってからの保護時間。抽選・直接開始の両方で使う。 */
+	static bool HasPassedOpeningDelay(UWorld* World);
 private:
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> Marker;
 	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> Boundary;
+	UPROPERTY() TObjectPtr<UMaterialInterface> NeutralBoundaryMaterial;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> BoundaryTint;
 	UFUNCTION() void OnRep_State();
 	void BuildBoundary(float Radius);
 	float DisplayRadius = -1;

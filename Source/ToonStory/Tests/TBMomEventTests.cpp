@@ -67,11 +67,18 @@ bool FTBMomEventTest::RunTest(const FString&)
 		Humans[Index]->SetActorLocation(Zone->GetActorLocation()+FVector(X,0,Humans[Index]->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+Height));
 	};
 	Rules.ArrivalSeconds=10; Rules.PersuadeSeconds=3; Rules.Radius=90;
+	TestEqual(TEXT("Mom opening grace defaults to one minute"), Rules.InitialDelaySeconds, 60.f);
 	Match->Phase=ETBPhase::Lobby;
 	TestFalse(TEXT("Lobby cannot start event"),Zone->StartEvent());
 	Playing.Hold(); Match->HidePreparation.bHiding=true;
 	TestFalse(TEXT("Preparation cannot start event"),Event->Execute(World));
 	Match->HidePreparation.bHiding=false;
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds();
+	TestFalse(TEXT("No warning or arrival at the beginning of a round"),Event->CanExecute(World));
+	TestFalse(TEXT("Direct zone start cannot bypass opening protection"),Zone->StartEvent());
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-59.99;
+	TestFalse(TEXT("Mom remains ineligible before sixty seconds"),Event->Execute(World));
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-60;
 	// NPCだけの人間陣営と、途中切断によりNPCだけになった状況を再現する。
 	auto* NPC=World->SpawnActor<ATBNPCController>();
 	NPC->SetActorTickEnabled(false);
@@ -115,6 +122,9 @@ bool FTBMomEventTest::RunTest(const FString&)
 	TestEqual(TEXT("Deadline ends round"),Match->Phase,ETBPhase::Results);
 	Playing.Hold(); Zone->StartEvent(); ++Match->HidePreparation.Round; Zone->Advance(1);
 	TestFalse(TEXT("Previous round never carries event"),Zone->State.bActive);
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds();
+	TestFalse(TEXT("A new round receives its own full opening protection"),Zone->StartEvent());
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-60;
 	Zone->StartEvent(); Match->Phase=ETBPhase::Lobby; Zone->Advance(1);
 	TestFalse(TEXT("Returning to lobby clears event"),Zone->State.bActive);
 	Playing.Hold(); Rules.PersuadeSeconds=0;
@@ -130,6 +140,9 @@ bool FTBMomEventTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { Events=SavedEvents; UTBEventTestEvent::Executions=Executions; Owner->Destroy(); };
 	Events.bEnabled=true; Events.CooldownSeconds=3; Events.ChancePerSecond=1;
 	Events.EventClasses={UTBMomArrivalEvent::StaticClass(),UTBEventTestEvent::StaticClass()};
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds();
+	TestFalse(TEXT("Director cannot explicitly trigger mom during opening protection"),Director->TryTrigger(UTBMomArrivalEvent::StaticClass()));
+	Match->HidePreparation.EndsAt=Match->GetServerWorldTimeSeconds()-60;
 	TestTrue(TEXT("Director starts mom event"),Director->TryTrigger(UTBMomArrivalEvent::StaticClass()));
 	Director->Advance(100);
 	TestEqual(TEXT("Mom blocks other natural event rolls"),UTBEventTestEvent::Executions,Executions);
@@ -156,8 +169,7 @@ bool FTBMomZoneAssetTest::RunTest(const FString&)
 	auto* Zone=World->SpawnActor<ATBMomArrivalZone>(Class,FVector(0,0,10000),FRotator::ZeroRotator);
 	if (!TestNotNull(TEXT("Zone can spawn without editing a map"),Zone)) return false;
 	ON_SCOPE_EXIT { Zone->Destroy(); };
-	if (TestNotNull(TEXT("Blueprint supplies red material"),Zone->BoundaryMaterial.Get()))
-		TestTrue(TEXT("Boundary supports instanced rendering"),Zone->BoundaryMaterial->GetMaterial()->bUsedWithInstancedStaticMeshes);
+	TestNotNull(TEXT("Blueprint retains its authored boundary material reference"),Zone->BoundaryMaterial.Get());
 	for (auto* Part : TInlineComponentArray<UStaticMeshComponent*>(Zone))
 		if (Part->GetName() == TEXT("PlaceholderCube"))
 		{
@@ -165,9 +177,28 @@ bool FTBMomZoneAssetTest::RunTest(const FString&)
 			TestFalse(TEXT("Hidden marker cannot cast a cube shadow"), Part->CastShadow);
 		}
 	auto* Boundary=Zone->FindComponentByClass<UInstancedStaticMeshComponent>();
-	if (TestNotNull(TEXT("Blueprint retains dashed boundary"),Boundary))
+	if (TestNotNull(TEXT("Blueprint retains its floor boundary component"),Boundary))
 	{
-		TestEqual(TEXT("Boundary has all dashes"),Boundary->GetInstanceCount(),48);
+		if (auto* Material=Boundary->GetMaterial(0))
+		{
+			TestTrue(TEXT("Visible boundary supports instanced rendering"),Material->GetMaterial()->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes));
+			FLinearColor Color;
+			TestTrue(TEXT("Legacy red material renders as warm paper"),
+			    Material->GetVectorParameterValue(FMaterialParameterInfo(TEXT("Color")),Color) &&
+			    Color.R>Color.B && Color.G>Color.R*.7f);
+		}
+		else AddError(TEXT("Visible boundary material is missing"));
+		TestTrue(TEXT("Continuous boundary has enough pieces for a smooth outline"),Boundary->GetInstanceCount()>=64);
+		for (int32 Index=0;Index<Boundary->GetInstanceCount();++Index)
+		{
+			FTransform Piece,Next;
+			Boundary->GetInstanceTransform(Index,Piece);
+			Boundary->GetInstanceTransform((Index+1)%Boundary->GetInstanceCount(),Next);
+			TestTrue(TEXT("Neighboring paper pieces meet without dashed gaps"),
+			    FVector::Distance(Piece.GetLocation(),Next.GetLocation())<Piece.GetScale3D().X*100);
+			TestTrue(TEXT("Paper outline stays within the actual standing radius"),
+			    Piece.GetLocation().Size2D()+Piece.GetScale3D().Y*50<=Zone->State.Radius+.01f);
+		}
 		TestFalse(TEXT("Boundary is hidden before event"),Boundary->IsVisible());
 		TestEqual(TEXT("Boundary never blocks players"),Boundary->GetCollisionEnabled(),ECollisionEnabled::NoCollision);
 	}

@@ -18,6 +18,7 @@ public:
 	ATBEscapeVehicle();
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	bool Board(ATBCharacter* Toy);
@@ -52,6 +53,28 @@ private:
 	FVector2D DriveInput = FVector2D::ZeroVector;
 	double LastInputAt = 0;
 	FTransform StartTransform;
+	// The shot and the decorative lamps share an origin at the parked mesh's center.
+	FVector ParkedMeshLocation;
+	FVector ShotCenter;
+	UPROPERTY()
+	TObjectPtr<class UMaterialInterface> LensMaterial;
+	UPROPERTY()
+	TObjectPtr<class UStaticMesh> LensPlane;
+	UPROPERTY()
+	TObjectPtr<class USoundBase> IgnitionSound;
+	UPROPERTY()
+	TObjectPtr<class USoundBase> ToyIgnitionSound;
+	UPROPERTY(Transient)
+	TObjectPtr<class USceneComponent> LampRig;
+	UPROPERTY(Transient)
+	TObjectPtr<class UMaterialInstanceDynamic> LensGlow;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class USpotLightComponent>> Headlights;
+	UPROPERTY(Transient)
+	TObjectPtr<class UAudioComponent> MotorAudio;
+	void StartIgnitionEffects(float Elapsed, USoundBase* Sound);
+	void UpdateIgnitionEffects(const class ATBGameState* Match);
+	void StopIgnitionEffects();
 	// リザルトの演出の走り。開始時刻が負なら走っていない。参加側も位置の同期を待たず、サーバー時刻からこの線の上の位置を出す。
 	UPROPERTY(Replicated)
 	FVector ResultFrom = FVector::ZeroVector;

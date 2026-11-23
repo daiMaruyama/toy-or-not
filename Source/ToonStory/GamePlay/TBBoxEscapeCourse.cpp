@@ -8,12 +8,15 @@
 #include "Core/TBGameState.h"
 #include "Core/TBPlayerState.h"
 #include "Core/TBGameHelpers.h"
+#include "Audio/TBAudioEvents.h"
+#include "Data/TBPresentationData.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/TriggerBox.h"
 #include "Engine/TargetPoint.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/Package.h"
@@ -168,9 +171,35 @@ bool ATBBoxEscapeCourse::SafeExitPoint(FVector Position, const ATBCharacter* Toy
 	if (CourseBounds->Bounds.GetBox().Intersect(CapsuleBox) ||
 	    Box->StorageRoomBounds().ExpandBy(FMath::Max(Radius, Half)).IsInsideOrOn(InRoom)) return false;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TBCourseExit), false, Toy);
-	if (!Toy) for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It) Params.AddIgnoredActor(*It);
-	return TB::SupportsCapsule(GetWorld(), Position, Radius, Half, ECC_GameTraceChannel1, Params,
+	if (!Toy)
+	{
+		for (TActorIterator<ATBCharacter> It(GetWorld()); It; ++It) Params.AddIgnoredActor(*It);
+		// Validate the authored exit's fixed floor and clearance. Movable props can
+		// occupy it during play; actual escape keeps checking those live blockers.
+		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+			for (const auto* Part : TInlineComponentArray<UPrimitiveComponent*>(*It))
+				if (Part->Mobility == EComponentMobility::Movable && Part->IsSimulatingPhysics() &&
+				    Part->ComponentHasTag(TEXT("TBPushable"))) Params.AddIgnoredComponent(Part);
+	}
+	const bool Supported = TB::SupportsCapsule(GetWorld(), Position, Radius, Half, ECC_GameTraceChannel1, Params,
 	    Toy ? Toy->GetCharacterMovement()->GetWalkableFloorZ() : .71f);
+	if (!Supported && !Toy)
+	{
+		const auto Shape = FCollisionShape::MakeCapsule(Radius, Half);
+		TArray<FOverlapResult> Overlaps;
+		GetWorld()->OverlapMultiByChannel(Overlaps, Position, FQuat::Identity, ECC_GameTraceChannel1, Shape, Params);
+		for (const auto& Overlap : Overlaps)
+			if (const auto* Part = Overlap.Component.Get(); Part && Overlap.bBlockingHit)
+				UE_LOG(LogTemp, Display, TEXT("[BoxExitValidation] map=%s course=%s position=%s blocker=%s movable=%d simulating=%d pushable=%d"),
+				    *GetWorld()->GetMapName(), *GetName(), *Position.ToString(), *Part->GetPathName(),
+				    Part->Mobility == EComponentMobility::Movable, Part->IsSimulatingPhysics(), Part->ComponentHasTag(TEXT("TBPushable")));
+		FHitResult Floor;
+		const bool Hit = GetWorld()->SweepSingleByChannel(Floor, Position + FVector(0, 0, 1), Position - FVector(0, 0, 12),
+		    FQuat::Identity, ECC_GameTraceChannel1, Shape, Params);
+		UE_LOG(LogTemp, Display, TEXT("[BoxExitValidation] map=%s position=%s floor=%s hit=%d penetrating=%d normalZ=%.3f"),
+		    *GetWorld()->GetMapName(), *Position.ToString(), *GetNameSafe(Floor.GetComponent()), Hit, Floor.bStartPenetrating, Floor.ImpactNormal.Z);
+	}
+	return Supported;
 }
 
 bool ATBBoxEscapeCourse::Contains(const UBoxComponent* Volume, const ATBCharacter* Toy, float Margin) const
@@ -211,6 +240,7 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 	const auto* State = TB::GS(GetWorld());
 	if (!State || State->Phase != ETBPhase::Playing || State->IsPreparing())
 	{ Attempts.Reset(); return; }
+	if (State->IsIgniting()) return;
 	FString Error;
 	TArray<UPrimitiveComponent*> Supports;
 	if (!ValidateWithSupports(Error, false, Supports)) return;
@@ -232,13 +262,47 @@ void ATBBoxEscapeCourse::Tick(float DeltaSeconds)
 		if (Contains(CourseBounds, Toy) && Toy->GetActorLocation().Z + Toy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() < GoalVolume->Bounds.GetBox().Min.Z)
 			Attempt.bDescendedBelowGoal = true;
 		if (Contains(CourseBounds, Toy)) Toy->SetFrozen(false);
-		if (!Attempt.bDescendedBelowGoal || !IsAtGoalHeight(Toy, Supports)) continue;
-		// Server deadlines and the current capture token still govern release.
+		if (!Attempt.bDescendedBelowGoal) continue;
+		const bool bAtGoal = IsAtGoalHeight(Toy, Supports);
+		// 出口が塞がって失敗したあとは、ゴールの高さからいったん離れて、もう一度届いたときだけやり直す。
+		// やり直しも新しい頭突きとして、ふたを開き直してから、遅らせて移す。居続けても毎フレームは出さない。
+		if (Attempt.bFailed)
+		{
+			if (!bAtGoal) { Attempt.bLeftGoal = true; continue; }
+			if (!Attempt.bLeftGoal) continue;
+			Attempt.bFailed = false;
+			Attempt.bLeftGoal = false;
+			Attempt.bBumped = false;
+		}
+		if (!Attempt.bBumped)
+		{
+			if (!bAtGoal) continue;
+			// Server deadlines and the current capture token still govern release.
+			if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
+			if (!Eligible(Toy) || State->Phase != ETBPhase::Playing) continue;
+			// ゴールの瞬間に、頭でふたを押し上げる。出口へ移すのは少し遅らせる。
+			Attempt.bBumped = true;
+			Attempt.ReleaseIn = TB::PresentationData().Lid.EscapeReleaseDelay;
+			Box->PlayEscapeBump();
+		}
+		else Attempt.ReleaseIn -= DeltaSeconds;
+		if (Attempt.ReleaseIn > 0.f) continue;
+		// 遅らせた間に試合が終わる・抜ける・捕まり直すことがあるので、移す時点で期限とキャプチャをもう一度確かめる。
 		if (auto* Mode = GetWorld()->GetAuthGameMode<ATBGameMode>()) Mode->CheckWin();
-		if (!Eligible(Toy) || State->Phase != ETBPhase::Playing) continue;
+		if (!Eligible(Toy) || State->Phase != ETBPhase::Playing || Box->CaptureGeneration(Toy) != Attempt.Generation) continue;
 		TArray<FTransform> Exits;
 		for (const auto& Exit : ExitPoints)
 			if (SafeExitPoint(Exit->GetActorLocation(), Toy)) Exits.Add(Exit->GetActorTransform());
-		if (Box->ReleasePrisoner(Toy, Capture, Exits)) Attempts.Remove(Toy);
+		// ふたは頭突きの時点で開いているので、ここでは救助・収納のふたの合図を出さない。
+		if (Box->ReleasePrisoner(Toy, Attempt.Generation, Exits, false))
+		{
+			UTBAudioEvents::Emit(this, ETBSoundEvent::RescueComplete, Toy->TBPS(), Box->InteractionPoint->GetComponentLocation());
+			Attempts.Remove(Toy);
+		}
+		else
+		{
+			Attempt.bFailed = true;
+			Attempt.bLeftGoal = false;
+		}
 	}
 }

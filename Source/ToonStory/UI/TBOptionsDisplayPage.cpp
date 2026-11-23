@@ -50,16 +50,18 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 	const bool bCanChangeWindow = !GIsEditor;
 	auto* Mode = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.WindowMode")), false);
 	Mode->Value = [S] { return TBText::String(WindowModeNames[WindowModeIndex(*S)]); };
-	Mode->CanStep = [S, bCanChangeWindow](int32 Steps)
+	Mode->Choices = [bCanChangeWindow]
 	{
-		const int32 Next = WindowModeIndex(*S) + Steps;
-		return bCanChangeWindow && Next >= 0 && Next < UE_ARRAY_COUNT(WindowModes);
+		TArray<FString> Names;
+		if (bCanChangeWindow)
+			for (const TCHAR* Name : WindowModeNames) Names.Add(TBText::String(Name));
+		return Names;
 	};
-	Mode->Step = [M](int32 Steps)
+	Mode->Select = [M](int32 Index)
 	{
-		M->ChangeVideoMode([Steps](UTBGameUserSettings& Changing)
+		M->ChangeVideoMode([Index](UTBGameUserSettings& Changing)
 		{
-			const auto Next = WindowModes[FMath::Clamp(WindowModeIndex(Changing) + Steps, 0, UE_ARRAY_COUNT(WindowModes) - 1)];
+			const auto Next = WindowModes[Index];
 			const FIntPoint Desktop = Changing.GetDesktopResolution();
 			Changing.SetFullscreenMode(Next);
 			if (Next == EWindowMode::WindowedFullscreen)
@@ -86,30 +88,25 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 		                                                                                : S->GetScreenResolution();
 		return FString::Printf(TEXT("%d × %d"), Size.X, Size.Y);
 	};
-	Resolution->CanStep = [S, bCanChangeWindow](int32 Steps)
+	Resolution->Choices = [S, bCanChangeWindow]
 	{
-		if (!bCanChangeWindow || S->GetFullscreenMode() == EWindowMode::WindowedFullscreen)
-		{
-			return false;
-		}
-		const auto List = Resolutions(*S);
-		const int32 Next = List.IndexOfByKey(S->GetScreenResolution()) + Steps;
-		return Next >= 0 && Next < List.Num();
+		TArray<FString> Names;
+		if (bCanChangeWindow && S->GetFullscreenMode() != EWindowMode::WindowedFullscreen)
+			for (const FIntPoint& Size : Resolutions(*S)) Names.Add(FString::Printf(TEXT("%d × %d"), Size.X, Size.Y));
+		return Names;
 	};
-	Resolution->Step = [M](int32 Steps)
+	Resolution->Select = [M, S](int32 Index)
 	{
-		M->ChangeVideoMode([Steps](UTBGameUserSettings& Changing)
-		{
-			const auto List = Resolutions(Changing);
-			Changing.SetScreenResolution(List[FMath::Clamp(List.IndexOfByKey(Changing.GetScreenResolution()) + Steps, 0, List.Num() - 1)]);
-		});
+		const auto Available = Resolutions(*S);
+		if (Available.IsValidIndex(Index))
+			M->ChangeVideoMode([Size = Available[Index]](UTBGameUserSettings& Changing) { Changing.SetScreenResolution(Size); });
 	};
 	auto* VSync = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.VSync")), false);
 	VSync->Value = [S] { return OnOff(S->IsVSyncEnabled()); };
-	VSync->CanStep = [S](int32 Steps) { return (Steps > 0) != S->IsVSyncEnabled(); };
-	VSync->Step = [S](int32 Steps)
+	VSync->Choices = ToggleChoices;
+	VSync->Select = [S](int32 Index)
 	{
-		S->SetVSyncEnabled(Steps > 0);
+		S->SetVSyncEnabled(Index != 0);
 		S->CommitDisplay();
 	};
 	auto* FrameRate = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.FrameLimit")), false);
@@ -118,14 +115,16 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 		const int32 Limit = FMath::RoundToInt(S->GetFrameRateLimit());
 		return Limit > 0 ? FString::FromInt(Limit) : FString(TBText::Literal(TEXT("Options.Unlimited")));
 	};
-	FrameRate->CanStep = [S](int32 Steps)
+	FrameRate->Choices = []
 	{
-		const int32 Index = S->GetFrameRateLimitIndex();
-		return Index == INDEX_NONE || (Index + Steps >= 0 && Index + Steps < TB::ConfigData().Display.FrameRateLimits.Num());
+		TArray<FString> Names;
+		for (int32 Limit : TB::ConfigData().Display.FrameRateLimits)
+			Names.Add(Limit > 0 ? FString::FromInt(Limit) : TBText::String(TEXT("Options.Unlimited")));
+		return Names;
 	};
-	FrameRate->Step = [S](int32 Steps)
+	FrameRate->Select = [S](int32 Index)
 	{
-		S->StepFrameRateLimit(Steps);
+		S->SetFrameRateLimit(TB::ConfigData().Display.FrameRateLimits[Index]);
 		S->CommitDisplay();
 	};
 	auto* Quality = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.Quality")), false);
@@ -134,16 +133,15 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 		const int32 Level = S->GetQualityPreset();
 		return Level >= 0 ? TBText::String(QualityNames[FMath::Min(Level, 3)]) : FString(TBText::Literal(TEXT("Options.Custom")));
 	};
-	// 段階がばらばら（カスタム）なら、最高から数える（「<」で高、「>」で最高）。
-	Quality->CanStep = [S](int32 Steps)
+	Quality->Choices = []
 	{
-		const int32 Level = S->GetQualityPreset();
-		return Level < 0 || (Level + Steps >= 0 && Level + Steps <= 3);
+		TArray<FString> Names;
+		for (const TCHAR* Name : QualityNames) Names.Add(TBText::String(Name));
+		return Names;
 	};
-	Quality->Step = [S](int32 Steps)
+	Quality->Select = [S](int32 Index)
 	{
-		const int32 Level = S->GetQualityPreset();
-		S->SetQualityPreset((Level < 0 ? 3 : Level) + Steps);
+		S->SetQualityPreset(Index);
 		S->CommitDisplay();
 	};
 	auto* ResolutionScale = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.ResolutionScale")), true);
@@ -152,17 +150,6 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 	{
 		const auto& Range = TB::ConfigData().Display.ResolutionScale;
 		return Fraction(S->GetResolutionScalePercent(), Range.Min, FMath::Min(Range.Max, 100.f));
-	};
-	ResolutionScale->CanStep = [S](int32 Steps)
-	{
-		const auto& Range = TB::ConfigData().Display.ResolutionScale;
-		const float Value = S->GetResolutionScalePercent();
-		return Steps < 0 ? Value > Range.Min + .01f : Value < FMath::Min(Range.Max, 100.f) - .01f;
-	};
-	ResolutionScale->Step = [S](int32 Steps)
-	{
-		S->StepResolutionScale(Steps);
-		S->CommitDisplay();
 	};
 	// 描画解像度は変えるたびに画面の作り直しが走るので、手を離したときだけ反映する。
 	const auto& ScaleRange = TB::ConfigData().Display.ResolutionScale;
@@ -180,26 +167,15 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 		const auto& Range = TB::ConfigData().Display.Brightness;
 		return Fraction(S->GetBrightness(), Range.Min, Range.Max);
 	};
-	Brightness->CanStep = [S](int32 Steps)
-	{
-		const auto& Range = TB::ConfigData().Display.Brightness;
-		const float Value = S->GetBrightness();
-		return Steps < 0 ? Value > Range.Min + .001f : Value < Range.Max - .001f;
-	};
-	Brightness->Step = [S](int32 Steps)
-	{
-		S->StepBrightness(Steps);
-		S->CommitDisplay();
-	};
 	const auto& BrightnessRange = TB::ConfigData().Display.Brightness;
 	BindSlider(*Brightness, BrightnessRange.Min, BrightnessRange.Max, BrightnessRange.Step,
 	           [S](float Gamma) { S->SetBrightness(Gamma); }, [S] { S->PreviewBrightness(); }, [S] { S->CommitDisplay(); });
 	auto* MotionBlur = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.MotionBlur")), false);
 	MotionBlur->Value = [S] { return OnOff(S->IsMotionBlurEnabled()); };
-	MotionBlur->CanStep = [S](int32 Steps) { return (Steps > 0) != S->IsMotionBlurEnabled(); };
-	MotionBlur->Step = [S](int32 Steps)
+	MotionBlur->Choices = ToggleChoices;
+	MotionBlur->Select = [S](int32 Index)
 	{
-		S->SetMotionBlurEnabled(Steps > 0);
+		S->SetMotionBlurEnabled(Index != 0);
 		S->CommitDisplay();
 	};
 	auto* RayTracing = Menu.AddRow(TBOptionsPage::Display, TBText::Get(TEXT("Options.RayTracing")), false);
@@ -207,13 +183,10 @@ void TBOptionsPages::BuildDisplay(UTBOptionsMenu& Menu, UTBGameUserSettings& Set
 	{
 		return UTBGameUserSettings::IsRayTracingSupported() ? OnOff(S->IsRayTracingOn()) : FString(TBText::Literal(TEXT("Options.Unsupported")));
 	};
-	RayTracing->CanStep = [S](int32 Steps)
+	RayTracing->Choices = [] { return UTBGameUserSettings::IsRayTracingSupported() ? ToggleChoices() : TArray<FString>(); };
+	RayTracing->Select = [S](int32 Index)
 	{
-		return UTBGameUserSettings::IsRayTracingSupported() && (Steps > 0) != S->IsRayTracingOn();
-	};
-	RayTracing->Step = [S](int32 Steps)
-	{
-		S->SetRayTracingOn(Steps > 0);
+		S->SetRayTracingOn(Index != 0);
 		S->CommitDisplay();
 	};
 	Menu.AddNote(TBOptionsPage::Display,

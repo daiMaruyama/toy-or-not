@@ -17,6 +17,9 @@ public:
 	// 凝視の入力も同じく移動パケットのフラグで送る。人間のときだけ効く。
 	bool bWantsToGaze = false;
 	virtual float GetMaxSpeed() const override;
+	virtual bool CanCrouchInCurrentState() const override;
+	virtual void Crouch(bool bClientSimulation = false) override;
+	virtual void UnCrouch(bool bClientSimulation = false) override;
 	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual void PerformMovement(float DeltaSeconds) override;
@@ -27,5 +30,7 @@ public:
 	                            const FVector& NewAccel) override;
 private:
 	bool bBrushingProp = false;
+	uint64 PropPushFrame = MAX_uint64;
+	TSet<TWeakObjectPtr<UPrimitiveComponent>> PushedPropsThisFrame;
 	void SweepPushableProps(float DeltaSeconds);
 };

@@ -3,6 +3,7 @@
 #include "Tests/TBTestMatch.h"
 #include "Character/TBNPCController.h"
 #include "Character/TBCharacter.h"
+#include "Character/TBCharacterGeometry.h"
 #include "Character/TBMovement.h"
 #include "Data/TBCharacterData.h"
 #include "Data/TBDataSettings.h"
@@ -27,6 +28,13 @@
 #include "EngineUtils.h"
 #include "Tests/AutomationCommon.h"
 #include "UI/TBHUD.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SViewport.h"
+#include "ImageUtils.h"
+#include "Misc/App.h"
+#include "Misc/FileHelper.h"
 #include "UnrealClient.h"
 #include "Misc/Paths.h"
 #include "ProfilingDebugging/CsvProfiler.h"
@@ -599,11 +607,12 @@ bool FTBNPCNavigationTest::RunTest(const FString& Parameters)
 		    (!Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) ||
 		     UNavigationSystemV1::IsNavigationBeingBuiltOrLocked(World))) return false;
 		TArray<FVector> Starts;
+		const FNavAgentProperties ToyAgent(TBCharacterGeometry::ToyRadius, 2.f * TBCharacterGeometry::ToyHalfHeight);
 		for (TActorIterator<APlayerStart> It(World); It; ++It)
 		{
 			Starts.Add(It->GetActorLocation());
 			FNavLocation Projected;
-			const auto* Data = Nav->GetNavDataForProps(FNavAgentProperties(7.5f, 19.5f), It->GetActorLocation());
+			const auto* Data = Nav->GetNavDataForProps(ToyAgent, It->GetActorLocation());
 			const bool OnNav = Data && Nav->ProjectPointToNavigation(It->GetActorLocation(), Projected, FVector(100,100,500), Data);
 			AddInfo(FString::Printf(TEXT("Start %s: %s projected=%d %s"), *It->GetName(), *It->GetActorLocation().ToString(), OnNav, *Projected.Location.ToString()));
 		}
@@ -613,7 +622,7 @@ bool FTBNPCNavigationTest::RunTest(const FString& Parameters)
 		{
 			for (const FVector& Start : Starts)
 			{
-				const FNavAgentProperties Agent = Human ? FNavAgentProperties(26, 130) : FNavAgentProperties(7.5f, 19.5f);
+				const FNavAgentProperties Agent = Human ? FNavAgentProperties(26, 130) : ToyAgent;
 				auto* Data = Nav->GetNavDataForProps(Agent, Start);
 				auto* Path = Data ? UNavigationSystemV1::FindPathToLocationSynchronously(World, Start, Destination, const_cast<ANavigationData*>(Data)) : nullptr;
 				if (Path && Path->IsValid() && !Path->IsPartial()) return true;
@@ -626,7 +635,7 @@ bool FTBNPCNavigationTest::RunTest(const FString& Parameters)
 			FHitResult Floor;
 			World->LineTraceSingleByChannel(Floor, It->GetActorLocation() + FVector(0,0,15), It->GetActorLocation() - FVector(0,0,100), ECC_Visibility);
 			FNavLocation Projected;
-			const auto* Data = Nav->GetNavDataForProps(FNavAgentProperties(7.5f,19.5f));
+			const auto* Data = Nav->GetNavDataForProps(ToyAgent);
 			bool ProjectedOK = Data && Nav->ProjectPointToNavigation(It->GetActorLocation(), Projected, FVector(40,40,50), Data);
 			AddInfo(FString::Printf(TEXT("Pickup %s floor=%s z=%.1f nav=%d %s"), *It->GetName(), *GetNameSafe(Floor.GetActor()), Floor.ImpactPoint.Z, ProjectedOK, *Projected.Location.ToString()));
 			if (Reaches(It->GetActorLocation(), false)) ++Reachable;
@@ -702,6 +711,7 @@ void FTBNPCTravelTest::GetTests(TArray<FString>& Names, TArray<FString>& Command
 {
 	Names.Add(TEXT("Demo")); Commands.Add(TEXT("1"));
 	Names.Add(TEXT("House")); Commands.Add(TEXT("3"));
+	Names.Add(TEXT("Random")); Commands.Add(TEXT("0"));
 }
 bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 {
@@ -726,17 +736,24 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 	PC->GetPlayerState<ATBPlayerState>()->bReady = true;
 	TBLobbySettings::SelectStage(PC, Stage);
 	Mode->StartRound(PC);
-		TestTrue(TEXT("Supported stage starts travel"), State->bTravelPending);
+	const int32 Destination = Stage == TBLobbySettings::RandomStageId
+	    ? World->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage : Stage;
+	TestTrue(TEXT("Destination is a retained playable stage"), Destination == TBLobbySettings::DemoStageId || Destination == TBLobbySettings::HouseStageId);
+	TestTrue(TEXT("Supported stage starts travel"), State->bTravelPending);
 	TestEqual(TEXT("No bots in lobby arrival count"), State->PlayerArray.Num(), 1);
 	const double Deadline = FPlatformTime::Seconds() + 60;
 	auto Arrived = MakeShared<bool>(false);
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Deadline, Arrived, Stage]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Deadline, Arrived, Stage, Destination]()
 	{
 		auto* Current = CurrentWorld();
 		auto* Match = Current ? Current->GetGameState<ATBGameState>() : nullptr;
 		if ((!Match || Match->Phase != ETBPhase::Playing || Match->IsPreparing()) && FPlatformTime::Seconds() < Deadline) return false;
-		*Arrived = Match && Match->Phase == ETBPhase::Playing && !Match->IsPreparing() && TBLobbySettings::StageIndex(Current) == Stage;
+		*Arrived = Match && Match->Phase == ETBPhase::Playing && !Match->IsPreparing() && TBLobbySettings::StageIndex(Current) == Destination;
 		TestTrue(TEXT("Match starts after arriving at selected stage"), *Arrived);
+		if (Match) TestEqual(TEXT("Arrival preserves the selection including Random"), Match->SelectedStage, Stage);
+		if (Stage == TBLobbySettings::RandomStageId && Current)
+			TestEqual(TEXT("Arrival and preparation keep the original random draw"),
+			    Current->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage, Destination);
 		if (*Arrived)
 		{
 			TestEqual(TEXT("NPC settings survive travel"), Match->Settings.NPCToys, 2);
@@ -760,19 +777,60 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 			}
 			TestEqual(TEXT("The host and five human NPCs start together"), Humans, 6);
 			TestEqual(TEXT("All available looks are used before repeating"), Assigned.Num(), FMath::Min(Humans, Roster.Num()));
-			auto* Host = Cast<ATBController>(Current->GetFirstPlayerController());
-			auto* GM = Current->GetAuthGameMode<ATBGameMode>();
-			GM->Finish(ETBWinner::Humans, TEXT("NPC travel test"));
-			GM->ReturnToLobby(Host);
 		}
 		return true;
 	}));
+	if (FParse::Param(FCommandLine::Get(), TEXT("UIReviewScreenshots")) && FApp::CanEverRender())
+	{
+		auto SettledAt = MakeShared<double>(0.);
+		ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Stage, Arrived, SettledAt]()
+		{
+			if (!*Arrived) return true;
+			auto* Current = CurrentWorld();
+			auto* Host = Current ? Cast<ATBController>(Current->GetFirstPlayerController()) : nullptr;
+			if (!TestNotNull(TEXT("Stage host remains available for the HUD capture"), Host)) return true;
+			const double Now = FPlatformTime::Seconds();
+			if (*SettledAt == 0.) *SettledAt = Now;
+			if (Now < *SettledAt + .4) return false;
+			if (Host->IsShowingEntranceApproach() || UTBLoadingScreenSubsystem::IsCovering(Current->GetGameInstance()))
+			{
+				if (Now < *SettledAt + 8.) return false;
+				AddError(TEXT("Stage HUD remained obscured after the round started"));
+				return true;
+			}
+			auto* Viewport = Current->GetGameViewport();
+			const auto Widget = Viewport ? Viewport->GetGameViewportWidget() : nullptr;
+			TArray<FColor> Pixels;
+			FIntVector Size(0);
+			if (!TestTrue(TEXT("Gameplay viewport renders the live HUD"), Widget.IsValid() &&
+			    FSlateApplication::Get().TakeScreenshot(Widget.ToSharedRef(), Pixels, Size) && !Pixels.IsEmpty())) return true;
+			FString Folder;
+			if (!FParse::Value(FCommandLine::Get(), TEXT("UIReviewOutput="), Folder))
+				Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/StageArrival");
+			IFileManager::Get().MakeDirectory(*Folder, true);
+			const FString Path = Folder / (Stage == TBLobbySettings::HouseStageId ? TEXT("House-HUD.png") : TEXT("Demo-HUD.png"));
+			TArray64<uint8> PNG;
+			FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
+			TestTrue(TEXT("Reached-stage HUD saved"), FFileHelper::SaveArrayToFile(PNG, *Path));
+			AddInfo(FString::Printf(TEXT("Actual gameplay HUD: %s"), *Path));
+			return true;
+		}));
+	}
 	auto ReturnDeadline = MakeShared<double>(0);
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Arrived, ReturnDeadline]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Arrived, ReturnDeadline, Stage]()
 	{
 		if (!*Arrived) return true;
-		if (*ReturnDeadline == 0) *ReturnDeadline = FPlatformTime::Seconds() + 60;
 		auto* Current = CurrentWorld();
+		if (*ReturnDeadline == 0)
+		{
+			*ReturnDeadline = FPlatformTime::Seconds() + 60;
+			auto* Host = Current ? Cast<ATBController>(Current->GetFirstPlayerController()) : nullptr;
+			auto* StageMode = Current ? Current->GetAuthGameMode<ATBGameMode>() : nullptr;
+			if (!TestTrue(TEXT("Stage remains available until return"), Host && StageMode)) return true;
+			StageMode->Finish(ETBWinner::Humans, TEXT("NPC travel test"));
+			StageMode->ReturnToLobby(Host);
+			return false;
+		}
 		if (!TBLobbySettings::IsLobby(Current) && FPlatformTime::Seconds() < *ReturnDeadline) return false;
 		if (TestTrue(TEXT("Returns to dedicated lobby"), TBLobbySettings::IsLobby(Current)))
 		{
@@ -780,6 +838,9 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 			if (!TestNotNull(TEXT("Lobby state restored"), Match)) return true;
 			TestEqual(TEXT("Bot states removed before return travel"), Match->PlayerArray.Num(), 1);
 			TestEqual(TEXT("NPC count retained after return travel"), Match->Settings.NPCToys, 2);
+			TestEqual(TEXT("Returning to lobby retains the selection including Random"), Match->SelectedStage, Stage);
+			TestEqual(TEXT("A new round can draw again after lobby return"),
+			    Current->GetGameInstance()->GetSubsystem<UTBLobbySettings>()->ResolvedStage, INDEX_NONE);
 		}
 		return true;
 	}));

@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Blueprint/WidgetTree.h"
+#include "Components/ComboBoxString.h"
 #include "Components/TextBlock.h"
 #include "Core/TBController.h"
 #include "Core/TBGameUserSettings.h"
@@ -127,9 +128,9 @@ bool FTBUILocalizationSwitchTest::RunTest(const FString& Parameters)
 	if (!TestTrue(TEXT("Japanese activates"), TBText::SetLanguage(TEXT("ja")))) return false;
 	const FText HeldTitle = TBText::Get(TEXT("Options.Title"));
 	const FText HeldFormat = FText::Format(TBText::Get(TEXT("Keys.Waiting")), FText::FromString(TEXT("TEST ACTION")));
-	TestEqual(TEXT("Initial Japanese title"), HeldTitle.ToString(), FString(TEXT("オプション")));
+	TestEqual(TEXT("Initial Japanese title"), HeldTitle.ToString(), FString(TEXT("設定")));
 	if (!TestTrue(TEXT("English activates"), TBText::SetLanguage(TEXT("en")))) return false;
-	TestEqual(TEXT("A retained FText changes to English"), HeldTitle.ToString(), FString(TEXT("Options")));
+	TestEqual(TEXT("A retained FText changes to English"), HeldTitle.ToString(), FString(TEXT("Settings")));
 	TestTrue(TEXT("A retained formatted FText changes to English"), HeldFormat.ToString().StartsWith(TEXT("Press a key")));
 	TestTrue(TEXT("Formatting preserves its argument"), HeldFormat.ToString().Contains(TEXT("TEST ACTION")));
 	TestEqual(TEXT("A fixed legacy notice uses the English catalog"),
@@ -148,9 +149,9 @@ bool FTBUILocalizationSwitchTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Unknown language is rejected"), TBText::SetLanguage(TEXT("unsupported-test-language")));
 	TestEqual(TEXT("Rejected language preserves active language"), TBText::GetLanguage(), FString(TEXT("en")));
 	TestEqual(TEXT("Rejected language preserves revision"), TBText::GetRevision(), Revision);
-	TestEqual(TEXT("Rejected language preserves retained text"), HeldTitle.ToString(), FString(TEXT("Options")));
+	TestEqual(TEXT("Rejected language preserves retained text"), HeldTitle.ToString(), FString(TEXT("Settings")));
 	TestTrue(TEXT("Japanese activates again"), TBText::SetLanguage(TEXT("ja")));
-	TestEqual(TEXT("The same retained FText changes back"), HeldTitle.ToString(), FString(TEXT("オプション")));
+	TestEqual(TEXT("The same retained FText changes back"), HeldTitle.ToString(), FString(TEXT("設定")));
 	return true;
 }
 
@@ -250,18 +251,47 @@ bool FTBUILocalizationOptionsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Existing display tab index is preserved"), int32(TBOptionsPage::Display), 1);
 	TestEqual(TEXT("Existing controls tab index is preserved"), int32(TBOptionsPage::Controls), 2);
 	TestEqual(TEXT("Language is the fourth tab"), int32(TBOptionsPage::Language), 3);
+	UTBOptionRow* Quality = nullptr;
+	UComboBoxString* QualityPicker = nullptr;
+	Menu->WidgetTree->ForEachWidget([&](UWidget* Widget)
+	{
+		auto* Row = Cast<UTBOptionRow>(Widget);
+		if (!Row || !Row->Choices || !Row->Choices().Contains(TBText::String(TEXT("Options.Low")))) return;
+		Quality = Row;
+		Row->WidgetTree->ForEachWidget([&](UWidget* Child)
+		{
+			if (auto* Picker = Cast<UComboBoxString>(Child)) QualityPicker = Picker;
+		});
+	});
+	if (!TestNotNull(TEXT("Quality has a native selection list"), QualityPicker)) return false;
+	TestEqual(TEXT("The picker shows the saved Japanese value"), QualityPicker->GetSelectedOption(), Quality->Value());
+	int32 Chosen = INDEX_NONE;
+	Quality->Select = [&Chosen](int32 Index) { Chosen = Index; }; // Exercise the picker without saving personal settings.
 	Menu->ShowPage(TBOptionsPage::Language);
 	TestEqual(TEXT("Language page can be selected"), Menu->GetPage(), 3);
-	TestNotNull(TEXT("Japanese language tab is visibly selected"), FindText(*Menu, TEXT("●  言語")));
-	UTextBlock* ExistingTitle = FindText(*Menu, TEXT("オプション"));
+	TestNotNull(TEXT("Japanese language tab uses its plain caption"), FindText(*Menu, TEXT("言語")));
+	auto* SelectionMark = Menu->WidgetTree->FindWidget(TEXT("LanguageSelectionMark"));
+	if (!TestNotNull(TEXT("Language selection uses a drawn check mark"), SelectionMark)) return false;
+	TestTrue(TEXT("The check starts on Japanese"), SelectionMark->GetRenderTransform().Translation.IsNearlyZero());
+	UTextBlock* ExistingTitle = FindText(*Menu, TEXT("設定"));
 	if (!TestNotNull(TEXT("Existing title text block"), ExistingTitle)) return false;
 	TestTrue(TEXT("Switches while the menu already exists"), TBText::SetLanguage(TEXT("en")));
-	TestEqual(TEXT("Same title widget now has English text"), ExistingTitle->GetText().ToString(), FString(TEXT("Options")));
+	TestTrue(TEXT("An existing selection list translates its entries"), QualityPicker->FindOptionIndex(TEXT("Low")) != INDEX_NONE);
+	TestEqual(TEXT("Updating translated options does not apply a setting"), Chosen, INDEX_NONE);
+	const int32 Another = QualityPicker->GetSelectedIndex() == 0 ? 1 : 0;
+	QualityPicker->OnSelectionChanged.Broadcast(QualityPicker->GetOptionAtIndex(Another), ESelectInfo::OnMouseClick);
+	TestEqual(TEXT("A user selection applies the chosen preset index"), Chosen, Another);
+	Chosen = INDEX_NONE;
+	QualityPicker->OnSelectionChanged.Broadcast(QualityPicker->GetOptionAtIndex(Another), ESelectInfo::Direct);
+	TestEqual(TEXT("Confirming a gamepad selection applies the same preset"), Chosen, Another);
+	TestEqual(TEXT("Same title widget now has English text"), ExistingTitle->GetText().ToString(), FString(TEXT("Settings")));
 	TestEqual(TEXT("Language page remains selected"), Menu->GetPage(), 3);
-	TestNotNull(TEXT("English language tab is visibly selected"), FindText(*Menu, TEXT("●  Language")));
-	TestNotNull(TEXT("English language description is present"), FindText(*Menu, TBText::String(TEXT("Options.LanguageNote"))));
+	TestNotNull(TEXT("English language tab uses its plain caption"), FindText(*Menu, TEXT("Language")));
+	TestNotNull(TEXT("The English option has its native caption"), FindText(*Menu, TEXT("English")));
+	TestTrue(TEXT("The check moves to the English choice"), SelectionMark->GetRenderTransform().Translation.X > 0.f);
+	TestNotNull(TEXT("Japanese remains available in its native script"), FindText(*Menu, TEXT("日本語")));
 	TestTrue(TEXT("Switches back with the same menu"), TBText::SetLanguage(TEXT("ja")));
-	TestEqual(TEXT("Same title widget returns to Japanese"), ExistingTitle->GetText().ToString(), FString(TEXT("オプション")));
+	TestEqual(TEXT("Same title widget returns to Japanese"), ExistingTitle->GetText().ToString(), FString(TEXT("設定")));
 	return true;
 }
 #endif

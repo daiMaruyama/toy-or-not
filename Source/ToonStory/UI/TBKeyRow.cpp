@@ -5,6 +5,7 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/SizeBox.h"
@@ -14,20 +15,19 @@
 #include "TBPaperStyle.h"
 #include "TBUIText.h"
 
-void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTexture2D* Paper)
+void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UFont* HeadingFont)
 {
 	MappingName = InMappingName;
 	auto* Size = WidgetTree->ConstructWidget<USizeBox>();
-	Size->SetWidthOverride(800);
-	Size->SetHeightOverride(50);
+	Size->SetHeightOverride(44);
 	WidgetTree->RootWidget = Size;
 	auto* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 	Size->SetContent(Canvas);
-	auto Place = [&](UWidget* Widget, float X, float Y, float W, float H)
+	auto Place = [&](UWidget* Widget, float X, float Y, float W, float H, FAnchors Anchors = FAnchors(0, 0))
 	{
 		auto* Slot = Canvas->AddChildToCanvas(Widget);
-		Slot->SetPosition(FVector2D(X, Y));
-		Slot->SetSize(FVector2D(W, H));
+		Slot->SetAnchors(Anchors);
+		Slot->SetOffsets(FMargin(X, Y, W, H));
 	};
 	auto Text = [&](const FText& String, int32 FontSize)
 	{
@@ -36,39 +36,46 @@ void UTBKeyRow::Build(const FText& Label, FName InMappingName, UFont* Font, UTex
 		Block->SetFont(FSlateFontInfo(Font, FontSize));
 		Block->SetColorAndOpacity(TBPaper::Ink);
 		Block->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-		Block->SetToolTipText(String);
 		return Block;
 	};
 	auto* Divider = WidgetTree->ConstructWidget<UBorder>();
-	Divider->SetBrushColor(TBPaper::Outline.CopyWithNewOpacity(.28f));
+	Divider->SetBrush(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(209, 179, 139)), 0.f));
 	Divider->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Divider, 8, 49, 784, 1);
-	auto* KeyPlate = WidgetTree->ConstructWidget<UBorder>();
-	KeyPlate->SetBrush(FSlateRoundedBoxBrush(TBPaper::Paper, 8.f, TBPaper::Outline, 2.5f));
-	KeyPlate->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(KeyPlate, 240, 4, 360, 42);
-	Place(Text(Label, 19), 8, 10, 224, 36);
-	KeyText = Text(FText::GetEmpty(), 19);
-	KeyText->SetJustification(ETextJustify::Center);
-	Place(KeyText, 240, 10, 360, 36);
-	auto* ResetButton = WidgetTree->ConstructWidget<UButton>();
-	ResetButton->SetStyle(TBPaper::CompactButtonStyle(true));
-	ResetButton->SetContent(Text(TBText::Get(TEXT("Keys.Reset")), 16));
-	ResetButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Keys.ResetTooltip")), Label));
-	Place(ResetButton, 612, 3, 84, 44);
-	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetClicked);
+	const FAnchors Stretch(0, 0, 1, 0);
+	Place(Divider, 0, 43, 6, 1, Stretch);
+	Place(Text(Label, 12), 6, 10, 344, 29);
+
 	ChangeButton = WidgetTree->ConstructWidget<UButton>();
-	ChangeButton->SetStyle(TBPaper::CompactButtonStyle());
-	ChangeButton->SetContent(Text(TBText::Get(TEXT("Keys.Change")), 16));
-	ChangeButton->SetToolTipText(FText::Format(TBText::Get(TEXT("Keys.ChangeTooltip")), Label));
-	Place(ChangeButton, 716, 3, 84, 44);
+	auto KeyStyle = TBPaper::CompactButtonStyle();
+	KeyStyle.SetNormal(FSlateRoundedBoxBrush(FLinearColor::FromSRGBColor(FColor(255, 250, 240)), 5.f,
+	    FLinearColor::FromSRGBColor(FColor(133, 100, 68)), 1.5f));
+	ChangeButton->SetStyle(KeyStyle);
+	KeyText = Text(FText::GetEmpty(), 11);
+	KeyText->SetFont(FSlateFontInfo(HeadingFont, 11));
+	KeyText->SetJustification(ETextJustify::Center);
+	auto* KeySlot = CastChecked<UButtonSlot>(ChangeButton->SetContent(KeyText));
+	KeySlot->SetPadding(FMargin(4, 0));
+	Place(ChangeButton, 366, 5, 94, 33, Stretch);
 	ChangeButton->OnClicked.AddDynamic(this, &ThisClass::Clicked);
+
+	ResetButton = WidgetTree->ConstructWidget<UButton>();
+	auto ResetStyle = KeyStyle;
+	ResetStyle.SetNormal(FSlateNoResource()).SetDisabled(FSlateNoResource());
+	ResetButton->SetStyle(ResetStyle);
+	auto* ResetText = Text(TBText::Get(TEXT("Keys.Reset")), 11);
+	ResetText->SetJustification(ETextJustify::Center);
+	auto* ResetSlot = CastChecked<UButtonSlot>(ResetButton->SetContent(ResetText));
+	ResetSlot->SetPadding(FMargin(3, 0));
+	Place(ResetButton, -88, 5, 82, 33, FAnchors(1, 0));
+	ResetButton->OnClicked.AddDynamic(this, &ThisClass::ResetClicked);
 }
 
 void UTBKeyRow::Refresh()
 {
-	KeyText->SetText(FText::FromString(TB::KeyLabel(GetOwningPlayer(), MappingName)));
-	KeyText->SetToolTipText(KeyText->GetText());
+	TB::FKeyboardKey Binding;
+	const bool bMapped = TB::FindKeyboardKey(GetOwningPlayer(), MappingName, Binding);
+	KeyText->SetText(FText::FromString(bMapped ? TB::FormatKey(Binding.Key) : TB::KeyLabel(GetOwningPlayer(), MappingName)));
+	ResetButton->SetIsEnabled(bMapped && Binding.Key != Binding.DefaultKey);
 }
 
 void UTBKeyRow::FocusButton()
