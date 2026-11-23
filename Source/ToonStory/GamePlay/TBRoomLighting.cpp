@@ -4,6 +4,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/LightComponent.h"
 #include "Components/LocalLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Engine/Light.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
@@ -16,12 +17,14 @@ void ATBRoomLighting::ApplyStageLightRanges(ULevel& Level)
 	{
 		FName ActorName;
 		float MaxRadiusCm;
+		float MaxOuterConeDegrees = 0.f;
 	};
 	// Scope to placed fixtures. Box-room lighting, character lights and newly authored lights keep their own ranges.
 	static const FFixtureRange HouseLights[] = {
 		{TEXT("PointLight2"), 2000.f}, {TEXT("PointLight3"), 2000.f}, {TEXT("PointLight4"), 2000.f},
 		{TEXT("RectLight5"), 900.f}, {TEXT("RectLight_1"), 900.f},
-		{TEXT("SpotLight5"), 900.f}, {TEXT("SpotLight6"), 900.f}, {TEXT("SpotLight7"), 900.f},
+		{TEXT("SpotLight5"), 900.f, 80.f}, {TEXT("SpotLight6"), 900.f, 80.f}, {TEXT("SpotLight7"), 900.f, 80.f},
+		{TEXT("SpotLight_0"), 0.f, 80.f},
 		{TEXT("SpotLight2_4"), 900.f}, {TEXT("SpotLight3"), 900.f}
 	};
 	static const FFixtureRange DemoLights[] = {
@@ -38,11 +41,20 @@ void ATBRoomLighting::ApplyStageLightRanges(ULevel& Level)
 	{
 		const ALight* Light = FindObjectFast<ALight>(&Level, Fixture.ActorName);
 		auto* LocalLight = Light ? Cast<ULocalLightComponent>(Light->GetLightComponent()) : nullptr;
-		if (!LocalLight || LocalLight->AttenuationRadius <= Fixture.MaxRadiusCm) continue;
-		// SetAttenuationRadius skips registered static fixtures. These stages use dynamic lighting only.
-		// Recreate the proxy once so shadow interactions and GPU Scene both receive the same bounds.
-		LocalLight->AttenuationRadius = Fixture.MaxRadiusCm;
-		LocalLight->MarkRenderStateDirty();
+		if (!LocalLight) continue;
+		if (Fixture.MaxRadiusCm > 0.f && LocalLight->AttenuationRadius > Fixture.MaxRadiusCm)
+		{
+			// SetAttenuationRadius skips registered static fixtures. These stages use dynamic lighting only.
+			LocalLight->AttenuationRadius = Fixture.MaxRadiusCm;
+			LocalLight->MarkRenderStateDirty();
+		}
+		// Near-hemispherical spot projections stretch shadow texels across the floor.
+		if (Fixture.MaxOuterConeDegrees > 0.f)
+		{
+			auto* Spot = Cast<USpotLightComponent>(LocalLight);
+			if (Spot && Spot->OuterConeAngle > Fixture.MaxOuterConeDegrees && Spot->InnerConeAngle < Fixture.MaxOuterConeDegrees)
+				Spot->SetOuterConeAngle(Fixture.MaxOuterConeDegrees);
+		}
 	}
 }
 

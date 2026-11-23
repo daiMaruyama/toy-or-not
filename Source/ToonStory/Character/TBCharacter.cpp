@@ -629,6 +629,10 @@ void ATBCharacter::ApplyState()
 					Part->UpdateBounds();
 				}
 				auto* Skinned = Cast<USkeletalMeshComponent>(Part);
+				// The player's camera hides their outfit with OwnerNoSee. Its visible meshes
+				// still cast the walking silhouette on the floor in first person.
+				if (Skinned && Skinned->CastShadow && Skinned->IsVisible() && !Skinned->bHiddenInGame)
+					Skinned->SetCastHiddenShadow(true);
 				if (Skinned && Skinned->GetFName() == TEXT("Face"))
 				{
 					// The entrance camera sees the back of the head. Groom bindings still
@@ -666,7 +670,9 @@ void ATBCharacter::ApplyState()
 	if (auto* Assembly = HumanVisual->GetChildActor())
 		for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Assembly))
 			Part->SetOwnerNoSee(IsHuman() && !IsCelebrating());
-	if (!Toy && LoadedChildMesh) GetMesh()->SetVisibility(!HumanVisual->GetChildActor());
+	const bool bUseFallbackHumanMesh = !Toy && LoadedChildMesh && !HumanVisual->GetChildActor();
+	if (!Toy && LoadedChildMesh) GetMesh()->SetVisibility(bUseFallbackHumanMesh);
+	GetMesh()->SetCastHiddenShadow(bUseFallbackHumanMesh);
 	UpdateHairEmote();
 	const bool Held = EscapeVehicle || ToyPlayerInfo->ToyState == ETBToyState::Grabbed ||
 	                  ToyPlayerInfo->ToyState == ETBToyState::Carried ||

@@ -80,6 +80,7 @@ bool FTBHumanAppearanceGCTest::RunTest(const FString&)
 	Character->ApplyState();
 	TestTrue(TEXT("Returning to human restores the same mesh"), Character->GetMesh()->GetSkeletalMeshAsset() == WeakMesh.Get());
 	TestTrue(TEXT("Returning human mesh is visible"), Character->GetMesh()->IsVisible());
+	TestTrue(TEXT("Fallback human casts its first-person shadow"), Character->GetMesh()->bCastHiddenShadow);
 	TestFalse(TEXT("Returning human does not use the fallback cube"), Character->Body->IsVisible());
 	for (const auto& Look : GetDefault<UTBDataSettings>()->HumanAppearances)
 	{
@@ -93,6 +94,9 @@ bool FTBHumanAppearanceGCTest::RunTest(const FString&)
 		{
 			if (Cast<UTBHumanBodyPose>(Part->GetAnimInstance())) BodyMesh = Part;
 			if (Part->GetName() == TEXT("Face")) FaceMesh = Part;
+			if (Part->GetSkeletalMeshAsset() && Part->IsVisible() && !Part->bHiddenInGame && Part->CastShadow)
+				TestTrue(*FString::Printf(TEXT("%s casts its first-person shadow"), *Part->GetPathName()),
+				    Part->bOwnerNoSee && Part->bCastHiddenShadow);
 		}
 		if (!TestNotNull(TEXT("Retargeted body"), BodyMesh) || !TestNotNull(TEXT("Face"), FaceMesh)) return false;
 		// A rear-facing entrance shot can occlude the face while its bound groom
@@ -109,6 +113,7 @@ bool FTBHumanAppearanceGCTest::RunTest(const FString&)
 		    FaceMesh->DoesSocketExist(TEXT("head")) && BodyMesh->DoesSocketExist(TEXT("head")) &&
 		    FaceMesh->GetSocketLocation(TEXT("head")).Equals(BodyMesh->GetSocketLocation(TEXT("head")), 1.0));
 		TestFalse(TEXT("Original child is hidden under the selected assembly"), Character->GetMesh()->IsVisible());
+		TestFalse(TEXT("Original child adds no second shadow"), Character->GetMesh()->bCastHiddenShadow);
 	}
 	return true;
 }
