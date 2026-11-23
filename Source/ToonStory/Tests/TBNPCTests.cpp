@@ -22,10 +22,18 @@
 #include "NavigationPath.h"
 #include "NavigationData.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Tests/AutomationCommon.h"
 #include "UI/TBHUD.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SViewport.h"
+#include "ImageUtils.h"
+#include "Misc/App.h"
+#include "Misc/FileHelper.h"
 #include "UnrealClient.h"
 #include "Misc/Paths.h"
 #include "ProfilingDebugging/CsvProfiler.h"
@@ -651,13 +659,28 @@ bool FTBNPCSettingsUITest::RunTest(const FString& Parameters)
 	auto* PC = Cast<ATBController>(World->GetFirstPlayerController());
 	auto* HUD = PC ? Cast<ATBHUD>(PC->GetHUD()) : nullptr;
 	auto* State = World->GetGameState<ATBGameState>();
-	if (!HUD || !State) return false;
+	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
+	if (!HUD || !State || !Pending) return false;
 	const auto Original = State->Settings;
+	const int32 OriginalStage = State->SelectedStage, OriginalPendingStage = Pending->SelectedStage;
+	const FString OriginalStageName = State->StageName;
+	const bool bOriginalStageSelected = Pending->bStageSelected;
 	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
-	HUD->NotifyHitBoxClick(TEXT("MoreNPCHumans"));
-	HUD->NotifyHitBoxClick(TEXT("MoreNPCToys"));
-	TestEqual(TEXT("NPC human button reaches authority settings"), State->Settings.NPCHumans, Original.NPCHumans + 1);
-	TestEqual(TEXT("NPC toy button reaches authority settings"), State->Settings.NPCToys, Original.NPCToys + 1);
+	TestTrue(TEXT("NPC settings opens the integrated stage editor"), HUD->IsStagePickerOpen());
+	const bool bInitiallyOff = Original.NPCHumans + Original.NPCToys == 0;
+	if (bInitiallyOff) HUD->NotifyHitBoxClick(TEXT("ToggleDraftNPCs"));
+	HUD->NotifyHitBoxClick(TEXT("DraftMoreNPCHumans"));
+	HUD->NotifyHitBoxClick(TEXT("DraftMoreNPCToys"));
+	TestEqual(TEXT("NPC human draft does not change saved settings"), State->Settings.NPCHumans, Original.NPCHumans);
+	TestEqual(TEXT("NPC toy draft does not change saved settings"), State->Settings.NPCToys, Original.NPCToys);
+	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
+	TestEqual(TEXT("Save applies the NPC human count"), State->Settings.NPCHumans, Original.NPCHumans + 1);
+	TestEqual(TEXT("Save applies the NPC toy count including the first-enable default"),
+	    State->Settings.NPCToys, Original.NPCToys + 1 + (bInitiallyOff ? 1 : 0));
+	TestFalse(TEXT("Save closes game settings"), HUD->IsLobbySettingsOpen());
+	TestFalse(TEXT("Save closes the stage draft"), HUD->IsStagePickerOpen());
+	// Capture the saved values in the same integrated editor.
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
 	ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(1.f));
 	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([]()
 	{
@@ -665,10 +688,16 @@ bool FTBNPCSettingsUITest::RunTest(const FString& Parameters)
 		return true;
 	}));
 	ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(1.f));
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([HUD, State, Original]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([HUD, State, Pending, Original, OriginalStage,
+	    OriginalPendingStage, OriginalStageName, bOriginalStageSelected]()
 	{
 		HUD->NotifyHitBoxClick(TEXT("CloseSettings"));
 		State->Settings = Original;
+		State->SelectedStage = OriginalStage;
+		State->StageName = OriginalStageName;
+		Pending->SelectedStage = OriginalPendingStage;
+		Pending->bStageSelected = bOriginalStageSelected;
+		State->ForceNetUpdate();
 		return true;
 	}));
 	return true;
@@ -738,19 +767,60 @@ bool FTBNPCTravelTest::RunTest(const FString& Parameters)
 			}
 			TestEqual(TEXT("The host and five human NPCs start together"), Humans, 6);
 			TestEqual(TEXT("All available looks are used before repeating"), Assigned.Num(), FMath::Min(Humans, Roster.Num()));
-			auto* Host = Cast<ATBController>(Current->GetFirstPlayerController());
-			auto* GM = Current->GetAuthGameMode<ATBGameMode>();
-			GM->Finish(ETBWinner::Humans, TEXT("NPC travel test"));
-			GM->ReturnToLobby(Host);
 		}
 		return true;
 	}));
+	if (FParse::Param(FCommandLine::Get(), TEXT("UIReviewScreenshots")) && FApp::CanEverRender())
+	{
+		auto SettledAt = MakeShared<double>(0.);
+		ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Stage, Arrived, SettledAt]()
+		{
+			if (!*Arrived) return true;
+			auto* Current = CurrentWorld();
+			auto* Host = Current ? Cast<ATBController>(Current->GetFirstPlayerController()) : nullptr;
+			if (!TestNotNull(TEXT("Stage host remains available for the HUD capture"), Host)) return true;
+			const double Now = FPlatformTime::Seconds();
+			if (*SettledAt == 0.) *SettledAt = Now;
+			if (Now < *SettledAt + .4) return false;
+			if (Host->IsShowingEntranceApproach() || UTBLoadingScreenSubsystem::IsCovering(Current->GetGameInstance()))
+			{
+				if (Now < *SettledAt + 8.) return false;
+				AddError(TEXT("Stage HUD remained obscured after the round started"));
+				return true;
+			}
+			auto* Viewport = Current->GetGameViewport();
+			const auto Widget = Viewport ? Viewport->GetGameViewportWidget() : nullptr;
+			TArray<FColor> Pixels;
+			FIntVector Size(0);
+			if (!TestTrue(TEXT("Gameplay viewport renders the live HUD"), Widget.IsValid() &&
+			    FSlateApplication::Get().TakeScreenshot(Widget.ToSharedRef(), Pixels, Size) && !Pixels.IsEmpty())) return true;
+			FString Folder;
+			if (!FParse::Value(FCommandLine::Get(), TEXT("UIReviewOutput="), Folder))
+				Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/StageArrival");
+			IFileManager::Get().MakeDirectory(*Folder, true);
+			const FString Path = Folder / (Stage == TBLobbySettings::HouseStageId ? TEXT("House-HUD.png") : TEXT("Demo-HUD.png"));
+			TArray64<uint8> PNG;
+			FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
+			TestTrue(TEXT("Reached-stage HUD saved"), FFileHelper::SaveArrayToFile(PNG, *Path));
+			AddInfo(FString::Printf(TEXT("Actual gameplay HUD: %s"), *Path));
+			return true;
+		}));
+	}
 	auto ReturnDeadline = MakeShared<double>(0);
 	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, CurrentWorld, Arrived, ReturnDeadline]()
 	{
 		if (!*Arrived) return true;
-		if (*ReturnDeadline == 0) *ReturnDeadline = FPlatformTime::Seconds() + 60;
 		auto* Current = CurrentWorld();
+		if (*ReturnDeadline == 0)
+		{
+			*ReturnDeadline = FPlatformTime::Seconds() + 60;
+			auto* Host = Current ? Cast<ATBController>(Current->GetFirstPlayerController()) : nullptr;
+			auto* StageMode = Current ? Current->GetAuthGameMode<ATBGameMode>() : nullptr;
+			if (!TestTrue(TEXT("Stage remains available until return"), Host && StageMode)) return true;
+			StageMode->Finish(ETBWinner::Humans, TEXT("NPC travel test"));
+			StageMode->ReturnToLobby(Host);
+			return false;
+		}
 		if (!TBLobbySettings::IsLobby(Current) && FPlatformTime::Seconds() < *ReturnDeadline) return false;
 		if (TestTrue(TEXT("Returns to dedicated lobby"), TBLobbySettings::IsLobby(Current)))
 		{

@@ -22,6 +22,10 @@ public:
 	virtual void SetToDefaults() override;
 	// 画質の下限・描画解像度の上限・明るさ・モーションブラーも、ここで効かせる。起動時にもエンジンが呼ぶ。
 	virtual void ApplyNonResolutionSettings() override;
+	// 表示言語。未選択・不正な保存値は日本語。変更時だけ保存し、起動時は保存値を適用する。
+	FString GetLanguage() const;
+	void SetLanguage(const FString& Code);
+	void CommitLanguage();
 
 	// 音
 	float GetVolume(ETBVolume Kind) const;
@@ -77,6 +81,8 @@ public:
 	FVector2D GetLookScale() const;
 
 private:
+	UPROPERTY(Config)
+	FString Language;
 	float& Saved(ETBVolume Kind);
 	float Saved(ETBVolume Kind) const;
 	// 負の値は「まだ選んでいない」。そのあいだはデータの初期値を使うので、あとから初期値を変えても、

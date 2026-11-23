@@ -61,7 +61,7 @@ struct FTBResultFeel
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
 	          meta = (DisplayName = "決着を見せる時間", Units = "s", ClampMin = "0"))
 	float DecisiveSeconds = .8f;
-	/** 車・ふた・吹き出しで画面が覆われきる時刻。ここで配置とカメラを切り替える */
+	/** 車・ふたで画面が覆われきる時刻。ここで配置とカメラを切り替える */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
 	          meta = (DisplayName = "覆いきる時刻", Units = "s", ClampMin = "0.1"))
 	float CoverSeconds = 3.2f;
@@ -77,9 +77,8 @@ struct FTBResultFeel
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
 	          meta = (DisplayName = "ふたが閉まる時間", Units = "s", ClampMin = "0.05"))
 	float LidSlamSeconds = .35f;
-	/** 結果の画面で、ママの吹き出しを出しておく時間 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト",
-	          meta = (DisplayName = "ママの吹き出しの時間", Units = "s", ClampMin = "0"))
+	// Retain the former timing property for existing assets and Blueprint references.
+	UPROPERTY(BlueprintReadOnly, Category = "リザルト", meta = (DeprecatedProperty, DeprecationMessage = "Result speech bubbles have been retired."))
 	float MomLineSeconds = 2.5f;
 };
 

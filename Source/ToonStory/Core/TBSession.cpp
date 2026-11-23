@@ -22,6 +22,7 @@
 #include "TimerManager.h"
 #include "Misc/PackageName.h"
 #include "Misc/CoreDelegates.h"
+#include "UI/TBUIText.h"
 
 namespace
 {
@@ -302,13 +303,29 @@ void UTBSession::Found(bool bSucceeded)
 			continue;
 		}
 		Results.Add(SearchResult);
-		Rooms.Add(FString::Printf(TEXT("%s | open %d/%d | ping %d"), *SearchResult.Session.OwningUserName,
-		                          SearchResult.Session.NumOpenPublicConnections,
-		                          SearchResult.Session.SessionSettings.NumPublicConnections, SearchResult.PingInMs));
+		Rooms.Add(GetRoomLabel(Results.Num() - 1).ToString());
 	}
 	// 画面にそのまま出る文なので日本語にする。
 	Message(Results.IsEmpty() ? FString(TEXT("部屋が見つかりませんでした。"))
 	                          : FString::Printf(TEXT("部屋が%d個見つかりました。"), Results.Num()));
+}
+
+FText UTBSession::GetRoomLabel(int32 Index) const
+{
+	if (!Results.IsValidIndex(Index)) return TBText::Get(TEXT("Rooms.Unavailable"));
+	const auto& Result = Results[Index];
+	const FText Ping = Result.PingInMs >= 0 && Result.PingInMs < MAX_QUERY_PING
+	    ? FText::Format(TBText::Get(TEXT("Rooms.Ping")), Result.PingInMs)
+	    : TBText::Get(TEXT("Rooms.UnknownPing"));
+	// The host name is a literal argument; never parse or translate player-authored text.
+	return FText::Format(TBText::Get(TEXT("Rooms.Summary")), FText::FromString(Result.Session.OwningUserName),
+	    Result.Session.NumOpenPublicConnections, Result.Session.SessionSettings.NumPublicConnections, Ping);
+}
+
+FString UTBSession::GetCurrentRoomOwner() const
+{
+	const FNamedOnlineSession* Current = Sessions.IsValid() ? Sessions->GetNamedSession(NAME_GameSession) : nullptr;
+	return Current ? Current->OwningUserName : FString();
 }
 
 void UTBSession::Join(int32 Index)

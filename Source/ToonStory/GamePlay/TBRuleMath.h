@@ -5,6 +5,20 @@
 // UEに依存しないルール計算。ゲーム本体と単体テストで同じ式を使う。
 namespace TBRuleMath
 {
+	// Explicit choices win. Random players fill missing teams and approach the default ratio, including fixed NPCs.
+	inline int AutoHumanPlayers(int Players, int HumanChoices, int ToyChoices, int NPCHumans, int NPCToys,
+	                           int DefaultHumans, int DefaultToys)
+	{
+		if (Players <= 0) return 0;
+		auto Clamp = [](int Value, int Low, int High) { return Value < Low ? Low : Value > High ? High : Value; };
+		const int Weight = DefaultHumans + DefaultToys;
+		const double HumanShare = Weight > 0 ? double(DefaultHumans) / Weight : .5;
+		const int Target = int(std::round((double(Players) + NPCHumans + NPCToys) * HumanShare)) - NPCHumans;
+		const int Minimum = NPCHumans == 0 ? 1 : 0;
+		const int Maximum = NPCToys == 0 && (Players > 1 || NPCHumans > 0) ? Players - 1 : Players;
+		return Clamp(Clamp(Target, Minimum, Maximum), HumanChoices, Players - ToyChoices);
+	}
+
 	// UE distances are centimeters. At exactly N meters the toy is protected.
 	inline bool DarknessProtects(bool LightsOn, double DistanceSquaredCm, float DistanceMeters)
 	{
@@ -224,19 +238,6 @@ namespace TBRuleMath
 		if (Slam <= 0.f || Elapsed <= Cover - Slam) return 1.f;
 		const float T = float((Cover - Elapsed) / Slam);
 		return T * T;
-	}
-
-	// ママの吹き出しで覆うときの広がり具合（0〜1）。決着の後から広がり、覆いきる時刻で画面を埋め、抜けるまでに消える。
-	inline float ResultMomCover(float Elapsed, float Decisive, float Cover, float Reveal)
-	{
-		if (Elapsed < Decisive) return 0.f;
-		if (Elapsed < Cover)
-		{
-			const float T = Cover > Decisive ? float((Elapsed - Decisive) / (Cover - Decisive)) : 1.f;
-			return T * T * (3.f - 2.f * T);
-		}
-		if (Elapsed < Cover + Reveal) return Reveal > 0.f ? 1.f - float((Elapsed - Cover) / Reveal) : 0.f;
-		return 0.f;
 	}
 
 	// リザルトで映す勝者を選ぶ順。箱にしまわれた子は箱の中にいるので後に回す。次に自分、次に番号の小さい順。

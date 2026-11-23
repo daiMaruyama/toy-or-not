@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Mamodou. All Rights Reserved.
+#include "UI/TBUIText.h"
 #include "TBHUD.h"
 #include "TBPaperStyle.h"
 #include "Core/TBController.h"
@@ -87,58 +88,65 @@ void ATBHUD::DrawPlayers()
 	{
 		return;
 	}
-	const float S = FMath::Min(Canvas->ClipX / 1280.f, Canvas->ClipY / 800.f);
-	const float X = (Canvas->ClipX - 700 * S) * .5f, Y = (Canvas->ClipY - 600 * S) * .5f;
-	DrawRect(FLinearColor(0, 0, 0, .6f), 0, 0, Canvas->ClipX, Canvas->ClipY);
-	PaperPanel(TBPaper::Cream, X, Y, 700 * S, 600 * S);
-	auto Text = [&](const FString& Value, float PX, float PY, float Scale = 1.f)
-	{ DrawText(Value, TBPaper::Ink, X + PX * S, Y + PY * S, PaperFont, Scale * S); };
-	auto Button = [&](FName Id, const FString& Label, float PX, float PY, float W)
-	{
-		PaperPanel(FLinearColor::White, X + PX * S, Y + PY * S, W * S, 42 * S);
-		Text(Label, PX + 12, PY + 7, .9f);
-		AddHitBox(FVector2D(X + PX * S, Y + PY * S), FVector2D(W * S, 42 * S), Id, true);
-	};
-	Text(TEXT("参加者一覧"), 30, 24, 1.5f);
-	if (KickSelection.IsValid() && !State->PlayerArray.Contains(KickSelection.Get()))
-	{
-		KickSelection.Reset();
-	}
+	using namespace TBPaper;
+	const float S = FMath::Min(Canvas->ClipX / 1440.f, Canvas->ClipY / 810.f);
+	if (KickSelection.IsValid() && !State->PlayerArray.Contains(KickSelection.Get())) KickSelection.Reset();
 	if (KickSelection.IsValid())
 	{
-		Text(KickSelection->GetPlayerName().Left(28), 30, 130, 1.2f);
-		Text(TEXT("このプレイヤーを部屋から退出させますか？"), 30, 190);
-		Text(TEXT("これはキックです。再参加を禁止するものではありません。"), 30, 240, .8f);
-		Button(TEXT("ConfirmKick"), TEXT("退出させる"), 30, 330, 300);
-		Button(TEXT("CancelKick"), TEXT("キャンセル"), 360, 330, 300);
+		DrawConfirmation(FText::Format(TBText::Get(TEXT("Root.Players.ConfirmName")), FText::FromString(KickSelection->GetPlayerName())).ToString(),
+		    TBText::String(TEXT("Root.Players.Rejoin")), TEXT("CancelKick"), TEXT("ConfirmKick"), TBText::String(TEXT("Root.Players.Kick")));
+		return;
 	}
-	else
+	const float Width = 520, Height = 130 + 45 * FMath::Min(State->PlayerArray.Num(), 8);
+	const float X = (Canvas->ClipX - Width * S) * .5f, Y = (Canvas->ClipY - Height * S) * .5f;
+	DrawRect(PrintInk.CopyWithNewOpacity(.65f), 0, 0, Canvas->ClipX, Canvas->ClipY);
+	DrawRoomPanel(X, Y, Width * S, Height * S, S, PrintStock);
+	DrawRect(PrintSea, X + 26 * S, Y + 23 * S, 5 * S, 30 * S);
+	DrawFittedText(TBText::String(TEXT("Canvas.PausePlayers")), PrintInk, X + 39 * S, Y + 34 * S, 421 * S, 1.34f * S, true);
+	int32 Row = 0;
+	for (APlayerState* Player : State->PlayerArray)
 	{
-		Text(PC->HasAuthority() ? TEXT("キックできるのはホストだけです。") : TEXT("ホストが参加者を管理します。"), 30,
-		     70, .85f);
-		int32 Row = 0;
-		for (APlayerState* Player : State->PlayerArray)
+		if (!Player || Row >= 8) continue;
+		const float PY = 64 + Row++ * 45;
+		DrawRect(PrintQuiet.CopyWithNewOpacity(.35f), X + 25 * S, Y + PY * S, 470 * S, S);
+		DrawFittedText(Player->GetPlayerName(), PrintInk, X + 30 * S, Y + (PY + 20) * S, 338 * S, .96f * S, true);
+		if (Player == PC->PlayerState || Player->IsABot())
 		{
-			if (!Player || Row >= 8)
-			{
-				continue;
-			}
-			const float PY = 112 + Row++ * 48;
-			Text(Player->GetPlayerName().Left(28), 30, PY + 6, .95f);
-			if (Player == PC->PlayerState)
-			{
-				Text(TEXT("あなた"), 540, PY + 6, .85f);
-			}
-			else if (Player->IsABot())
-			{
-				Text(TEXT("NPC"), 540, PY + 6, .85f);
-			}
-			else if (PC->HasAuthority() && !State->bTravelPending)
-			{
-				Button(FName(*FString::Printf(TEXT("Kick_%d"), Player->GetPlayerId())), TEXT("キック"), 540, PY, 120);
-			}
+			DrawRect(PrintAqua, X + 413 * S, Y + (PY + 7) * S, 77 * S, 28 * S);
+			DrawFittedText(TBText::String(Player->IsABot() ? TEXT("Lobby.NPC") : TEXT("Root.Common.You")), PrintInk,
+			    X + 418 * S, Y + (PY + 19) * S, 67 * S, .77f * S, false, true);
 		}
-		Text(PC->Notice.Left(65), 30, 505, .75f);
-		Button(TEXT("ClosePlayers"), TEXT("もどる"), 450, 545, 210);
+		else if (PC->HasAuthority() && !State->bTravelPending)
+			DrawRoomButton(FName(*FString::Printf(TEXT("Kick_%d"), Player->GetPlayerId())), TBText::String(TEXT("Root.Players.Remove")),
+			    X + 409 * S, Y + (PY + 7) * S, 80 * S, 30 * S, S, PrintCream);
 	}
+	DrawRoomButton(TEXT("ClosePlayers"), TBText::String(TEXT("Root.Common.Back")), X + 372 * S,
+	    Y + (Height - 55) * S, 121 * S, 37 * S, S, PrintHoney);
+}
+
+void ATBHUD::DrawConfirmation(const FString& Question, const FString& Detail, FName Cancel, FName Confirm, const FString& Action)
+{
+	using namespace TBPaper;
+	const float S = FMath::Min(Canvas->ClipX / 1440.f, Canvas->ClipY / 810.f);
+	const float W = 494, H = Detail.IsEmpty() ? 170 : 202;
+	const float X = (Canvas->ClipX - W * S) * .5f, Y = (Canvas->ClipY - H * S) * .5f;
+	DrawRect(PrintInk.CopyWithNewOpacity(.65f), 0, 0, Canvas->ClipX, Canvas->ClipY);
+	DrawRoomPanel(X, Y, W * S, H * S, S, PrintStock);
+	// Two torn strips bridge the paper edge, like the approval mock.
+	if (const auto* Tape = ArtTextures.Find(TEXT("Tape_Cream")); Tape && *Tape)
+	{
+		for (const auto& Corner : {FVector2D(27, 8), FVector2D(W - 25, H - 8)})
+			DrawTexture(Tape->Get(), X + (Corner.X - 43) * S, Y + (Corner.Y - 43) * S,
+			    86 * S, 86 * S, 0, 0, 1, 1, FLinearColor::White, BLEND_Translucent, 1, false, 12.f, FVector2D(.5, .5));
+	}
+	float TW = 0, TH = 0;
+	GetTextSize(Question, TW, TH, HeadingFont, 1.48f);
+	const float LabelW = FMath::Min(W - 70, TW + 38);
+	DrawRoomPanel(X + 34 * S, Y + 30 * S, LabelW * S, 48 * S, S * .72f, PrintHoney);
+	DrawFittedText(Question, PrintInk, X + 44 * S, Y + 50 * S, (LabelW - 20) * S, 1.48f * S, true, true);
+	if (!Detail.IsEmpty())
+		DrawFittedText(Detail, PrintQuiet, X + 36 * S, Y + 109 * S, (W - 72) * S, .86f * S);
+	DrawRoomButton(Cancel, TBText::String(TEXT("Root.Common.Back")), X + 214 * S,
+	    Y + (H - 68) * S, 101 * S, 38 * S, S, PrintCream);
+	DrawRoomButton(Confirm, Action, X + 330 * S, Y + (H - 68) * S, 129 * S, 38 * S, S, PrintHoney);
 }

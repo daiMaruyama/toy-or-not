@@ -12,10 +12,13 @@
 #include "Core/TBController.h"
 #include "UI/TBTitleMenu.h"
 #include "UI/TBHUD.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
+#include "UI/Loading/TBLoadingScreenSettings.h"
+#include "Data/TBRuleData.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
-#include "Components/ComboBoxString.h"
+#include "Components/ScrollBox.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
@@ -65,6 +68,7 @@ namespace
 			auto* State = World->GetGameState<ATBGameState>();
 			auto* Host = Cast<ATBController>(World->GetFirstPlayerController());
 			auto* HUD = Host ? Cast<ATBHUD>(Host->GetHUD()) : nullptr;
+			const bool bCovered = UTBLoadingScreenSubsystem::IsCovering(GI.Get());
 
 			switch (Step)
 			{
@@ -86,19 +90,19 @@ namespace
 					}
 					{
 						auto* Menu = GetTitle();
-						auto* Rooms = Cast<UComboBoxString>(Menu->WidgetTree->FindWidget(TEXT("Rooms")));
+						auto* Rooms = Cast<UScrollBox>(Menu->WidgetTree->FindWidget(TEXT("Rooms")));
 						auto* Join = Cast<UButton>(Menu->WidgetTree->FindWidget(TEXT("Join")));
 						if (!Rooms || !Join)
 						{
 							Test->AddError(TEXT("Room selection UI missing"));
 							return true;
 						}
-						Test->TestEqual(TEXT("Room list reflects session results"), Rooms->GetOptionCount(),
+						Test->TestEqual(TEXT("Room list reflects session results"), Rooms->GetChildrenCount(),
 						                Session->Rooms.Num());
 						Test->TestEqual(TEXT("Join requires a selected result"), Join->GetIsEnabled(),
 						                !Session->Rooms.IsEmpty());
 					}
-					if (!ClickTitle(TEXT("HostButton")))
+					if (!ClickTitle(TEXT("BackFromFinder")) || !ClickTitle(TEXT("HostButton")))
 					{
 						return true;
 					}
@@ -117,6 +121,7 @@ namespace
 						Test->AddError(TEXT("Stage controller/HUD missing"));
 						return true;
 					}
+					if (!Host->CanUseLobbyShortcuts()) return false;
 					Test->TestNull(TEXT("Title UI removed on entering the stage"), GetTitle());
 					Test->TestTrue(TEXT("Hosted session survives Title -> stage"), HasSession(World));
 					Second = Cast<ATBController>(UGameplayStatics::CreatePlayer(World, -1, true));
@@ -128,17 +133,29 @@ namespace
 					Host->TBRules(1, 1, 10.f, 5);
 					HUD->NotifyHitBoxClick(TEXT("Ready"));
 					Second->TBReady();
+					Step = 23;
+					break;
+				case 23:
+					if (!Host || !HUD || !Host->CanUseLobbyShortcuts()) return false;
+					StageRequestedAt = FPlatformTime::Seconds();
 					HUD->NotifyHitBoxClick(TEXT("Start"));
 					Step = 20;
 					break;
 				case 20:
 					// Start in the lobby travels to the selected stage before starting the match.
-					if (World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
+					if (bCovered && TBLobbySettings::StageIndex(World) != INDEX_NONE && State && State->bTravelPending)
+						bSawFilmOnArrivingStage = true;
+					if (bCovered || World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
 						return false;
 					if (!Test->TestEqual(TEXT("Start action begins match"), State->Phase, ETBPhase::Playing))
 					{
 						return true;
 					}
+					Test->TestTrue(TEXT("The stage film remains over the loaded map while participants prepare"), bSawFilmOnArrivingStage);
+					Test->TestTrue(TEXT("Beginning play preserves the minimum stage film duration"),
+					    FPlatformTime::Seconds() - StageRequestedAt >= GetDefault<UTBLoadingScreenSettings>()->MinimumTravelSeconds);
+					Test->TestTrue(TEXT("The toys retain their hiding time when the stage curtain opens"),
+					    State->IsPreparing() && State->HideRemaining() >= TB::Rules().Match.HidePreparationSeconds - 1.);
 					// Seamless travel may replace controllers; retain the participant, not the old controller.
 					if (auto* Player = GI->GetLocalPlayerByIndex(1))
 						Second = Cast<ATBController>(Player->GetPlayerController(World));
@@ -187,6 +204,22 @@ namespace
 				case 21:
 					if (World->IsInSeamlessTravel() || !State || State->bTravelPending ||
 					    !TBLobbySettings::IsLobby(World) || !Host || !HUD) return false;
+					if (bCovered)
+					{
+						if (!bCheckedCoveredLobby && Host->GetPlayerState<ATBPlayerState>())
+						{
+							Host->TBReady();
+							Host->TBStart();
+							HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+							Host->ToggleLeaveMenu();
+							Test->TestFalse(TEXT("Covered lobby settings ignore mouse and menu shortcuts"), HUD->IsLobbySettingsOpen());
+							Test->TestFalse(TEXT("Ready shortcut stays inactive while loading covers the lobby"), Host->GetPlayerState<ATBPlayerState>()->bReady);
+							Test->TestFalse(TEXT("Start shortcut stays inactive while loading covers the lobby"), State->bTravelPending);
+							bCheckedCoveredLobby = true;
+						}
+						return false;
+					}
+					if (!Host->CanUseLobbyShortcuts()) return false;
 					if (auto* Player = GI->GetLocalPlayerByIndex(1))
 						Second = Cast<ATBController>(Player->GetPlayerController(World));
 					if (!Test->TestTrue(TEXT("Second participant returns to the lobby"), Second.IsValid())) return true;
@@ -197,11 +230,15 @@ namespace
 					Test->TestFalse(TEXT("Second ready reset"), Second->GetPlayerState<ATBPlayerState>()->bReady);
 					HUD->NotifyHitBoxClick(TEXT("Ready"));
 					Second->TBReady();
+					Step = 24;
+					break;
+				case 24:
+					if (!Host || !HUD || !Host->CanUseLobbyShortcuts()) return false;
 					HUD->NotifyHitBoxClick(TEXT("Start"));
 					Step = 22;
 					break;
 				case 22:
-					if (World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
+					if (bCovered || World->IsInSeamlessTravel() || !State || State->bTravelPending || !Host || !HUD)
 						return false;
 					if (!Test->TestEqual(TEXT("Can start the rematch"), State->Phase, ETBPhase::Playing))
 					{
@@ -218,10 +255,15 @@ namespace
 					}
 					Test->TestTrue(TEXT("In-match leave menu open"), Host->IsLeaveMenuOpen());
 					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					Test->TestTrue(TEXT("Leave confirmation blocks underlying controls"), HUD->IsChatBlocked());
+					HUD->NotifyHitBoxClick(TEXT("CancelLeave"));
+					Test->TestTrue(TEXT("Cancel keeps the session"), HasSession(World));
+					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					HUD->NotifyHitBoxClick(TEXT("ConfirmLeave"));
 					++Step;
 					break;
 				case 7:
-					if (!World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
+					if (bCovered || !World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
 					{
 						return false;
 					}
@@ -243,7 +285,7 @@ namespace
 					++Step;
 					break;
 				case 8:
-					if (!World->GetAuthGameMode<ATBGameMode>() || Session->IsBusy())
+					if (bCovered || !World->GetAuthGameMode<ATBGameMode>() || Session->IsBusy())
 					{
 						return false;
 					}
@@ -255,10 +297,15 @@ namespace
 					Test->TestTrue(TEXT("Can host again"), HasSession(World));
 					Test->TestEqual(TEXT("Rehost begins in lobby"), State->Phase, ETBPhase::Lobby);
 					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					Test->TestTrue(TEXT("Leave confirmation blocks underlying controls"), HUD->IsChatBlocked());
+					HUD->NotifyHitBoxClick(TEXT("CancelLeave"));
+					Test->TestTrue(TEXT("Cancel keeps the session"), HasSession(World));
+					HUD->NotifyHitBoxClick(TEXT("Leave"));
+					HUD->NotifyHitBoxClick(TEXT("ConfirmLeave"));
 					++Step;
 					break;
 				case 9:
-					if (!World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
+					if (bCovered || !World->GetAuthGameMode<ATBTitleGameMode>() || Session->IsBusy())
 					{
 						return false;
 					}
@@ -310,7 +357,10 @@ namespace
 		TWeakObjectPtr<UGameInstance> GI;
 		TWeakObjectPtr<ATBController> Second;
 		double Deadline;
+		double StageRequestedAt = 0.;
+		bool bSawFilmOnArrivingStage = false;
 		int32 Step = 0;
+		bool bCheckedCoveredLobby = false;
 	};
 } // namespace
 

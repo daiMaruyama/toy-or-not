@@ -2,6 +2,7 @@
 
 #include "Input/TBKeyPrompt.h"
 #include "Input/TBKeyLabels.h"
+#include "UI/TBUIText.h"
 
 namespace
 {
@@ -22,7 +23,7 @@ FString TB::KeyRowName(FName Name)
 		{
 			if (Row.Name == Name)
 			{
-				return Section.Heading + TEXT("：") + Row.Label;
+				return FText::Format(TBText::Get(TEXT("Keys.RowName")), FText::FromString(Section.Heading), FText::FromString(Row.Label)).ToString();
 			}
 		}
 	}
@@ -31,7 +32,7 @@ FString TB::KeyRowName(FName Name)
 
 FString TB::WaitingText(FName Row)
 {
-	return FString::Printf(TEXT("「%s」にするキーを押してください　Escで取り消し"), *KeyRowName(Row));
+	return FText::Format(TBText::Get(TEXT("Keys.Waiting")), FText::FromString(KeyRowName(Row))).ToString();
 }
 
 TB::FKeyPrompt TB::PromptForRemap(const FRemapResult& Result, const FKey& Key)
@@ -41,24 +42,23 @@ TB::FKeyPrompt TB::PromptForRemap(const FRemapResult& Result, const FKey& Key)
 	case ERemapResult::OK:
 		return Make(EKeyPromptKind::Done);
 	case ERemapResult::Unusable:
-		return Make(EKeyPromptKind::Retry, TEXT("そのキーは使えません。ほかのキーを押してください"));
+		return Make(EKeyPromptKind::Retry, TBText::String(TEXT("Keys.UnusableRetry")));
 	case ERemapResult::Conflict:
 		if (Result.Conflicting.Num() == 1)
 		{
-			return Make(EKeyPromptKind::AskSwap, FString::Printf(TEXT("「%s」は「%s」が使っています。入れ替えますか？"),
-			                                                     *FormatKey(Key), *KeyRowName(Result.Conflicting[0])));
+			return Make(EKeyPromptKind::AskSwap, FText::Format(TBText::Get(TEXT("Keys.Conflict")), FText::FromString(FormatKey(Key)), FText::FromString(KeyRowName(Result.Conflicting[0]))).ToString());
 		}
 		{
 			// 重なっている相手を並べる。
 			FString Names;
 			for (const FName& Other : Result.Conflicting)
 			{
-				Names += FString::Printf(TEXT("「%s」"), *KeyRowName(Other));
+				Names += FText::Format(TBText::Get(TEXT("Keys.QuotedAction")), FText::FromString(KeyRowName(Other))).ToString();
 			}
-			return Make(EKeyPromptKind::Notice, TEXT("複数の操作と重なるので使えません\n") + Names);
+			return Make(EKeyPromptKind::Notice, TBText::String(TEXT("Keys.MultipleConflicts")) + Names);
 		}
 	default:
-		return Make(EKeyPromptKind::Notice, TEXT("変更できませんでした"));
+		return Make(EKeyPromptKind::Notice, TBText::String(TEXT("Keys.ChangeFailed")));
 	}
 }
 
@@ -70,15 +70,14 @@ TB::FKeyPrompt TB::PromptForReset(const FRemapResult& Result, const FKey& Defaul
 	}
 	if (Result.Conflicting.Num() == 1)
 	{
-		return Make(EKeyPromptKind::AskSwap, FString::Printf(TEXT("「%s」は「%s」が使っています。入れ替えて戻しますか？"),
-		                                                     *FormatKey(DefaultKey), *KeyRowName(Result.Conflicting[0])));
+		return Make(EKeyPromptKind::AskSwap, FText::Format(TBText::Get(TEXT("Keys.ResetConflict")), FText::FromString(FormatKey(DefaultKey)), FText::FromString(KeyRowName(Result.Conflicting[0]))).ToString());
 	}
 	FString Names;
 	for (const FName& Other : Result.Conflicting)
 	{
-		Names += FString::Printf(TEXT("「%s」"), *KeyRowName(Other));
+		Names += FText::Format(TBText::Get(TEXT("Keys.QuotedAction")), FText::FromString(KeyRowName(Other))).ToString();
 	}
-	return Make(EKeyPromptKind::Notice, TEXT("複数の操作と重なるので戻せません\n") + Names);
+	return Make(EKeyPromptKind::Notice, TBText::String(TEXT("Keys.ResetMultipleConflicts")) + Names);
 }
 
 TB::FKeyPrompt TB::PromptForSwap(const FRemapResult& Result)
@@ -90,10 +89,10 @@ TB::FKeyPrompt TB::PromptForSwap(const FRemapResult& Result)
 	case ERemapResult::NoPartner:
 		return Make(EKeyPromptKind::Redo);
 	case ERemapResult::Conflict:
-		return Make(EKeyPromptKind::Notice, TEXT("入れ替えると別の操作と重なるので、入れ替えできませんでした"));
+		return Make(EKeyPromptKind::Notice, TBText::String(TEXT("Keys.SwapConflict")));
 	case ERemapResult::Unusable:
-		return Make(EKeyPromptKind::Notice, TEXT("そのキーは使えません"));
+		return Make(EKeyPromptKind::Notice, TBText::String(TEXT("Keys.Unusable")));
 	default:
-		return Make(EKeyPromptKind::Notice, TEXT("変更できませんでした"));
+		return Make(EKeyPromptKind::Notice, TBText::String(TEXT("Keys.ChangeFailed")));
 	}
 }

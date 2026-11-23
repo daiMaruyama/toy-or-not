@@ -12,24 +12,13 @@ void TBOptionsPages::BuildAudio(UTBOptionsMenu& Menu, UTBGameUserSettings& Setti
 {
 	auto* S = &Settings;
 	auto* M = &Menu;
-	const TCHAR* VolumeNames[] = {TEXT("全体"), TEXT("BGM"), TEXT("効果音"), TEXT("ボイスチャット")};
+	const TCHAR* VolumeNames[] = {TEXT("Options.MasterVolume"), TEXT("Options.MusicVolume"), TEXT("Options.EffectsVolume"), TEXT("Options.VoiceVolume")};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(VolumeNames); ++Index)
 	{
 		const auto Kind = ETBVolume(Index);
-		auto* Row = Menu.AddRow(TBOptionsPage::Audio, VolumeNames[Index], true);
-		Row->Step = [M, S, Kind](int32 Steps)
-		{
-			S->StepVolume(Kind, Steps);
-			S->CommitVolumes(M->GetOwningPlayer() ? M->GetOwningPlayer()->GetGameInstance() : nullptr);
-		};
+		auto* Row = Menu.AddRow(TBOptionsPage::Audio, TBText::Get(VolumeNames[Index]), true);
 		Row->Value = [S, Kind] { return FString::Printf(TEXT("%d%%"), FMath::RoundToInt(S->GetVolume(Kind) * 100)); };
 		Row->Fill = [S, Kind] { return S->GetVolume(Kind); };
-		Row->CanStep = [S, Kind](int32 Steps)
-		{
-			const auto& Range = TB::ConfigData().Audio.Get(Kind);
-			const float Volume = S->GetVolume(Kind);
-			return Steps < 0 ? Volume > Range.Clamp(0.f) + KINDA_SMALL_NUMBER : Volume < Range.Clamp(1.f) - KINDA_SMALL_NUMBER;
-		};
 		// 動かしている途中も音量を変えて聞かせる。保存は手を離したときだけ。
 		const float VolumeStep = TB::ConfigData().Audio.Step;
 		BindSlider(*Row, 0.f, 1.f, VolumeStep,

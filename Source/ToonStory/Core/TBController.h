@@ -55,6 +55,7 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientPreparationTravelCancelled();
 	void ToggleLeaveMenu();
+	bool CanUseLobbyShortcuts() const;
 	/** リザルトで自分が勝っておらず、勝った人を観戦している */
 	bool IsSpectatingResults() const;
 	/** 観戦で切り替えられる勝者。NPCを除き、箱の外 → 番号の小さい順 */
@@ -183,11 +184,10 @@ private:
 	ETBPhase LastPhase = ETBPhase::Lobby;
 	ETBToyState LastToyState = ETBToyState::Free;
 	void UpdateLobbyCamera(bool InLobby);
-	void UpdateMenuInput(bool ShowMenu);
+	void UpdateMenuInput(bool ShowMenu, bool LobbyPointer = false);
 	// メニューとロビーのカーソル状態に合わせた入力モードを入れる。
 	void ApplyMenuInputMode();
 	bool bLobbyInput = false;
-	bool bLobbyCursor = false;
 	bool bInputModeInitialized = false;
 	double NoticeExpires = 0;
 	bool bLeaveMenuOpen = false;

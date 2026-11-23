@@ -5,6 +5,7 @@
 #include "TBGameState.h"
 #include "TBPlayerState.h"
 #include "Data/TBRuleData.h"
+#include "UI/Loading/TBLoadingScreenSettings.h"
 #include "GamePlay/TBPickup.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -48,6 +49,7 @@ void UTBLobbySettings::Initialize(FSubsystemCollectionBase& Collection)
 			    bArrivalCancelled = false;
 			    bStageSelected = false;
 			    ArrivalDeadline = 0;
+			    StageRevealAt = 0;
 			    bDedicatedLobby = false;
 			    SelectedStage = 1;
 		    }
@@ -74,6 +76,10 @@ int32 TBLobbySettings::StageIndex(const UWorld* World)
 		}
 	}
 	return INDEX_NONE;
+}
+int32 TBLobbySettings::StageItemCount(int32 Index)
+{
+	return FindStage(Index)->ItemCount;
 }
 int32 TBLobbySettings::AvailableItems(UWorld* World)
 {
@@ -147,6 +153,7 @@ void TBLobbySettings::CancelTravel(UWorld* World)
 	Pending->bStartOnArrival = false;
 	Pending->bArrivalCancelled = false;
 	Pending->ArrivalDeadline = 0;
+	Pending->StageRevealAt = 0;
 	if (auto* State = World->GetGameState<ATBGameState>())
 	{
 		State->bTravelPending = false;
@@ -187,6 +194,7 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	Pending->PendingMap = Path;
 	Pending->bStartOnArrival = StartMatch;
 	Pending->ArrivalDeadline = 0;
+	Pending->StageRevealAt = 0;
 	Pending->bArrivalCancelled = false;
 	State->bTravelPending = true;
 	Mode->bUseSeamlessTravel = true;
@@ -231,6 +239,20 @@ void TBLobbySettings::TickArrival(ATBGameMode* Mode)
 		Pending->ArrivalDeadline = FPlatformTime::Seconds() + 60;
 	}
 	Ready &= !Pending->bArrivalCancelled;
+	if (Ready)
+	{
+		// Start the presentation clock only after the last client has loaded. Even a stalled
+		// editor or a slow disk gets a few real seconds of film before the round timer starts.
+		const double Now = FPlatformTime::Seconds();
+		const auto* Loading = GetDefault<UTBLoadingScreenSettings>();
+		if (Pending->StageRevealAt == 0.)
+			Pending->StageRevealAt = Now + (Loading->bEnabled ? Loading->MinimumTravelSeconds : 0.f);
+		if (Now < Pending->StageRevealAt) return;
+	}
+	else
+	{
+		Pending->StageRevealAt = 0;
+	}
 	if (!Ready && !Pending->bArrivalCancelled && FPlatformTime::Seconds() < Pending->ArrivalDeadline)
 	{
 		return;
@@ -251,7 +273,8 @@ void TBLobbySettings::TickArrival(ATBGameMode* Mode)
 			{
 				UE_LOG(LogTemp, Display, TEXT("[ToyBoxArrival] Before Start map=%s phase=%d players=%d reason=%s"),
 				    *World->GetMapName(), int32(State->Phase), State->PlayerArray.Num(), *State->Reason);
-				Mode->StartRound(It->Get());
+				const auto* Loading = GetDefault<UTBLoadingScreenSettings>();
+				Mode->StartRound(It->Get(), Loading->bEnabled ? Loading->FadeOutSeconds : 0.f);
 				const auto* PC = Cast<ATBController>(It->Get());
 				UE_LOG(LogTemp, Display, TEXT("[ToyBoxArrival] After Start map=%s phase=%d players=%d round=%u preparing=%d reason=%s notice=%s"),
 				    *World->GetMapName(), int32(State->Phase), State->PlayerArray.Num(), State->HidePreparation.Round,

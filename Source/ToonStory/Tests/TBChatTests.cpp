@@ -1,20 +1,29 @@
 #include "Misc/AutomationTest.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Character/TBNPCController.h"
+#include "Components/Button.h"
 #include "Components/HorizontalBox.h"
+#include "Components/PanelWidget.h"
 #include "Components/ScrollBox.h"
+#include "Components/TextBlock.h"
 #include "UI/TBChatBox.h"
+#include "UI/TBHUD.h"
+#include "UI/TBUIText.h"
 #include "Core/TBChat.h"
 #include "Core/TBController.h"
 #include "Core/TBGameMode.h"
+#include "Core/TBGameState.h"
+#include "Core/TBLobbySettings.h"
 #include "Core/TBPlayerState.h"
 #include "Data/TBRuleData.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerState.h"
+#include "Misc/ScopeExit.h"
 
 // 改行と制御文字は空白に、前後は詰める。1回の文字数で切り、絵文字の途中では切らない。
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBChatCleanTest, "ToonStory.Chat.Clean",
@@ -166,6 +175,115 @@ bool FTBChatFadeLayoutTest::RunTest(const FString& Parameters)
 	});
 	TestTrue(TEXT("Scroll box exists"), bFoundScroll);
 	Log->Clear();
+	return true;
+}
+
+// 履歴が空でも期限切れでも、閉じたチャットを再び開ける入口を残す。
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBChatClosedEntryTest, "ToonStory.Chat.ClosedEntry",
+                                 EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBChatClosedEntryTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	for (const auto& Context : GEngine->GetWorldContexts())
+		if (Context.WorldType == EWorldType::Game) World = Context.World();
+	if (!World || !World->GetGameInstance()) return false;
+	auto* Box = CreateWidget<UTBChatBox>(World->GetGameInstance());
+	if (!TestNotNull(TEXT("Chat widget"), Box)) return false;
+	auto* Entry = Cast<UButton>(Box->WidgetTree->FindWidget(TEXT("OpenChatButton")));
+	if (!TestNotNull(TEXT("Closed chat has an opener"), Entry)) return false;
+	TestFalse(TEXT("The empty chat starts closed"), Box->IsOpen());
+	TestEqual(TEXT("The empty chat opener is visible"), Entry->GetVisibility(), ESlateVisibility::Visible);
+	TestTrue(TEXT("The opener is enabled"), Entry->GetIsEnabled());
+	for (UWidget* Parent = Entry->GetParent(); Parent; Parent = Parent->GetParent())
+	{
+		TestTrue(TEXT("No ancestor hides or disables clicks on the opener"),
+			Parent->GetVisibility() == ESlateVisibility::Visible || Parent->GetVisibility() == ESlateVisibility::SelfHitTestInvisible);
+	}
+	const auto* Caption = Cast<UTextBlock>(Entry->GetContent());
+	if (TestNotNull(TEXT("Chat entry caption"), Caption))
+	{
+		TestEqual(TEXT("Lobby entry explains how to start typing"), Caption->GetText().ToString(), TBText::String(TEXT("Root.Chat.EnterPrompt")));
+		Box->SetResultsLayout(true);
+		TestEqual(TEXT("Collapsed results chat shows its shortcut"), Caption->GetText().ToString(), TBText::String(TEXT("Root.Chat.Open")));
+		Box->SetResultsLayout(false);
+	}
+	// 独立したログを使い、実際の部屋の履歴には触らない。
+	auto* Log = NewObject<UTBChatLog>(World->GetGameInstance());
+	Log->Add(TEXT("A"), TEXT("expired"), false);
+	Box->RefreshLines(*Log, Log->GetLines().Last().Time + TB::Rules().Chat.ShowSeconds + 5);
+	TestEqual(TEXT("The opener survives message fading"), Entry->GetVisibility(), ESlateVisibility::Visible);
+	return true;
+}
+
+// 設定を閉じた次のフレームには、再作成されたチャットをマウスでも開ける。
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBChatLobbyRecoveryTest, "ToonStory.Chat.LobbyEntryRecovery",
+                                 EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBChatLobbyRecoveryTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	for (const auto& Context : GEngine->GetWorldContexts())
+		if (Context.WorldType == EWorldType::Game && Context.World() && TBLobbySettings::IsLobby(Context.World())) World = Context.World();
+	if (!TestNotNull(TEXT("Standalone TB_Lobby world"), World)) return false;
+	if (!TestEqual(TEXT("Isolated local process"), World->GetNetMode(), NM_Standalone)) return false;
+	auto* PC = Cast<ATBController>(World->GetFirstPlayerController());
+	auto* HUD = PC ? Cast<ATBHUD>(PC->GetHUD()) : nullptr;
+	auto* State = World->GetGameState<ATBGameState>();
+	auto* Pending = World->GetGameInstance()->GetSubsystem<UTBLobbySettings>();
+	if (!TestNotNull(TEXT("Local controller"), PC) || !TestNotNull(TEXT("HUD"), HUD) ||
+		!TestNotNull(TEXT("Lobby state"), State) || !TestNotNull(TEXT("Lobby handoff"), Pending)) return false;
+	if (!TestEqual(TEXT("Lobby phase"), State->Phase, ETBPhase::Lobby) ||
+		!TestFalse(TEXT("No travel is pending"), State->bTravelPending) ||
+		!TestFalse(TEXT("No other panel is open"), HUD->IsChatBlocked())) return false;
+	const FTBSettings OriginalRules = State->Settings;
+	const int32 OriginalStage = State->SelectedStage, OriginalPendingStage = Pending->SelectedStage;
+	const FString OriginalName = State->StageName;
+	const bool bStageSelected = Pending->bStageSelected, bChatWasOpen = PC->IsChatOpen();
+	ON_SCOPE_EXIT
+	{
+		PC->CloseChat();
+		HUD->NotifyHitBoxClick(TEXT("CloseSettings"));
+		State->Settings = OriginalRules;
+		State->SelectedStage = OriginalStage;
+		State->StageName = OriginalName;
+		Pending->SelectedStage = OriginalPendingStage;
+		Pending->bStageSelected = bStageSelected;
+		State->ForceNetUpdate();
+		PC->PlayerTick(0.f);
+		if (bChatWasOpen) PC->OpenChat();
+	};
+	auto VisibleChat = [&]() -> UTBChatBox*
+	{
+		TArray<UUserWidget*> Widgets;
+		UWidgetBlueprintLibrary::GetAllWidgetsOfClass(World, Widgets, UTBChatBox::StaticClass(), true);
+		for (UUserWidget* Widget : Widgets)
+			if (Widget->GetOwningPlayer() == PC && Widget->IsInViewport()) return Cast<UTBChatBox>(Widget);
+		return nullptr;
+	};
+	PC->CloseChat();
+	for (const FName Exit : {FName(TEXT("CancelStage")), FName(TEXT("SaveStage")), FName(TEXT("Escape"))})
+	{
+		HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+		TestTrue(TEXT("Game settings opens the stage editor directly"), HUD->IsStagePickerOpen());
+		PC->PlayerTick(0.f);
+		TestFalse(TEXT("Settings blocks chat input"), PC->CanUseChat());
+		TestNull(TEXT("Settings removes the chat widget"), VisibleChat());
+		if (Exit == TEXT("Escape")) PC->ToggleLeaveMenu();
+		else HUD->NotifyHitBoxClick(Exit);
+		TestFalse(*FString::Printf(TEXT("%s returns to the lobby"), *Exit.ToString()), HUD->IsLobbySettingsOpen());
+		TestFalse(TEXT("Stage editor closes"), HUD->IsStagePickerOpen());
+		PC->PlayerTick(0.f);
+		TestTrue(TEXT("Lobby chat is available again"), PC->CanUseChat());
+		auto* Box = VisibleChat();
+		if (!TestNotNull(TEXT("Chat is recreated after closing settings"), Box)) return false;
+		auto* Entry = Cast<UButton>(Box->WidgetTree->FindWidget(TEXT("OpenChatButton")));
+		if (!TestNotNull(TEXT("Recreated chat has its entry button"), Entry)) return false;
+		TestEqual(TEXT("The entry button is visible"), Entry->GetVisibility(), ESlateVisibility::Visible);
+		Entry->OnClicked.Broadcast();
+		TestTrue(TEXT("Click opens the normal chat input"), PC->IsChatOpen());
+		TestEqual(TEXT("The opener hides while typing"), Entry->GetVisibility(), ESlateVisibility::Collapsed);
+		PC->CloseChat();
+		TestEqual(TEXT("Closing chat restores the opener"), Entry->GetVisibility(), ESlateVisibility::Visible);
+	}
 	return true;
 }
 

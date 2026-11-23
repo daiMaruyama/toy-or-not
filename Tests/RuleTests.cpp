@@ -5,6 +5,38 @@
 int main()
 {
 	using namespace TBRuleMath;
+	auto AutoHumans = [](int Players, int HumanChoices = 0, int ToyChoices = 0, int NPCHumans = 0, int NPCToys = 0)
+	{
+		return AutoHumanPlayers(Players, HumanChoices, ToyChoices, NPCHumans, NPCToys, 1, 4);
+	};
+	assert(AutoHumans(0) == 0);
+	assert(AutoHumans(1) == 1); // A solo lobby still cannot start without the opposite team.
+	for (int Players = 2; Players <= 7; ++Players) assert(AutoHumans(Players) == 1);
+	assert(AutoHumans(8) == 2); // Nearest whole-player split to the existing 1:4 default.
+	assert(AutoHumans(4, 4) == 4); // Never reverse an explicit choice to manufacture an opposing team.
+	assert(AutoHumans(4, 0, 4) == 0);
+	assert(AutoHumans(4, 3) == 3); // The one random player fills the missing toy side.
+	assert(AutoHumans(4, 0, 3) == 1);
+	assert(AutoHumans(8, 4, 3) == 4); // Preferences outrank the standard ratio.
+	assert(AutoHumans(1, 0, 0, 1, 0) == 0);
+	assert(AutoHumans(1, 0, 0, 0, 1) == 1);
+	assert(AutoHumans(1, 1, 0, 1, 0) == 1); // Fixed NPCs do not override an explicit player.
+	assert(AutoHumans(7, 0, 0, 1, 0) == 1);
+	assert(AutoHumans(6, 0, 0, 2, 0) == 0);
+	assert(AutoHumans(6, 0, 0, 0, 2) == 2);
+	for (int Players = 1; Players <= 8; ++Players)
+		for (int Humans = 0; Humans <= Players; ++Humans)
+			for (int Toys = 0; Toys <= Players - Humans; ++Toys)
+				for (int NPCHumans = 0; NPCHumans <= 8 - Players; ++NPCHumans)
+					for (int NPCToys = 0; NPCToys <= 8 - Players - NPCHumans; ++NPCToys)
+					{
+						const int Assigned = AutoHumans(Players, Humans, Toys, NPCHumans, NPCToys);
+						const int Random = Players - Humans - Toys;
+						assert(Assigned >= Humans && Players - Assigned >= Toys);
+						if (Players + NPCHumans + NPCToys >= 2 && Humans + NPCHumans + Random > 0 && Toys + NPCToys + Random > 0)
+							assert(Assigned + NPCHumans > 0 && Players - Assigned + NPCToys > 0);
+					}
+	std::cout << "PASS: preference-first automatic teams and fixed NPCs\n";
 	assert(!DarknessProtects(true, 1000000, 3));
 	assert(!DarknessProtects(false, 299.0 * 299.0, 3));
 	assert(DarknessProtects(false, 300.0 * 300.0, 3));
@@ -151,10 +183,6 @@ int main()
 	assert(ResultLidOpen(1.f, 3.2f, .4f) == 1);
 	assert(ResultLidOpen(3.0f, 3.2f, .4f) > 0 && ResultLidOpen(3.0f, 3.2f, .4f) < 1);
 	assert(ResultLidOpen(3.2f, 3.2f, .4f) == 0);
-	assert(ResultMomCover(.5f, .8f, 3.2f, .5f) == 0);
-	assert(Near(ResultMomCover(2.0f, .8f, 3.2f, .5f), .5f));
-	assert(ResultMomCover(3.2f, .8f, 3.2f, .5f) == 1);
-	assert(ResultMomCover(3.8f, .8f, 3.2f, .5f) == 0);
 	std::cout << "PASS: result presentation timing\n";
 	std::cout << "PASS: freeze, step camera, contact, rescue, timeout priority and boxing victory\n";
 	std::cout << "PASS: gaze cone, gaze state and gaze shade\n";

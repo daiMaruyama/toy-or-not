@@ -6,6 +6,7 @@
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
 #include "GameFramework/PlayerController.h"
 #include "Character/TBToyFacingPose.h"
 #include "Character/TBToyPresentation.h"
@@ -109,6 +110,19 @@ bool FTBTitleStoryTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("No sequence goes straight to the menu"), Menu->GetState() == UTBTitleMenu::EState::Menu);
 	TestTrue(TEXT("The story counts as shown"), Memory->bShown);
 	TestFalse(TEXT("The room cards are hidden"), Menu->AreRoomCardsShown());
+	const FKeyEvent PadBack(EKeys::Gamepad_FaceButton_Right, FModifierKeysState(), 0, false, 0, 0);
+	const auto* Comic = Cast<UImage>(Menu->WidgetTree->FindWidget(TEXT("HelpComic")));
+	if (TestNotNull(TEXT("Help has a comic image"), Comic))
+	{
+		TestNull(TEXT("The closed guide does not load a page at startup"), Comic->GetBrush().GetResourceObject());
+		PressStoryButton(Menu, TEXT("HelpButton"));
+		TestNotNull(TEXT("Opening the guide supplies its first page"), Comic->GetBrush().GetResourceObject());
+		TestTrue(TEXT("Gamepad Back closes the guide"), Menu->SendKeyDownForTest(PadBack).IsEventHandled());
+		TestFalse(TEXT("Back returns control to the title"), Menu->SendKeyDownForTest(PadBack).IsEventHandled());
+	}
+	PressStoryButton(Menu, TEXT("QuitButton"));
+	TestTrue(TEXT("Gamepad Back cancels quitting"), Menu->SendKeyDownForTest(PadBack).IsEventHandled());
+	TestFalse(TEXT("Quit confirmation is now dismissed"), Menu->SendKeyDownForTest(PadBack).IsEventHandled());
 	Menu->EnterStory();
 	TestTrue(TEXT("Entering the story does nothing without a sequence"), Menu->GetState() == UTBTitleMenu::EState::Menu);
 	Menu->RemoveFromParent();
@@ -176,7 +190,7 @@ bool FTBTitleStoryTest::RunTest(const FString& Parameters)
 	Menu = Open();
 	TestTrue(TEXT("Coming back goes straight to the menu"), Menu->GetState() == UTBTitleMenu::EState::Menu);
 
-	// 部屋をさがすとカードが出る。探している間は、放っておいても寸劇で割り込まない。検索は終わるのを待たないので最後に。
+	// 検索中は寸劇で割り込まない。カードを閉じても続く検索が終わってから次のテストへ進む。
 	PressStoryButton(Menu, TEXT("FindButton"));
 	TestTrue(TEXT("Finding rooms shows the cards"), Menu->AreRoomCardsShown());
 	if (PC->GetGameInstance()->GetSubsystem<UTBSession>()->IsBusy())
@@ -184,7 +198,12 @@ bool FTBTitleStoryTest::RunTest(const FString& Parameters)
 		Menu->AdvanceIdleForTest(60.f);
 		TestTrue(TEXT("Searching holds off the story"), Menu->GetState() == UTBTitleMenu::EState::Menu);
 	}
+	TestTrue(TEXT("Gamepad Back closes the room finder"), Menu->SendKeyDownForTest(PadBack).IsEventHandled());
+	TestFalse(TEXT("The finder is dismissed"), Menu->AreRoomCardsShown());
 	Menu->RemoveFromParent();
+	const TWeakObjectPtr<UTBSession> Session = PC->GetGameInstance()->GetSubsystem<UTBSession>();
+	ADD_LATENT_AUTOMATION_COMMAND(FUntilCommand([Session]() { return !Session.IsValid() || !Session->IsBusy(); },
+	    [this]() { AddError(TEXT("The room search did not finish after closing the finder")); return true; }, 35.f));
 	return true;
 }
 

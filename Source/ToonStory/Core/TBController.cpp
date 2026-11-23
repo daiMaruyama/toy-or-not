@@ -21,6 +21,7 @@
 #include "Data/TBRuleData.h"
 #include "UI/TBChatBox.h"
 #include "UI/TBHUD.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/TBGameViewportClient.h"
 #include "HAL/PlatformTime.h"
 #include "InputKeyEventArgs.h"
@@ -73,17 +74,20 @@ namespace
 
 void ATBController::PreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bIsSeamlessTravel)
 {
+	Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
 	bPreparationTravelMask = true;
 	bPreparationTravelFailed = false;
-	bPreparationBlack = true;
 	NextEntranceFootstep = 0;
-	TBScreen::HoldBlack(this, true);
+	if (!UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld()))
+	{
+		bPreparationBlack = true;
+		TBScreen::HoldBlack(this, true);
+		SetViewTarget(this);
+	}
 	ReleaseVoicePlayback(GetWorld(), false, false);
-	SetViewTarget(this);
 	LobbyCamera.Reset();
 	bLobbyCameraSearched = false;
 	bLobbyCameraActive = false;
-	Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
 }
 
 void ATBController::ClientRoomClosed_Implementation()
@@ -106,9 +110,10 @@ void ATBController::PlayerTick(float DeltaTime)
 	const bool BlockingPanel = HUD && (HUD->IsChatBlocked() || HUD->IsStagePickerOpen());
 	const bool ShowMenu = State && (InLobby ? (BlockingPanel || IsChatOpen() || State->bTravelPending) :
 	    (State->Phase != ETBPhase::Playing && State->Phase != ETBPhase::Results) || IsChatOpen() || bLeaveMenuOpen || BlockingPanel);
-	UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
-	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()));
-	UpdateScreenTransition();
+	const bool bClosingCurtain = UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld());
+	if (!bClosingCurtain) UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
+	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()), InLobby);
+	if (!bClosingCurtain) UpdateScreenTransition();
 	UpdateResultView();
 	UpdateViewAspect();
 	SyncInputContexts();
@@ -492,18 +497,17 @@ void ATBController::UpdateLobbyCamera(bool InLobby)
 	}
 }
 
-void ATBController::UpdateMenuInput(bool ShowMenu)
+void ATBController::UpdateMenuInput(bool ShowMenu, bool LobbyPointer)
 {
-	const auto* State = TB::GS(GetWorld());
-	const bool ShowLobbyCursor = State && State->Phase == ETBPhase::Lobby;
-	if (!bInputModeInitialized || bLobbyInput != ShowMenu || bLobbyCursor != ShowLobbyCursor)
+	const bool ShowPointer = ShowMenu || LobbyPointer;
+	if (!bInputModeInitialized || bLobbyInput != ShowMenu || bShowMouseCursor != ShowPointer)
 	{
 		const bool WasMenuOpen = bLobbyInput;
 		bInputModeInitialized = true;
 		bLobbyInput = ShowMenu;
-		bLobbyCursor = ShowLobbyCursor;
-		bShowMouseCursor = ShowMenu || ShowLobbyCursor;
-		bEnableClickEvents = ShowMenu || ShowLobbyCursor;
+		// The lobby camera is fixed: its controls and the moving pawn can share input.
+		bShowMouseCursor = ShowPointer;
+		bEnableClickEvents = ShowPointer;
 		if (WasMenuOpen != ShowMenu)
 		{
 			SetIgnoreLookInput(ShowMenu);
@@ -515,7 +519,7 @@ void ATBController::UpdateMenuInput(bool ShowMenu)
 
 void ATBController::ApplyMenuInputMode()
 {
-	if (bLobbyInput || bLobbyCursor)
+	if (bShowMouseCursor)
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetHideCursorDuringCapture(false);
@@ -644,6 +648,8 @@ void ATBController::SetupInputComponent()
 
 void ATBController::ToggleLeaveMenu()
 {
+	if (UTBLoadingScreenSubsystem::IsCovering(GetGameInstance())) return;
+	if (auto* HUD = Cast<ATBHUD>(GetHUD()); HUD && HUD->DismissConfirmation()) return;
 	const auto* State = TB::GS(GetWorld());
 	if (State && State->Phase == ETBPhase::Lobby && !State->bTravelPending && !IsChatOpen())
 	{
@@ -695,9 +701,17 @@ void ATBController::TBQuit()
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
+bool ATBController::CanUseLobbyShortcuts() const
+{
+	const auto* State = TB::GS(GetWorld());
+	const auto* HUD = Cast<ATBHUD>(GetHUD());
+	return State && State->Phase == ETBPhase::Lobby && !State->bTravelPending &&
+	    !UTBLoadingScreenSubsystem::IsCovering(GetGameInstance()) && !(HUD && HUD->IsChatBlocked());
+}
+
 void ATBController::TBReady()
 {
-	ServerReady();
+	if (CanUseLobbyShortcuts()) ServerReady();
 }
 
 void ATBController::TBLobby()
@@ -715,7 +729,7 @@ void ATBController::ServerReturnToLobby_Implementation()
 
 void ATBController::TBStart()
 {
-	ServerStart();
+	if (CanUseLobbyShortcuts()) ServerStart();
 }
 
 void ATBController::TBRules(int32 HumanCount, int32 ToyCount, float Seconds, int32 Items)
@@ -787,7 +801,8 @@ void ATBController::ClientNotice_Implementation(const FString& Message, bool bEr
 bool ATBController::CanUseChat() const
 {
 	const auto* State = TB::GS(GetWorld());
-	if (!IsLocalController() || !State || !TB::Chat::IsAvailable(State->Phase) || ShouldHidePreparationView() || UTBGameViewportClient::IsUIHidden(GetWorld()))
+	if (!IsLocalController() || !State || !TB::Chat::IsAvailable(State->Phase) || ShouldHidePreparationView() ||
+	    UTBLoadingScreenSubsystem::IsCovering(GetGameInstance()) || UTBGameViewportClient::IsUIHidden(GetWorld()))
 	{
 		return false;
 	}
@@ -808,6 +823,12 @@ void ATBController::UpdateChat()
 		if (ChatBox)
 		{
 			CloseChat();
+			if (UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld()))
+			{
+				// Keep the old lobby composition behind the travelling fabric, with input closed.
+				ChatBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+				return;
+			}
 			ChatBox->RemoveFromParent();
 			ChatBox = nullptr;
 		}
@@ -823,6 +844,7 @@ void ATBController::UpdateChat()
 		// オプション画面（50）より奥。
 		ChatBox->AddToViewport(40);
 	}
+	ChatBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	ChatBox->SetResultsLayout(TB::GS(GetWorld())->Phase != ETBPhase::Lobby);
 }
 
@@ -839,7 +861,7 @@ bool ATBController::InputKey(const FInputKeyEventArgs& Params)
 
 void ATBController::OpenChat()
 {
-	if (ChatBox && !ChatBox->IsOpen())
+	if (ChatBox && !ChatBox->IsOpen() && CanUseChat())
 	{
 		UpdateMenuInput(true);
 		ChatBox->SetOpen(true);
