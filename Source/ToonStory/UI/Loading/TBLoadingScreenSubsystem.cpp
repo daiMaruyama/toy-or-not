@@ -24,6 +24,14 @@
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/SWeakWidget.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+bool UTBLoadingScreenSubsystem::IsViewportMoviePlayingForReview() const
+{
+	const auto* Player = Screen ? Screen->GetPlaybackForReview() : nullptr;
+	return Player && Player->IsPlaying();
+}
+#endif
+
 bool UTBLoadingScreenSubsystem::IsCovering(const UGameInstance* Instance)
 {
 	const auto* Loading = UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(Instance);
@@ -41,12 +49,26 @@ bool UTBLoadingScreenSubsystem::IsClosingOverDeparture(const UWorld* World)
 	return FPlatformTime::Seconds() - Loading->TravelShownAt < GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds * .5f;
 }
 
-bool UTBLoadingScreenSubsystem::DeferForCurtain(UWorld* World, const FString& URL, FSimpleDelegate Travel)
+void UTBLoadingScreenSubsystem::BeginReplicatedDeparture(UWorld* World)
+{
+	auto* Loading = World ? UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(World->GetGameInstance()) : nullptr;
+	if (!Loading || !World->GetGameViewport() || World->IsInSeamlessTravel() || !FApp::CanEverRender()) return;
+	// The engine's travel notification can arrive first. Keep its destination and curtain progress.
+	if (Loading->Overlay && Loading->TravelFromWorld.Get() == World && Loading->TravelShownAt > 0.) return;
+	Loading->NotePreClientTravel(FString(), TRAVEL_Absolute, true);
+	if (Loading->Screen)
+	{
+		Loading->Screen->Restart();
+		Loading->TravelShownAt = Loading->Screen->GetShownAt();
+	}
+}
+
+bool UTBLoadingScreenSubsystem::DeferForCurtain(UWorld* World, const FString& URL, FSimpleDelegate Travel, bool bSeamless)
 {
 	auto* Loading = World ? UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(World->GetGameInstance()) : nullptr;
 	if (!Loading || !World->GetGameViewport() || !FApp::CanEverRender() ||
 	    GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds <= 0.f) return false;
-	Loading->NotePreClientTravel(URL, TRAVEL_Absolute, false);
+	Loading->NotePreClientTravel(URL, TRAVEL_Absolute, bSeamless);
 	if (!Loading->Screen) return false;
 	Loading->Screen->Restart();
 	Loading->Screen->HoldDepartureCurtain();
@@ -96,6 +118,8 @@ void UTBLoadingScreenSubsystem::NotePreClientTravel(const FString& PendingURL, E
 	{
 		Screen->SetStatus(TBText::Get(TEXT("Root.Loading.Prepare")));
 		Screen->SetExit(0.f);
+		// Blocking map loads start the native stream at frame zero. Reveal its poster until then.
+		Screen->SetMovieVisible(bSeamless || !bHadWorld || GIsEditor || !IsMoviePlayerEnabled());
 	}
 }
 
@@ -192,7 +216,11 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FWorldContext& Context, const F
 	{
 		MovieScreen.Reset();
 		ShowOverlay();
-		if (Screen) Screen->SetStatus(Status);
+		if (Screen)
+		{
+			Screen->SetMovieVisible(true);
+			Screen->SetStatus(Status);
+		}
 		return;
 	}
 	MovieScreen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::NativeMovie).Edition(FilmEdition).Poster(FilmPosters[FilmEdition]);
@@ -382,12 +410,13 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	}
 	else if (bHardLoad)
 	{
-		if (NativeFilmStartedAt > 0.)
+		if (MovieScreen && Screen)
 		{
-			if (Screen) Screen->SetMovieVisible(true, NativeFilmStartedAt);
+			Screen->ContinueFilmReveal(*MovieScreen);
+			Screen->SetMovieVisible(true, NativeFilmStartedAt);
 			NativeFilmStartedAt = 0.;
+			MovieScreen.Reset();
 		}
-		if (MovieScreen && Screen) Screen->ContinueFilmReveal(*MovieScreen);
 		// キャラのいない画面（タイトル）は待たずに明ける。
 		// 待つ上限は、コントローラーがいなくても効かせる。出てこないままだと、画面がずっと覆われてしまう。
 		const auto* Controller = GetGameInstance()->GetFirstLocalPlayerController();

@@ -15,6 +15,7 @@
 #include "GamePlay/TBPushableProps.h"
 #include "GamePlay/TBRoomLighting.h"
 #include "Net/UnrealNetwork.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 
 ATBGameState::ATBGameState()
 {
@@ -166,6 +167,13 @@ float ATBGameState::HideRemaining() const
 {
 	return IsPreparing() && HidePreparation.bValid
 	    ? FMath::Max(0., HidePreparation.EndsAt - GetServerWorldTimeSeconds()) : 0.f;
+}
+
+void ATBGameState::OnRep_TravelPending()
+{
+	// The destination stage also replicates pending while waiting for the players to arrive.
+	if (bTravelPending && (TBLobbySettings::IsLobby(GetWorld()) || Phase == ETBPhase::Results || Phase == ETBPhase::Aborted))
+		UTBLoadingScreenSubsystem::BeginReplicatedDeparture(GetWorld());
 }
 
 void ATBGameState::OnRep_Ignition()

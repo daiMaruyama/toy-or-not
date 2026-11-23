@@ -126,6 +126,7 @@ void STBLoadingScreen::SetViewportPoster(UTexture2D* Texture)
 
 void STBLoadingScreen::SetMovieVisible(bool bVisible, double MovieStartedAt)
 {
+	bViewportMovieVisible = bVisible;
 	bStartMovieWhenReady = bVisible;
 	ResumeMovieFrom = MovieStartedAt;
 	if (!bVisible && Player.IsValid() && Player->IsPlaying()) Player->Pause();
@@ -247,7 +248,7 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 			FSlateDrawElement::MakeBox(Out, Layer++, Geometry.ToPaintGeometry(), White, ESlateDrawEffect::None,
 			                           FLinearColor::FromSRGBColor(FColor(35, 30, 24)));
 			const FSlateBrush* Frame = Poster.IsValid() ? &PosterBrush : nullptr;
-			if (Film.IsValid() && Film->GetWidth() > 2 && Film->GetHeight() > 2) Frame = &FilmBrush;
+			if (bViewportMovieVisible && Film.IsValid() && Film->GetWidth() > 2 && Film->GetHeight() > 2) Frame = &FilmBrush;
 			if (Frame)
 			{
 				const FVector2f FilmSize(1280 * S, 720 * S);

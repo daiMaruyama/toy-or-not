@@ -33,10 +33,14 @@ public:
 
 	virtual void Tick(float DeltaTime) override;
 	bool IsCoveringViewport() const { return bHardLoad || Overlay.IsValid(); }
+#if WITH_DEV_AUTOMATION_TESTS
+	bool IsViewportMoviePlayingForReview() const;
+#endif
 	static bool IsCovering(const UGameInstance* Instance);
 	static bool IsClosingOverDeparture(const UWorld* World);
+	static void BeginReplicatedDeparture(UWorld* World);
 	// Returns true when the local viewport takes ownership of the travel callback.
-	static bool DeferForCurtain(UWorld* World, const FString& URL, FSimpleDelegate Travel);
+	static bool DeferForCurtain(UWorld* World, const FString& URL, FSimpleDelegate Travel, bool bSeamless = false);
 	// 移動の向きの文字を決める部品。移動の行き先（URLから取ったマップ名）がわかっていればそれを優先し、なければGameStateから決めた値を使う。
 	static FString MapNameFromURL(const FString& URL);
 	static bool IsReturningLabel(const FString& DestMap, bool bReturningFromState);

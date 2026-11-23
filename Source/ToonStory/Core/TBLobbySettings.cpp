@@ -252,7 +252,7 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 			GEngine->BroadcastTravelFailure(World, ETravelFailure::ServerTravelFailure, TEXT("Server travel could not start."));
 	});
 	State->ForceNetUpdate();
-	if (!UTBLoadingScreenSubsystem::DeferForCurtain(World, Path, StartTravel) && !World->ServerTravel(Path))
+	if (!UTBLoadingScreenSubsystem::DeferForCurtain(World, Path, StartTravel, true) && !World->ServerTravel(Path))
 	{
 		State->bTravelPending = false;
 		Pending->PendingMap.Reset();

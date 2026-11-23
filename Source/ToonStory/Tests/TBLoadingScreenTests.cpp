@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+#include "Core/TBGameState.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "Engine/GameInstance.h"
@@ -371,6 +372,10 @@ namespace
 				const FString Path = TEXT("/Game/Maps/") + Destination;
 				const auto Travel = FSimpleDelegate::CreateWeakLambda(World, [this, World, Path]()
 				{
+					const auto* Loading = World->GetGameInstance()->GetSubsystem<UTBLoadingScreenSubsystem>();
+					if (Loading && !GIsEditor)
+						Test->TestFalse(TEXT("Only the poster is revealed before the native movie starts"),
+							Loading->IsViewportMoviePlayingForReview());
 					Test->TestTrue(TEXT("Hard travel waits for both curtain passes"), FPlatformTime::Seconds() - RequestedAt >=
 						GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
 					UGameplayStatics::OpenLevel(World, FName(*Path));
@@ -393,6 +398,17 @@ namespace
 				                FString(STBLoadingScreen::MovieName()));
 				Test->TestTrue(TEXT("Fast map loads still show the film for the configured minimum"),
 				               FPlatformTime::Seconds() - RequestedAt >= GetDefault<UTBLoadingScreenSettings>()->MinimumTravelSeconds);
+				if (Destination == TEXT("TB_Lobby"))
+				{
+					if (auto* State = World->GetGameState<ATBGameState>())
+					{
+						TGuardValue<bool> SimulateReceivedPending(State->bTravelPending, true);
+						State->OnRep_TravelPending();
+						Test->TestTrue(TEXT("Replicated departure starts closing over the current lobby"),
+							UTBLoadingScreenSubsystem::IsClosingOverDeparture(World));
+					}
+					else Test->AddError(TEXT("Lobby is missing its replicated game state"));
+				}
 				return true;
 			}
 			if (FPlatformTime::Seconds() < Deadline) return false;

@@ -98,6 +98,7 @@ private:
 	ETBLoadingBackdrop Backdrop = ETBLoadingBackdrop::Illustrations;
 	TAtomic<bool> bShowNativePoster{false};
 	bool bStartMovieWhenReady = false;
+	bool bViewportMovieVisible = false;
 	double ResumeMovieFrom = 0.;
 	TStrongObjectPtr<UMediaPlayer> Player;
 	TStrongObjectPtr<UMediaTexture> Film;
