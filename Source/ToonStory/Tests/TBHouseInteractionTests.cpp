@@ -76,7 +76,12 @@ bool FTBHouseInteractionTest::RunTest(const FString&)
 			TestEqual(TEXT("Authored mass overrides are preserved, including bowls with welded fruit"),
 				Part->BodyInstance.GetMassOverride(), Part->ComponentHasTag(TEXT("TBRuntimePushable")) ? 1.f : 2.f);
 			TestEqual(TEXT("Human capsule passes through small prop"), Part->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
-			TestEqual(TEXT("Toy capsule collides with small prop"), Part->GetCollisionResponseToChannel(ECC_GameTraceChannel1), ECR_Block);
+			const FVector HalfSize = Mesh->GetBounds().BoxExtent * Part->GetComponentScale().GetAbs();
+			const double R = TBCharacterGeometry::ToyRadius + UE_KINDA_SMALL_NUMBER;
+			const bool FitsToy = HalfSize.GetMax() <= TBCharacterGeometry::ToyHalfHeight + UE_KINDA_SMALL_NUMBER &&
+			    int32(HalfSize.X > R) + int32(HalfSize.Y > R) + int32(HalfSize.Z > R) <= 1;
+			TestEqual(TEXT("Small and equal-sized props yield to the toy"), Part->GetCollisionResponseToChannel(ECC_GameTraceChannel1),
+			    FitsToy ? ECR_Ignore : ECR_Block);
 			TestEqual(TEXT("Small prop cannot be used as a step"), Part->CanCharacterStepUpOn, ECB_No);
 			TestEqual(TEXT("Small prop does not retract camera"), Part->GetCollisionResponseToChannel(ECC_Camera), ECR_Ignore);
 			TestTrue(TEXT("Small prop actually simulates physics"), Part->IsSimulatingPhysics());
@@ -88,7 +93,7 @@ bool FTBHouseInteractionTest::RunTest(const FString&)
 	TestEqual(TEXT("All selected furniture components are configured"), Furniture, 27);
 	TestEqual(TEXT("All dining chairs checked"), Chairs, 7);
 	TestEqual(TEXT("Fridge checked"), Fridges, 1);
-	TestEqual(TEXT("All authored and runtime small props configured"), Props, 117);
+	TestEqual(TEXT("All authored and runtime small props configured"), Props, 116);
 	if (TestNotNull(TEXT("Radio physics probe exists"), Probe))
 	{
 		auto* Body = Cast<ATBCharacter>(World->GetFirstPlayerController()->GetPawn());

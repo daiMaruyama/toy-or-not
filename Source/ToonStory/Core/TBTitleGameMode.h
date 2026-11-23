@@ -23,6 +23,7 @@ class TOONSTORY_API ATBTitleController : public APlayerController
 {
 	GENERATED_BODY()
 public:
+	ATBTitleController();
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void ReceivedPlayer() override;
@@ -39,5 +40,6 @@ protected:
 	virtual void SetupInputComponent() override;
 private:
 	void ClickToyPressed() { ClickToy(); }
+	UPROPERTY() TObjectPtr<class UMaterialInterface> PortraitPile;
 	UPROPERTY(Transient) TObjectPtr<UTBTitleMenu> Menu;
 };

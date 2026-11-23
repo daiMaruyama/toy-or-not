@@ -7,6 +7,14 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Camera/CameraActor.h"
+#include "CineCameraComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/RectLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Core/TBTitleEmote.h"
 #include "Character/TBToyPresentation.h"
 #include "EngineUtils.h"
@@ -24,6 +32,13 @@ ATBTitleGameMode::ATBTitleGameMode()
 	PlayerControllerClass = ATBTitleController::StaticClass();
 }
 
+ATBTitleController::ATBTitleController()
+{
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Pile(
+		TEXT("/Game/Characters/ToyCollectionRealistic/TeddyBear/Materials/M_TitleBearPlush"));
+	PortraitPile = Pile.Object;
+}
+
 void ATBTitleController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -35,11 +50,46 @@ void ATBTitleController::BeginPlay()
 		if (It->ActorHasTag(TEXT("TitleCamera")))
 		{
 			Camera = *It;
+			if (auto* Lens = Cast<UCineCameraComponent>(Camera->GetCameraComponent()))
+			{
+				auto Focus = Lens->FocusSettings;
+				Focus.FocusMethod = ECameraFocusMethod::Disable;
+				Lens->SetFocusSettings(Focus);
+				auto& Grade = Lens->PostProcessSettings;
+				Grade.bOverride_MotionBlurAmount = true;
+				Grade.MotionBlurAmount = 0.f;
+				Grade.bOverride_ColorSaturation = true;
+				Grade.ColorSaturation = FVector4(1, 1, 1, .91f);
+				Grade.bOverride_ColorGain = true;
+				Grade.ColorGain = FVector4(1.f, .985f, .96f, .94f);
+				Grade.bOverride_IndirectLightingIntensity = true;
+				Grade.IndirectLightingIntensity = .75f;
+
+				// A broad, off-axis reflection gives the bead eyes a catchlight and shapes the nap.
+				auto* Softbox = NewObject<URectLightComponent>(Camera);
+				Softbox->SetupAttachment(Lens);
+				Softbox->SetMobility(EComponentMobility::Movable);
+				Softbox->SetRelativeLocation(FVector(10, -65, 65));
+				Softbox->SetRelativeRotation(FVector(95, 65, -58).Rotation());
+				Softbox->SetIntensityUnits(ELightUnits::Lumens);
+				Softbox->SetIntensity(420.f);
+				Softbox->SetSourceWidth(70.f);
+				Softbox->SetSourceHeight(90.f);
+				Softbox->SetAttenuationRadius(260.f);
+				Softbox->SetLightColor(FLinearColor(1.f, .93f, .86f));
+				Softbox->RegisterComponent();
+			}
 			break;
 		}
 		if (!Camera) Camera = *It;
 	}
 	if (Camera) SetViewTarget(Camera);
+	// The window is a broad light source relative to the miniature set.
+	for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+	{
+		if (auto* Sun = Cast<UDirectionalLightComponent>(It->GetLightComponent()))
+			Sun->SetLightSourceAngle(FMath::Max(Sun->LightSourceAngle, 3.f));
+	}
 	// ループで踊るおもちゃに、ゲームと同じエモートを出させる。メニューが寸劇を流し始める前に整える。
 	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
 	{
@@ -48,6 +98,21 @@ void ATBTitleController::BeginPlay()
 			auto* Emote = NewObject<UTBTitleEmote>(*It);
 			Emote->RegisterComponent();
 			TBToyPresentation::UseLookPose(*It);
+			// Each fur layer shares the body pose. Keep its depth and its eye/nose cutouts.
+			for (auto* Part : TInlineComponentArray<USkeletalMeshComponent*>(*It))
+			{
+				if (!PortraitPile || !Part->LeaderPoseComponent.IsValid()) continue;
+				const UMaterialInterface* Material = Part->GetMaterial(0);
+				float ShellDepth;
+				if (!Material || !Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("ShellDepth")), ShellDepth)) continue;
+				// The opaque fabric and its silhouette need the same nap and diffuse response.
+				auto* Body = Part->LeaderPoseComponent.Get();
+				if (Body->GetMaterial(0) != PortraitPile) Body->SetMaterial(0, PortraitPile);
+				auto* Layer = UMaterialInstanceDynamic::Create(PortraitPile, Part);
+				Layer->SetScalarParameterValue(TEXT("ShellDepth"), ShellDepth);
+				for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot)
+					if (Part->GetMaterial(Slot) == Material) Part->SetMaterial(Slot, Layer);
+			}
 		}
 	}
 	GetGameInstance()->GetSubsystem<UTBSession>()->Activate();

@@ -87,10 +87,7 @@ void ATBGameState::ConfigureStageActors(ULevel* Level, UWorld* World)
 		auto* Part = Prop->GetStaticMeshComponent();
 		if (!Part || !Part->ComponentHasTag(TEXT("TBPushable"))) continue;
 		// World geometry still supports the prop. A character cannot use it as a moving floor.
-		Part->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-		Part->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
-		Part->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-		Part->CanCharacterStepUpOn = ECB_No;
+		if (!bInitialized) TBPushableProps::ConfigureCharacterCollision(*Part);
 		if (HasAuthority() && Part->IsSimulatingPhysics() && !PropPeakHeights.Contains(Part))
 		{
 			Prop->SetReplicates(true);

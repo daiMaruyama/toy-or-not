@@ -7,6 +7,7 @@
 #include "UI/TBUIText.h"
 #include "Data/TBRuleData.h"
 #include "UI/Loading/TBLoadingScreenSettings.h"
+#include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "GamePlay/TBPickup.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -245,7 +246,13 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 	Pending->bArrivalCancelled = false;
 	State->bTravelPending = true;
 	Mode->bUseSeamlessTravel = true;
-	if (!World->ServerTravel(Path))
+	auto StartTravel = FSimpleDelegate::CreateWeakLambda(Mode, [World, Path, Pending, State]()
+	{
+		if (Pending->PendingMap == Path && State->bTravelPending && !World->ServerTravel(Path))
+			GEngine->BroadcastTravelFailure(World, ETravelFailure::ServerTravelFailure, TEXT("Server travel could not start."));
+	});
+	State->ForceNetUpdate();
+	if (!UTBLoadingScreenSubsystem::DeferForCurtain(World, Path, StartTravel) && !World->ServerTravel(Path))
 	{
 		State->bTravelPending = false;
 		Pending->PendingMap.Reset();

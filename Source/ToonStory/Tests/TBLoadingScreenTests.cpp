@@ -228,9 +228,48 @@ namespace
 			}
 			if (bCaptureCurtain)
 			{
+				if (bCheckDeparture && !Screen->HasPaintedClosed()) return false;
+				if (bCheckReveal && Screen->GetFilmReveal() < .4f) return false;
 				TArray<FColor> Pixels;
 				FIntVector Size(0);
 				if (!Test->TestTrue(TEXT("The transition curtain renders"), FSlateApplication::Get().TakeScreenshot(Screen.ToSharedRef(), Pixels, Size) && !Pixels.IsEmpty())) return true;
+				if (bCheckDeparture)
+				{
+					for (const int32 Y : {2, Size.Y / 2, Size.Y - 3})
+						for (const int32 X : {2, Size.X / 2, Size.X - 3})
+						{
+							const FColor Cloth = Pixels[Y * Size.X + X];
+							Test->TestTrue(TEXT("Departure cloth covers the center and edges before travel"),
+								Cloth.R > 1.7f * Cloth.G && Cloth.R > 1.4f * Cloth.B);
+						}
+					bCheckDeparture = false;
+					Screen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
+					bCheckReveal = true;
+					return false;
+				}
+				if (bCheckReveal)
+				{
+					auto ClothFraction = [&](int32 X)
+					{
+						int32 Red = 0, Count = 0;
+						for (int32 Y = Size.Y / 4; Y < Size.Y * 3 / 4; Y += 3)
+						{
+							const FColor Color = Pixels[Y * Size.X + X];
+							Red += Color.R > 1.7f * Color.G && Color.R > 1.4f * Color.B;
+							++Count;
+						}
+						return float(Red) / Count;
+					};
+					Test->TestTrue(TEXT("The film is visible on the left while the opening cloth still covers the right"),
+						ClothFraction(Size.X / 10) < .9f && ClothFraction(Size.X * 19 / 20) > .95f);
+					TArray64<uint8> PNG;
+					FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
+					const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/LoadingFilm") / TBText::GetLanguage();
+					Test->TestTrue(TEXT("Rendered opening saved"), FFileHelper::SaveArrayToFile(PNG, *(Folder / TEXT("OpeningCurtain.png"))));
+					bCheckReveal = false;
+					Screen->SetExit(.34f);
+					return false;
+				}
 				int32 RedSamples = 0, Samples = 0, Lightest = 0, Darkest = 255;
 				for (int32 X = Size.X / 8; X < Size.X / 2; X += 4)
 				{
@@ -285,7 +324,9 @@ namespace
 			Test->TestTrue(TEXT("The comic film loops after the last panel"), Player->IsLooping() && Player->GetDuration().GetTotalSeconds() > 4.);
 			if (Edition == 0)
 			{
-				Screen->SetExit(.34f);
+				Screen->Restart();
+				Screen->HoldDepartureCurtain();
+				bCheckDeparture = true;
 				bCaptureCurtain = true;
 				return false;
 			}
@@ -301,6 +342,8 @@ namespace
 		double Deadline = 0., Previous = 0.;
 		int32 Captured = 0;
 		bool bCaptureCurtain = false;
+		bool bCheckDeparture = false;
+		bool bCheckReveal = false;
 	};
 
 	class FLoadingFilmTravelReview : public IAutomationLatentCommand
@@ -325,7 +368,15 @@ namespace
 				Destination = World->GetMapName().EndsWith(TEXT("Title")) ? TEXT("TB_Lobby") : TEXT("Title");
 				RequestedAt = FPlatformTime::Seconds();
 				Deadline = RequestedAt + 120.;
-				UGameplayStatics::OpenLevel(World, FName(*(TEXT("/Game/Maps/") + Destination)));
+				const FString Path = TEXT("/Game/Maps/") + Destination;
+				const auto Travel = FSimpleDelegate::CreateWeakLambda(World, [this, World, Path]()
+				{
+					Test->TestTrue(TEXT("Hard travel waits for both curtain passes"), FPlatformTime::Seconds() - RequestedAt >=
+						GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
+					UGameplayStatics::OpenLevel(World, FName(*Path));
+				});
+				if (!Test->TestTrue(TEXT("A rendered departure waits for the curtain"),
+					UTBLoadingScreenSubsystem::DeferForCurtain(World, Path, Travel))) return true;
 				return false;
 			}
 			if (World && World->GetMapName().EndsWith(Destination))

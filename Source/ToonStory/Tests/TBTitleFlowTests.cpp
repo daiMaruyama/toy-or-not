@@ -11,6 +11,7 @@
 #include "Core/TBPlayerState.h"
 #include "Core/TBController.h"
 #include "UI/TBTitleMenu.h"
+#include "UI/TBPaperStyle.h"
 #include "UI/TBHUD.h"
 #include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/Loading/TBLoadingScreenSettings.h"
@@ -311,6 +312,7 @@ namespace
 					}
 					CheckTitle(World);
 					Test->TestFalse(TEXT("Lobby leave destroys session"), HasSession(World));
+					Test->TestTrue(TEXT("Returning normally leaves the title notice empty"), TBPaper::Status(Session->Status).IsEmpty());
 					return true;
 			}
 			return false;

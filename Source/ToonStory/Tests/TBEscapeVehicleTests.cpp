@@ -12,6 +12,7 @@
 #include "Tests/TBTestMatch.h"
 #include "AIController.h"
 #include "Components/BoxComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Engine.h"
@@ -85,6 +86,22 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	TestTrue(TEXT("Human is held during the shot"), Toy->IsMovementLocked() && !Toy->CanAct());
 	Info->Team = ETBTeam::Toy;
 	TestFalse(TEXT("Cannot board during ignition"), Car->Board(Toy));
+	auto* ShotCar = Match->Ignition.Vehicle.Get();
+	if (!TestNotNull(TEXT("Ignition vehicle"), ShotCar)) return false;
+	World->TimeSeconds = StartTime + 34. / 24.;
+	ShotCar->Tick(1.f / 24.f);
+	TInlineComponentArray<USpotLightComponent*> Lights(ShotCar);
+	if (!TestEqual(TEXT("Both headlights exist before ignition"), Lights.Num(), 2)) return false;
+	const FTransform LeftMount = Lights[0]->GetComponentTransform().GetRelativeTransform(ShotCar->Mesh->GetComponentTransform());
+	TestTrue(TEXT("Headlights start dark"), FMath::IsNearlyZero(Lights[0]->Intensity));
+	for (const double Frame : {35., 37., 72., 80.})
+	{
+		World->TimeSeconds = StartTime + Frame / 24.;
+		ShotCar->Tick(1.f / 24.f);
+		TestTrue(TEXT("Light comes up while fixed to the moving body"), Lights[0]->Intensity > 0.f &&
+			Lights[0]->IsAttachedTo(ShotCar->Mesh) && LeftMount.Equals(
+				Lights[0]->GetComponentTransform().GetRelativeTransform(ShotCar->Mesh->GetComponentTransform()), .001));
+	}
 	constexpr double EndOfShot = StartTime + FTBEscapeIgnition::Duration;
 	constexpr float LastFrame = 1.f / 64.f;
 	World->TimeSeconds = EndOfShot - LastFrame;
@@ -95,6 +112,7 @@ bool FTBEscapeVehicleTest::RunTest(const FString&)
 	World->TimeSeconds = EndOfShot;
 	Mode->Tick(LastFrame);
 	if (!TestTrue(TEXT("Ignition ends and opens boarding at the deadline"), !Match->IsIgniting() && Match->bEscapePhase)) return false;
+	ShotCar->Tick(LastFrame);
 	TestFalse(TEXT("Movement resumes after ignition"), Toy->IsMovementLocked());
 	TestTrue(TEXT("Escape clock resumes with the full minimum"), FMath::IsNearlyEqual(Match->Remaining(), 30.f, .05f));
 	TestTrue(TEXT("Toy boards"), Car->Board(Toy));
@@ -204,6 +222,81 @@ bool FTBEscapeVehicleGroundTest::RunTest(const FString&)
 	TestTrue(TEXT("Vehicle keeps moving after landing"), Car->GetActorLocation().X > LandedX + 30.f);
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBParkedVehicleTest, "ToonStory.Items.ParkedVehicle",
+	EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FTBParkedVehicleTest::RunTest(const FString&)
+{
+	UWorld* World = nullptr;
+	for (const auto& C : GEngine->GetWorldContexts()) if (C.WorldType == EWorldType::Game) World = C.World();
+	if (!World || World->GetNetMode() != NM_Standalone) return false;
+	TActorIterator<ATBEscapeVehicle> It(World);
+	auto* Car = It ? *It : nullptr;
+	auto* PC = World->GetFirstPlayerController();
+	auto* Toy = PC ? PC->GetPawn<ATBCharacter>() : nullptr;
+	auto* Match = World->GetGameState<ATBGameState>();
+	if (!Car || !Toy || !Toy->TBPS() || !Match) return false;
+	TBTest::FPlayingScope Playing(*Match);
+	const auto OldTeam = Toy->TBPS()->Team;
+	const auto OldToyState = Toy->TBPS()->ToyState;
+	const auto OldTransform = Toy->GetActorTransform();
+	const auto OldAim = PC->GetControlRotation();
+	const bool WasEscape = Match->bEscapePhase, WasFrozen = Toy->TBPS()->bFrozen;
+	ON_SCOPE_EXIT {
+		Match->bEscapePhase = WasEscape;
+		Car->ResetRound();
+		Toy->TBPS()->Team = OldTeam; Toy->TBPS()->ToyState = OldToyState; Toy->TBPS()->bFrozen = WasFrozen;
+		Toy->SetActorTransform(OldTransform, false, nullptr, ETeleportType::TeleportPhysics);
+		Toy->ApplyState();
+		PC->SetControlRotation(OldAim);
+	};
+	Match->bEscapePhase = true;
+	Toy->TBPS()->Team = ETBTeam::Toy;
+	Toy->TBPS()->ToyState = ETBToyState::Free;
+	if (!TestTrue(TEXT("Board the authored car"), Car->Board(Toy))) return false;
+	FMinimalViewInfo View;
+	Toy->CalcCamera(.016f, View);
+	const FVector Start = Car->GetActorLocation();
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(TBParkedDrivingView), false, Car);
+	Query.AddIgnoredActor(Toy);
+	TestFalse(TEXT("Boarding camera clears furniture and the floor"), World->OverlapBlockingTestByChannel(
+	    View.Location, FQuat::Identity, ECC_Camera, FCollisionShape::MakeSphere(1.f), Query));
+	TestFalse(TEXT("Boarding camera clears the visible bodywork"), Car->Mesh->Bounds.GetBox().IsInside(View.Location));
+	TestFalse(TEXT("Furniture does not hide the car from the boarding camera"), World->LineTraceTestByChannel(
+		View.Location, Car->Mesh->Bounds.Origin, ECC_Camera, Query));
+	// The whole parked car should fit a 16:9 gameplay view with room around its silhouette.
+	const FBox LocalBody = Car->Mesh->GetStaticMesh()->GetBoundingBox();
+	const double HorizontalTangent = FMath::Tan(FMath::DegreesToRadians(View.FOV * .5f));
+	bool bBodyInFrame = true;
+	for (int32 Corner = 0; Corner < 8; ++Corner)
+	{
+		const FVector Point(Corner & 1 ? LocalBody.Max.X : LocalBody.Min.X, Corner & 2 ? LocalBody.Max.Y : LocalBody.Min.Y,
+			Corner & 4 ? LocalBody.Max.Z : LocalBody.Min.Z);
+		const FVector Ray = View.Rotation.UnrotateVector(Car->Mesh->GetComponentTransform().TransformPosition(Point) - View.Location);
+		bBodyInFrame &= Ray.X > View.PerspectiveNearClipPlane && FMath::Abs(Ray.Y) < .9 * Ray.X * HorizontalTangent &&
+			FMath::Abs(Ray.Z) < .9 * Ray.X * HorizontalTangent * 9. / 16.;
+	}
+	TestTrue(TEXT("Third-person boarding view frames the entire car"), bBodyInFrame);
+	AddInfo(FString::Printf(TEXT("Boarding view: %s, %s, FOV %.2f"), *View.Location.ToString(), *View.Rotation.ToString(), View.FOV));
+	for (int32 Frame = 0; Frame < 35; ++Frame)
+	{
+		Toy->ServerVehicleInput(FVector2D(0, 1));
+		Car->Tick(1.f / 60.f);
+	}
+	AddInfo(FString::Printf(TEXT("Parked %s, camera %s, driven %s"), *Start.ToString(), *View.Location.ToString(), *Car->GetActorLocation().ToString()));
+	TestTrue(TEXT("Driver can pull forward out of the parking spot"), FVector::DotProduct(Car->GetActorLocation() - Start, Car->GetActorForwardVector()) > 10.);
+	Car->SetActorLocation(FVector(20000, 20000, 10000), false, nullptr, ETeleportType::TeleportPhysics);
+	Toy->CalcCamera(.016f, View);
+	const FVector Chase = Car->GetActorTransform().InverseTransformVectorNoScale(View.Location - Car->GetActorLocation());
+	TestTrue(TEXT("Open driving view sits behind and to the side of the car"), Chase.X < -180. && Chase.Y > 50.);
+	TestEqual(TEXT("Open road restores the original chase distance"),
+		FVector::Distance(View.Location, Car->GetActorLocation() + FVector::UpVector * 45.), 250., .1);
+	Car->AddActorWorldRotation(FRotator(0, 75, 0));
+	Toy->CalcCamera(.016f, View);
+	TestTrue(TEXT("The rear-quarter view follows a turn"), Chase.Equals(
+		Car->GetActorTransform().InverseTransformVectorNoScale(View.Location - Car->GetActorLocation()), .1));
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBEscapeEntranceClearanceTest, "ToonStory.Items.EscapeEntranceClearance",
 	EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
 bool FTBEscapeEntranceClearanceTest::RunTest(const FString&)

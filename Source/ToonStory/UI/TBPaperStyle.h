@@ -83,7 +83,7 @@ namespace TBPaper
 		}
 		if (Value == TEXT("Offline. Last match ended; TBHost / TBFind for a new lobby."))
 		{
-			return TBText::Literal(TEXT("Root.Status.Welcome"));
+			return {};
 		}
 		return TBText::TranslateNotice(Value);
 	}

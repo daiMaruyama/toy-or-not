@@ -76,7 +76,7 @@ bool FTBExpandedPropsTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("New prop has a live physics body"), P->IsSimulatingPhysics() && P->IsGravityEnabled());
 		TestTrue(TEXT("New prop remains pushable and cannot become a character floor"),
 			P->ComponentHasTag(TEXT("TBPushable")) && P->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Ignore &&
-			P->GetCollisionResponseToChannel(ECC_GameTraceChannel1) == ECR_Block && P->CanCharacterStepUpOn == ECB_No);
+			P->CanCharacterStepUpOn == ECB_No);
 		TestEqual(TEXT("Authored initial overlaps do not inject a separating impulse"), P->GetMaxDepenetrationVelocity(), 0.f);
 		TestFalse(TEXT("Repeated configuration does not reset a moving prop"), TBPushableProps::TryEnable(**It));
 		if (World->GetNetMode() != NM_Client)
@@ -101,6 +101,21 @@ bool FTBExpandedPropsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Late setup preserves received motion"), EarlyPart->IsAnyRigidBodyAwake() &&
 		EarlyPart->GetPhysicsLinearVelocity().Equals(FVector(123, 45, 67), .1f));
 	EarlyPhysics->Destroy();
+	// Classify the scaled mesh, independent of yaw and of physics-driven rotation on other peers.
+	auto* SizeProbe = World->SpawnActor<AStaticMeshActor>();
+	auto* SizePart = SizeProbe->GetStaticMeshComponent();
+	SizePart->SetMobility(EComponentMobility::Movable);
+	SizePart->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
+	const FVector ToyExtent(TBCharacterGeometry::ToyRadius, TBCharacterGeometry::ToyRadius, TBCharacterGeometry::ToyHalfHeight);
+	for (const double Ratio : {.75, 1., 1.05})
+	{
+		SizePart->SetWorldScale3D(ToyExtent * Ratio / 50.);
+		SizePart->SetWorldRotation(FRotator(24, 48, 11));
+		TBPushableProps::ConfigureCharacterCollision(*SizePart);
+		TestEqual(TEXT("Only props larger than the toy can block its capsule"), SizePart->GetCollisionResponseToChannel(ECC_GameTraceChannel1),
+			Ratio > 1. ? ECR_Block : ECR_Ignore);
+	}
+	SizeProbe->Destroy();
 	auto Probe = MakeShared<FExpandedPropProbe>();
 	Probe->Part = Part;
 	Probe->Original = Part->GetComponentTransform();
@@ -144,8 +159,8 @@ bool FTBExpandedPropsTest::RunTest(const FString& Parameters)
 				Centre + FVector(100, 0, 0), FQuat::Identity, ECC_GameTraceChannel1,
 				FCollisionShape::MakeCapsule(TBCharacterGeometry::ToyRadius, TBCharacterGeometry::ToyHalfHeight),
 				FCollisionQueryParams(SCENE_QUERY_STAT(TBPropToyContact)));
-			TestTrue(TEXT("A toy capsule physically hits the actual prop instead of passing through"),
-				bToyBlocked && ToyHit.GetComponent() == P);
+			TestEqual(TEXT("Real toy capsule sweep follows the placed prop's size policy"),
+				bToyBlocked && ToyHit.GetComponent() == P, P->GetCollisionResponseToChannel(ECC_GameTraceChannel1) == ECR_Block);
 			P->AddImpulse(FVector(100, 0, 0), NAME_None, true);
 			Probe->Started = Now;
 			return false;

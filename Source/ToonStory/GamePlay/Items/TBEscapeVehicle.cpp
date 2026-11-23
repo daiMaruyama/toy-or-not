@@ -128,6 +128,7 @@ bool ATBEscapeVehicle::Board(ATBCharacter* Toy)
 	Toy->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
 	Toy->SetActorRelativeLocation(FVector(0, 0, 25));
 	Toy->SetActorHiddenInGame(true);
+	Toy->OnRep_EscapeVehicle();
 	Toy->ForceNetUpdate();
 	ForceNetUpdate();
 	return true;

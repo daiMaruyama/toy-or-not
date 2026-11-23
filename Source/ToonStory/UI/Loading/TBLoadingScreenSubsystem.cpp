@@ -34,11 +34,32 @@ bool UTBLoadingScreenSubsystem::IsClosingOverDeparture(const UWorld* World)
 {
 	if (!World) return false;
 	const auto* Loading = UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(World->GetGameInstance());
-	if (!Loading || !Loading->bTravelSeamless || !Loading->Overlay || Loading->TravelFromWorld.Get() != World) return false;
+	if (!Loading || !Loading->Overlay || Loading->TravelFromWorld.Get() != World) return false;
 	const auto* State = World->GetGameState<ATBGameState>();
 	if (!State || (State->Phase != ETBPhase::Lobby && State->Phase != ETBPhase::Results && State->Phase != ETBPhase::Aborted))
 		return false;
 	return FPlatformTime::Seconds() - Loading->TravelShownAt < GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds * .5f;
+}
+
+bool UTBLoadingScreenSubsystem::DeferForCurtain(UWorld* World, const FString& URL, FSimpleDelegate Travel)
+{
+	auto* Loading = World ? UGameInstance::GetSubsystem<UTBLoadingScreenSubsystem>(World->GetGameInstance()) : nullptr;
+	if (!Loading || !World->GetGameViewport() || !FApp::CanEverRender() ||
+	    GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds <= 0.f) return false;
+	Loading->NotePreClientTravel(URL, TRAVEL_Absolute, false);
+	if (!Loading->Screen) return false;
+	Loading->Screen->Restart();
+	Loading->Screen->HoldDepartureCurtain();
+	Loading->TravelShownAt = Loading->Screen->GetShownAt();
+	Loading->PendingDeparture = MoveTemp(Travel);
+	return true;
+}
+
+void UTBLoadingScreenSubsystem::SealDeparture(UWorld* World)
+{
+	if (!World || World->GetGameInstance() != GetGameInstance()) return;
+	ShowOverlay();
+	if (Screen) Screen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
 }
 
 // FURLはマップ名がないとき既定のマップ（タイトル）を返すため使わない。
@@ -102,6 +123,7 @@ void UTBLoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 	PreClientTravelHandle = GetGameInstance()->OnNotifyPreClientTravel().AddUObject(this, &ThisClass::NotePreClientTravel);
 	PreLoadHandle = FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &ThisClass::PreLoadMap);
+	FWorldDelegates::OnSeamlessTravelTransition.AddUObject(this, &ThisClass::SealDeparture);
 	PostLoadHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &ThisClass::PostLoadMap);
 	if (GEngine)
 	{
@@ -114,6 +136,8 @@ void UTBLoadingScreenSubsystem::Deinitialize()
 {
 	GetGameInstance()->OnNotifyPreClientTravel().Remove(PreClientTravelHandle);
 	FCoreUObjectDelegates::PreLoadMapWithContext.Remove(PreLoadHandle);
+	FWorldDelegates::OnSeamlessTravelTransition.RemoveAll(this);
+	PendingDeparture.Unbind();
 	FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadHandle);
 	if (GEngine)
 	{
@@ -156,8 +180,7 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FWorldContext& Context, const F
 {
 	const UWorld* World = GetGameInstance()->GetWorld();
 	if (!bHadWorld || Context.OwningGameInstance != GetGameInstance() || (World && World->IsInSeamlessTravel())) return;
-	const bool bStartedInViewport = Overlay.IsValid();
-	RemoveOverlay();
+	SealDeparture(GetGameInstance()->GetWorld());
 	FinishPostersIfReady();
 	SelectFilmForTravel();
 	const FText Status = TBText::Get(TEXT("Root.Loading.Prepare"));
@@ -173,7 +196,8 @@ void UTBLoadingScreenSubsystem::PreLoadMap(const FWorldContext& Context, const F
 		return;
 	}
 	MovieScreen = SNew(STBLoadingScreen).Backdrop(ETBLoadingBackdrop::NativeMovie).Edition(FilmEdition).Poster(FilmPosters[FilmEdition]);
-	if (bStartedInViewport && Screen) MovieScreen->ContinueFrom(*Screen);
+	if (Screen) MovieScreen->ContinueFrom(*Screen);
+	MovieScreen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
 	MovieScreen->SetStatus(Status);
 	FLoadingScreenAttributes Attributes;
 	Attributes.WidgetLoadingScreen = MovieScreen;
@@ -225,6 +249,8 @@ void UTBLoadingScreenSubsystem::EndFailedTravel(UWorld* World)
 	if (World ? World->GetGameInstance() != GetGameInstance() : GetGameInstance()->GetWorld() != nullptr) return;
 	TravelDestMap.Reset();
 	StopMovie();
+	PendingDeparture.Unbind();
+	if (Screen) Screen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
 	bFilmSelected = false;
 	bHardLoad = false;
 	bTravelSeamless = false;
@@ -254,6 +280,7 @@ void UTBLoadingScreenSubsystem::ShowOverlay()
 	{
 		Screen->Restart();
 		if (bHardLoad && MovieScreen) Screen->ContinueFrom(*MovieScreen);
+		if (bHardLoad) Screen->FinishDeparture(GetDefault<UTBLoadingScreenSettings>()->FadeInSeconds);
 		Screen->SetMovieVisible(true, bHardLoad && MovieScreen ? MovieScreen->GetShownAt() : 0.);
 	}
 	Overlay = SNew(SWeakWidget).PossiblyNullContent(Screen);
@@ -300,6 +327,22 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	const auto* Settings = GetDefault<UTBLoadingScreenSettings>();
 	UWorld* World = GetGameInstance()->GetWorld();
 	const double Now = FPlatformTime::Seconds();
+	if (PendingDeparture.IsBound())
+	{
+		ShowOverlay();
+		if (Screen && Screen->IsHoldingDeparture())
+		{
+			if (!Screen->HasPaintedClosed() && Now - TravelShownAt < Settings->FadeInSeconds * .5 + .25) return;
+			Screen->FinishDeparture(Settings->FadeInSeconds);
+		}
+		// Reveal the film in the old viewport before a blocking load can interrupt the motion.
+		// An invisible window may stop painting, but must still be able to join or leave a room.
+		if (Screen && Screen->GetFilmReveal() < 1.f &&
+		    Now - FMath::Max(TravelShownAt, Screen->GetLastRevealPaint()) < Settings->FadeInSeconds + 1.) return;
+		FSimpleDelegate Travel = MoveTemp(PendingDeparture);
+		if (TravelFromWorld.Get() == World) Travel.ExecuteIfBound();
+		return;
+	}
 	// The result-to-lobby trip can have no preparation mask at all. Cover the engine's
 	// complete seamless journey, even when a local controller missed the destination URL.
 	const bool bSeamless = World && World->IsInSeamlessTravel();
@@ -333,6 +376,7 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 	}
 	else if (bHardLoad)
 	{
+		if (MovieScreen && Screen) Screen->ContinueFilmReveal(*MovieScreen);
 		// キャラのいない画面（タイトル）は待たずに明ける。
 		// 待つ上限は、コントローラーがいなくても効かせる。出てこないままだと、画面がずっと覆われてしまう。
 		const auto* Controller = GetGameInstance()->GetFirstLocalPlayerController();
@@ -365,7 +409,8 @@ void UTBLoadingScreenSubsystem::Tick(float DeltaTime)
 		{
 			Screen->SetStatus(TBText::Get(TEXT("Root.Loading.Prepare")));
 			LabelReturning = bBack ? 1 : 0;
-			if (bNew) Screen->Restart();
+			// A same-world phase switch can first be observed after its camera changed.
+			if (bNew && TravelShownAt <= 0.) Screen->FinishDeparture(Settings->FadeInSeconds);
 		}
 		Screen->SetExit(0.f);
 		return;

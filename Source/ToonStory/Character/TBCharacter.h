@@ -110,8 +110,10 @@ public:
 	TObjectPtr<ATBCharacter> CarriedToy;
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	TObjectPtr<ATBDummyToy> CarriedDummy;
-	UPROPERTY(Replicated, BlueprintReadOnly, Category="脱出車両")
+	UPROPERTY(ReplicatedUsing=OnRep_EscapeVehicle, BlueprintReadOnly, Category="脱出車両")
 	TObjectPtr<ATBEscapeVehicle> EscapeVehicle;
+	UFUNCTION()
+	void OnRep_EscapeVehicle();
 	UFUNCTION(Server, Unreliable)
 	void ServerVehicleInput(FVector2D Input);
 	double VehicleExitStarted = -1;
@@ -263,6 +265,7 @@ private:
 	void JumpPressed();
 	void JumpReleased();
 	void UpdateCarryCamera();
+	float VehicleYawAtBoarding = 0.f;
 	void CrouchPressed();
 	void CrouchReleased();
 	void SprintPressed();

@@ -8,6 +8,7 @@ public class ToonStory : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PrivateDependencyModuleNames.Add("PhysicsCore");
+		PrivateDependencyModuleNames.Add("CinematicCamera");
 		// ロード画面（UI/Loading）。マップの読み込み中も絵を出し続ける。
 		PrivateDependencyModuleNames.AddRange(new string[] { "MoviePlayer", "MediaAssets", "EngineSettings" });
 

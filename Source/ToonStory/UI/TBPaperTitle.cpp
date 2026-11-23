@@ -11,8 +11,6 @@
 #include "Components/ButtonSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
-#include "Components/VerticalBox.h"
-#include "Components/VerticalBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/SizeBox.h"
 #include "Engine/GameInstance.h"
@@ -139,23 +137,22 @@ void UTBTitleMenu::BuildPaperLayout()
 		Button->OnHovered.AddUniqueDynamic(this, &ThisClass::Hover);
 		return Button;
 	};
-	auto CoverChoice = [&](UButton* Bound, const TCHAR* Name, const TCHAR* Key, float Y, FLinearColor Color)
+	auto CoverChoice = [&](UButton* Bound, const TCHAR* Name, const TCHAR* Key, float X, float Y, FLinearColor Color, bool bCompact = false)
 	{
-		constexpr float X = 80, W = 390, H = 61;
-		auto* Shadow = Rect(Canvas, X + 4, Y + 5, W, H, TBPaper::PrintInk);
-		Shadow->SetRenderShear(FVector2D(-5, 0));
+		const float W = bCompact ? 140.f : 390.f;
+		const float H = bCompact ? 44.f : 61.f;
+		const float DetailScale = H / 61.f;
+		Rect(Canvas, X + 4 * DetailScale, Y + 5 * DetailScale, W, H, TBPaper::PrintInk);
 		FButtonStyle Style = TBPaper::PrintButtonStyle(Color);
 		Style.SetNormalPadding(FMargin(0)).SetPressedPadding(FMargin(0));
 		auto* Button = TitleButton(Bound, Name, Style);
-		Button->SetRenderShear(FVector2D(-5, 0));
 		auto* Content = WidgetTree->ConstructWidget<UCanvasPanel>();
 		auto* ContentSlot = CastChecked<UButtonSlot>(Button->SetContent(Content));
 		ContentSlot->SetHorizontalAlignment(HAlign_Fill);
 		ContentSlot->SetVerticalAlignment(VAlign_Fill);
 		ContentSlot->SetPadding(FMargin(0));
-		auto* Caption = Label(TBText::Get(Key), 20, TBPaper::PrintInk, true);
+		auto* Caption = Label(TBText::Get(Key), bCompact ? 16 : 20, TBPaper::PrintInk, true);
 		Caption->SetAutoWrapText(false);
-		Caption->SetRenderShear(FVector2D(5, 0));
 		auto* Fit = WidgetTree->ConstructWidget<UScaleBox>();
 		Fit->SetStretch(EStretch::ScaleToFit);
 		Fit->SetStretchDirection(EStretchDirection::DownOnly);
@@ -163,54 +160,30 @@ void UTBTitleMenu::BuildPaperLayout()
 		CastChecked<UScaleBoxSlot>(Caption->Slot)->SetHorizontalAlignment(HAlign_Left);
 		auto* TextSlot = Content->AddChildToCanvas(Fit);
 		TextSlot->SetAnchors(FAnchors(0, 0, 1, 1));
-		TextSlot->SetOffsets(FMargin(24, 3, 52, 3));
-		Rect(Content, W - 39, H * .5f - 4, 12, 3, TBPaper::PrintInk)->SetRenderTransformAngle(45);
-		Rect(Content, W - 39, H * .5f + 3, 12, 3, TBPaper::PrintInk)->SetRenderTransformAngle(-45);
+		TextSlot->SetOffsets(FMargin(24 * DetailScale, 3, 52 * DetailScale, 3));
+		Rect(Content, W - 39 * DetailScale, H * .5f - 4 * DetailScale, 12 * DetailScale, 3 * DetailScale, TBPaper::PrintInk)->SetRenderTransformAngle(45);
+		Rect(Content, W - 39 * DetailScale, H * .5f + 3 * DetailScale, 12 * DetailScale, 3 * DetailScale, TBPaper::PrintInk)->SetRenderTransformAngle(-45);
 		Place(Button, X, Y, W, H);
 		return Button;
 	};
-	HostButton = CoverChoice(HostButton, TEXT("HostButton"), TEXT("Root.Title.Host"), 540, TBPaper::PrintHoney);
-	FindButton = CoverChoice(FindButton, TEXT("FindButton"), TEXT("Root.Title.Find"), 613, TBPaper::PrintCream);
-	HelpButton = CoverChoice(HelpButton, TEXT("HelpButton"), TEXT("Root.Title.Help"), 686, TBPaper::PrintCream);
-	auto* Utilities = WidgetTree->ConstructWidget<UHorizontalBox>();
-	Place(Utilities, 80, 798, 360, 39);
-	auto Utility = [&](UButton* Bound, const TCHAR* Name, const TCHAR* Key)
-	{
-		FButtonStyle Style;
-		Style.SetNormal(FSlateNoResource()).SetHovered(FSlateRoundedBoxBrush(TBPaper::PrintInk, 0.f));
-		Style.SetPressed(FSlateRoundedBoxBrush(TBPaper::PrintSea, 0.f));
-		Style.SetNormalPadding(FMargin(0, 2)).SetPressedPadding(FMargin(0, 3, 0, 1));
-		auto* Button = TitleButton(Bound, Name, Style);
-		auto* Caption = Label(TBText::Get(Key), 14, TBPaper::PrintCream);
-		Caption->SetAutoWrapText(false);
-		auto Font = Caption->GetFont();
-		Font.OutlineSettings.OutlineSize = 1;
-		Font.OutlineSettings.OutlineColor = TBPaper::PrintInk;
-		Caption->SetFont(Font);
-		Caption->SetShadowColorAndOpacity(TBPaper::PrintInk);
-		Caption->SetShadowOffset(FVector2D(0, 1));
-		auto* CaptionSlot = CastChecked<UButtonSlot>(Button->SetContent(Caption));
-		CaptionSlot->SetPadding(FMargin(0));
-		CaptionSlot->SetVerticalAlignment(VAlign_Center);
-		auto* Link = WidgetTree->ConstructWidget<UBorder>();
-		Link->SetBrush(FSlateRoundedBoxBrush(TBPaper::PrintCream.CopyWithNewOpacity(.5f), 0.f));
-		// Draw the fine underline behind the link, sized by its translated caption.
-		auto* Stack = WidgetTree->ConstructWidget<UVerticalBox>();
-		Stack->AddChildToVerticalBox(Button)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		auto* Rule = WidgetTree->ConstructWidget<USizeBox>();
-		Rule->SetHeightOverride(1.f);
-		Link->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Rule->SetContent(Link);
-		Stack->AddChildToVerticalBox(Rule);
-		Utilities->AddChildToHorizontalBox(Stack)->SetPadding(FMargin(0, 0, 26, 0));
-		return Button;
-	};
-	OptionsButton = Utility(OptionsButton, TEXT("OptionsButton"), TEXT("Options.Title"));
-	QuitButton = Utility(QuitButton, TEXT("QuitButton"), TEXT("Root.Title.QuitShort"));
+	HostButton = CoverChoice(HostButton, TEXT("HostButton"), TEXT("Root.Title.Host"), 80, 496, TBPaper::PrintHoney);
+	FindButton = CoverChoice(FindButton, TEXT("FindButton"), TEXT("Root.Title.Find"), 80, 569, TBPaper::PrintCream);
+	HelpButton = CoverChoice(HelpButton, TEXT("HelpButton"), TEXT("Root.Title.Help"), 80, 642, TBPaper::PrintCream);
+	OptionsButton = CoverChoice(OptionsButton, TEXT("OptionsButton"), TEXT("Options.Title"), 80, 798, TBPaper::PrintCream, true);
+	QuitButton = CoverChoice(QuitButton, TEXT("QuitButton"), TEXT("Root.Title.QuitShort"), 234, 798, TBPaper::PrintCream, true);
 	StatusText = Label(FText::FromString(TEXT("")), 17, TBPaper::Paper);
 	StatusText->SetShadowColorAndOpacity(TBPaper::Ink);
 	StatusText->SetShadowOffset(FVector2D(1, 2));
-	Place(StatusText, 80, 752, 390, 46);
+	StatusText->SetWrapTextAt(560.f);
+	auto* StatusFit = WidgetTree->ConstructWidget<UScaleBox>();
+	StatusFit->SetStretch(EStretch::ScaleToFit);
+	StatusFit->SetStretchDirection(EStretchDirection::DownOnly);
+	StatusFit->SetVisibility(ESlateVisibility::HitTestInvisible);
+	StatusFit->SetContent(StatusText);
+	auto* StatusSlot = CastChecked<UScaleBoxSlot>(StatusText->Slot);
+	StatusSlot->SetHorizontalAlignment(HAlign_Left);
+	StatusSlot->SetVerticalAlignment(VAlign_Center);
+	Place(StatusFit, 80, 716, 560, 70);
 	HostButton->OnClicked.AddDynamic(this, &ThisClass::Host);
 	FindButton->OnClicked.AddDynamic(this, &ThisClass::Find);
 	QuitButton->OnClicked.AddDynamic(this, &ThisClass::AskQuit);

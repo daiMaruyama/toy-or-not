@@ -42,11 +42,36 @@ public:
 	// 下に出す状態の文字。ロード中は描画が別スレッドなので、ロードを始める前に決めておく。
 	void SetStatus(const FText& Text);
 	// 出しはじめ。黒から明けて出てくる。
-	void Restart() { ShownAt = FPlatformTime::Seconds(), Exit = 0.f, ToyEndsAt = -1.0; }
+	void Restart()
+	{
+		ShownAt = FPlatformTime::Seconds();
+		Exit = 0.f;
+		ToyEndsAt = -1.0;
+		bHoldClosed = false;
+		bPaintedClosed = false;
+		LastRevealPaint = 0.;
+		FilmReveal.Store(0.f);
+	}
+	void HoldDepartureCurtain() { bHoldClosed = true; bPaintedClosed = false; }
+	bool HasPaintedClosed() const { return bPaintedClosed; }
+	bool IsHoldingDeparture() const { return bHoldClosed; }
+	float GetFilmReveal() const { return FilmReveal.Load(); }
+	double GetLastRevealPaint() const { return LastRevealPaint; }
+	void ContinueFilmReveal(const STBLoadingScreen& Other)
+	{
+		FilmReveal.Store(FMath::Max(GetFilmReveal(), Other.GetFilmReveal()));
+	}
+	void FinishDeparture(float FadeInSeconds)
+	{
+		const double Midpoint = FPlatformTime::Seconds() - FadeInSeconds * .5;
+		ShownAt = bHoldClosed ? Midpoint : FMath::Min(ShownAt, Midpoint);
+		bHoldClosed = false;
+	}
 	// ロード中に MoviePlayer が描いていた絵から、時間・おもちゃ・文字を引き継ぐ。同じ部品を2か所に付けないため、別に作って続ける。
 	void ContinueFrom(const STBLoadingScreen& Other)
 	{
 		SetStatus(Other.Status);
+		ContinueFilmReveal(Other);
 		ShownAt = Other.ShownAt, Started = Other.Started, Exit = 0.f, ToyEndsAt = -1.0;
 		Loop = Other.Loop, Toy = Other.Toy;
 	}
@@ -64,6 +89,11 @@ public:
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(1280, 720); }
 
 private:
+	bool bHoldClosed = false;
+	mutable bool bPaintedClosed = false;
+	// Each renderer owns its frame clock. Only the drawn fraction crosses the MoviePlayer handoff.
+	mutable double LastRevealPaint = 0.;
+	mutable TAtomic<float> FilmReveal{0.f};
 	int32 Edition = 0;
 	ETBLoadingBackdrop Backdrop = ETBLoadingBackdrop::Illustrations;
 	TAtomic<bool> bShowNativePoster{false};
