@@ -252,7 +252,10 @@ bool FTBParkedVehicleTest::RunTest(const FString&)
 	Match->bEscapePhase = true;
 	Toy->TBPS()->Team = ETBTeam::Toy;
 	Toy->TBPS()->ToyState = ETBToyState::Free;
+	const FRotator BoardingAim(-18.f, Car->GetActorRotation().Yaw - 27.f, 0.f);
+	PC->SetControlRotation(BoardingAim);
 	if (!TestTrue(TEXT("Board the authored car"), Car->Board(Toy))) return false;
+	TestTrue(TEXT("Boarding preserves the player's look direction"), PC->GetControlRotation().Equals(BoardingAim, .01f));
 	FMinimalViewInfo View;
 	Toy->CalcCamera(.016f, View);
 	const FVector Start = Car->GetActorLocation();
@@ -285,15 +288,16 @@ bool FTBParkedVehicleTest::RunTest(const FString&)
 	AddInfo(FString::Printf(TEXT("Parked %s, camera %s, driven %s"), *Start.ToString(), *View.Location.ToString(), *Car->GetActorLocation().ToString()));
 	TestTrue(TEXT("Driver can pull forward out of the parking spot"), FVector::DotProduct(Car->GetActorLocation() - Start, Car->GetActorForwardVector()) > 10.);
 	Car->SetActorLocation(FVector(20000, 20000, 10000), false, nullptr, ETeleportType::TeleportPhysics);
+	const FRotator FreeLook(19.f, -64.f, 0.f);
+	PC->SetControlRotation(FreeLook);
 	Toy->CalcCamera(.016f, View);
-	const FVector Chase = Car->GetActorTransform().InverseTransformVectorNoScale(View.Location - Car->GetActorLocation());
-	TestTrue(TEXT("Open driving view sits behind and to the side of the car"), Chase.X < -180. && Chase.Y > 50.);
-	TestEqual(TEXT("Open road restores the original chase distance"),
-		FVector::Distance(View.Location, Car->GetActorLocation() + FVector::UpVector * 45.), 250., .1);
+	const FVector ExpectedEye = Car->GetActorLocation() + FVector::UpVector * 45. - FreeLook.Vector() * 250.;
+	TestTrue(TEXT("Open driving view follows the player's yaw and pitch"),
+		View.Rotation.Equals(FreeLook, .01f) && View.Location.Equals(ExpectedEye, .1));
 	Car->AddActorWorldRotation(FRotator(0, 75, 0));
 	Toy->CalcCamera(.016f, View);
-	TestTrue(TEXT("The rear-quarter view follows a turn"), Chase.Equals(
-		Car->GetActorTransform().InverseTransformVectorNoScale(View.Location - Car->GetActorLocation()), .1));
+	TestTrue(TEXT("Steering does not rotate the player's view"),
+		View.Rotation.Equals(FreeLook, .01f) && View.Location.Equals(ExpectedEye, .1));
 	return !HasAnyErrors();
 }
 

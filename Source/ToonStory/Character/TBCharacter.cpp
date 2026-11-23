@@ -846,15 +846,6 @@ void ATBCharacter::UpdateCarryCamera()
 	UpdateAppearance(TBPS() && TBPS()->Team == ETBTeam::Toy);
 }
 
-void ATBCharacter::OnRep_EscapeVehicle()
-{
-	if (IsValid(EscapeVehicle) && IsLocallyControlled() && Controller)
-	{
-		VehicleYawAtBoarding = EscapeVehicle->GetActorRotation().Yaw;
-		Controller->SetControlRotation(FRotator(-16.f, VehicleYawAtBoarding - 22.f, 0.f));
-	}
-}
-
 void ATBCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 {
 	Super::CalcCamera(DeltaTime, OutResult);
@@ -862,9 +853,7 @@ void ATBCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 	{
 		const float CarScale = FMath::Max(.01f, float(EscapeVehicle->GetActorScale3D().GetAbsMin()));
 		const FVector BodyCentre = EscapeVehicle->Mesh->Bounds.Origin;
-		FRotator View = GetControlRotation();
-		View.Yaw += FMath::FindDeltaAngleDegrees(VehicleYawAtBoarding, float(EscapeVehicle->GetActorRotation().Yaw));
-		View.Pitch = FMath::ClampAngle(View.Pitch, -55.f, 5.f);
+		const FRotator View = GetControlRotation();
 		FCollisionQueryParams Query(SCENE_QUERY_STAT(TBEscapeVehicleCamera), false, this);
 		Query.AddIgnoredActor(EscapeVehicle);
 		// Give the sightline some width so thin chair legs cannot fill the foreground.

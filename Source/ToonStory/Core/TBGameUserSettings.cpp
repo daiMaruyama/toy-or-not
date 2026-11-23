@@ -144,8 +144,8 @@ void UTBGameUserSettings::SetQualityPreset(int32 Level)
 
 float UTBGameUserSettings::GetResolutionScalePercent() const
 {
-	// 0 はエンジンの既定（100% 以下）。
-	return ScalabilityQuality.ResolutionQuality > 0.f ? ScalabilityQuality.ResolutionQuality : 100.f;
+	// UE はプレイヤーが倍率を選ぶまで 0 を保持する。
+	return ScalabilityQuality.ResolutionQuality > 0.f ? ScalabilityQuality.ResolutionQuality : TB::ConfigData().Display.ResolutionScale.Default;
 }
 
 void UTBGameUserSettings::StepResolutionScale(int32 Steps)

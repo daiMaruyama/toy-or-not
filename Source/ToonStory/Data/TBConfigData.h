@@ -149,7 +149,7 @@ struct FTBDisplayConfig
 	int32 MinViewDistanceQuality = 2;
 	/** 描画解像度（%）。上げると遠くの小さいおもちゃがくっきり見えるので、100 より上にはできない */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "画面", meta = (DisplayName = "描画解像度（%）"))
-	FTBNumberSetting ResolutionScale = FTBNumberSetting(100.f, 50.f, 100.f, 5.f);
+	FTBNumberSetting ResolutionScale = FTBNumberSetting(65.f, 50.f, 100.f, 5.f);
 	/** 表示のガンマ（標準は 2.2）。暗がりを明るくしすぎると隠れているおもちゃが見えるので、上げる幅は小さくする */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "画面", meta = (DisplayName = "明るさ"))
 	FTBNumberSetting Brightness = FTBNumberSetting(2.2f, 1.8f, 2.5f, .1f);
