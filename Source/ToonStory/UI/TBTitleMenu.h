@@ -141,6 +141,8 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UButton> HelpHumanTab;
 	UPROPERTY(Transient) TObjectPtr<class UImage> HelpComic;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> HelpGoal;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpCaptions;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> HelpSpeech;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitleContent;
 	UPROPERTY(Transient) TObjectPtr<UWidget> HelpOverlay;
 	UPROPERTY(Transient) TObjectPtr<UButton> CloseHelpButton;

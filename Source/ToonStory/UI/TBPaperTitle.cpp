@@ -291,64 +291,75 @@ void UTBTitleMenu::BuildPaperLayout()
 	End->OnClicked.AddDynamic(this, &ThisClass::Quit);
 	QuitOverlay->SetVisibility(ESlateVisibility::Collapsed);
 
-	HelpOverlay = NewPopup(1600, 900, FLinearColor::FromSRGBColor(FColor(235, 224, 199)));
-	auto* Paper = WidgetTree->ConstructWidget<UImage>();
-	Paper->SetBrushFromTexture(TBPaper::Art(TEXT("GuidePaper")));
-	Paper->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Paper, 0, 0, 1600, 900);
+	// The two text-free photo plates share the same 1230 x 771 print layout.
+	HelpOverlay = NewPopup(1440, 810, TBPaper::PrintInk.CopyWithNewOpacity(.81f));
+	auto* Page = WidgetTree->ConstructWidget<UCanvasPanel>();
+	Place(Page, 105, 20, 1230, 771);
+	Canvas = Page;
+	HelpComic = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("HelpComic"));
+	HelpComic->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Place(HelpComic, 0, 0, 1230, 771);
 
-	auto* Heading = Label(TBText::Get(TEXT("Root.Title.Help")), 30, TBPaper::PrintCream, true);
-	Heading->SetAutoWrapText(false);
-	auto* FitHeading = WidgetTree->ConstructWidget<UScaleBox>();
-	FitHeading->SetStretch(EStretch::ScaleToFit);
-	FitHeading->SetStretchDirection(EStretchDirection::DownOnly);
-	FitHeading->SetContent(Heading);
-	auto* HeadingSlot = CastChecked<UScaleBoxSlot>(Heading->Slot);
-	HeadingSlot->SetHorizontalAlignment(HAlign_Left);
-	HeadingSlot->SetVerticalAlignment(VAlign_Center);
-	Place(FitHeading, 118, 23, 235, 58);
-	auto GuideButton = [&](const TCHAR* Name, const TCHAR* Key, float X, float Y, float Width)
+	auto FitLabel = [&](UTextBlock* Text, float X, float Y, float Width, float Height,
+	                    EHorizontalAlignment Alignment)
 	{
-		auto* Button = AddButton(Name, TBText::Get(Key), X, Y, Width);
-		CastChecked<UCanvasPanelSlot>(Button->Slot)->SetSize(FVector2D(Width, 44));
-		auto* Caption = CastChecked<UTextBlock>(Button->GetContent());
-		Caption->SetFont(FSlateFontInfo(LogoFont, 15));
-		Caption->SetColorAndOpacity(TBPaper::PrintInk);
-		auto* Slot = CastChecked<UButtonSlot>(Caption->Slot);
-		Slot->SetHorizontalAlignment(HAlign_Center);
+		Text->SetAutoWrapText(false);
+		auto* Fit = WidgetTree->ConstructWidget<UScaleBox>();
+		Fit->SetStretch(EStretch::ScaleToFit);
+		Fit->SetStretchDirection(EStretchDirection::DownOnly);
+		Fit->SetContent(Text);
+		auto* Slot = CastChecked<UScaleBoxSlot>(Text->Slot);
+		Slot->SetHorizontalAlignment(Alignment);
 		Slot->SetVerticalAlignment(VAlign_Center);
-		return Button;
+		Fit->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Place(Fit, X, Y, Width, Height);
+		return Fit;
 	};
-	HelpToyTab = GuideButton(TEXT("HelpToyTab"), TEXT("Root.Help.ToyTab"), 406, 31, 118);
-	HelpHumanTab = GuideButton(TEXT("HelpHumanTab"), TEXT("Root.Help.HumanTab"), 536, 31, 118);
+	FitLabel(Label(TBText::Get(TEXT("Root.Title.Help")), 23, TBPaper::PrintInk, true),
+	    43, 28, 328, 43, HAlign_Left);
+	HelpToyTab = DialogButton(TEXT("HelpToyTab"), TEXT("Root.Help.ToyTab"), 967, 28, 104, TBPaper::PrintCream);
+	HelpHumanTab = DialogButton(TEXT("HelpHumanTab"), TEXT("Root.Help.HumanTab"), 1070, 28, 116, TBPaper::PrintCream);
 	HelpToyTab->OnClicked.AddDynamic(this, &ThisClass::ShowToyHelp);
 	HelpHumanTab->OnClicked.AddDynamic(this, &ThisClass::ShowHumanHelp);
 
-	HelpGoal = Label(FText::GetEmpty(), 16, TBPaper::PrintInk, true, TEXT("HelpGoal"));
-	HelpGoal->SetAutoWrapText(false);
-	auto* FitGoal = WidgetTree->ConstructWidget<UScaleBox>();
-	FitGoal->SetStretch(EStretch::ScaleToFit);
-	FitGoal->SetStretchDirection(EStretchDirection::DownOnly);
-	FitGoal->SetContent(HelpGoal);
-	auto* GoalSlot = CastChecked<UScaleBoxSlot>(HelpGoal->Slot);
-	GoalSlot->SetHorizontalAlignment(HAlign_Right);
-	GoalSlot->SetVerticalAlignment(VAlign_Center);
-	Place(FitGoal, 698, 24, 802, 57);
+	HelpGoal = Label(FText::GetEmpty(), 33, TBPaper::PrintInk, true, TEXT("HelpGoal"));
+	FitLabel(HelpGoal, 43, 106, 294, 112, HAlign_Left);
 
-	auto* Margin = WidgetTree->ConstructWidget<UBorder>();
-	Margin->SetBrush(FSlateRoundedBoxBrush(FLinearColor::White, 0.f, FLinearColor::FromSRGBColor(FColor(221, 218, 212)), 1.f));
-	Margin->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Place(Margin, 563.5f, 111.7f, 473, 705.4f);
-	HelpComic = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("HelpComic"));
-	HelpComic->SetVisibility(ESlateVisibility::HitTestInvisible);
-	auto* FitComic = WidgetTree->ConstructWidget<UScaleBox>();
-	FitComic->SetStretch(EStretch::ScaleToFit);
-	FitComic->SetContent(HelpComic);
-	Place(FitComic, 574, 111.7f, 452, 705.4f);
-	auto* Credit = Label(TBText::Get(TEXT("Root.Help.BudgetNote")), 12, TBPaper::Muted, false, TEXT("HelpCredit"));
-	Place(Credit, 100, 844, 1020, 35);
-	CloseHelpButton = GuideButton(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 1364, 834, 136);
-	CloseHelpButton->SetStyle(TBPaper::PrintButtonStyle(TBPaper::PrintHoney));
+	auto* HandFont = TBPaper::Font(this, TBPaper::EFontRole::Hand);
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		const bool bPhotoOnRight = Index == 1;
+		const float Top = 111.f + 196.f * Index;
+		auto* Badge = WidgetTree->ConstructWidget<UBorder>();
+		Badge->SetBrush(FSlateRoundedBoxBrush(TBPaper::PrintInk, 0.f));
+		Badge->SetPadding(FMargin(8.f, 3.f, 12.f, 4.f));
+		Badge->SetVisibility(ESlateVisibility::HitTestInvisible);
+		auto* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		Badge->SetContent(Row);
+		auto* Number = Label(FText::AsCultureInvariant(FString::Printf(TEXT("%02d"), Index + 1)), 10, TBPaper::PrintHoney, true);
+		Number->SetAutoWrapText(false);
+		auto* NumberSlot = Row->AddChildToHorizontalBox(Number);
+		NumberSlot->SetPadding(FMargin(0, 0, 7, 0));
+		NumberSlot->SetVerticalAlignment(VAlign_Center);
+		auto* Caption = Label(FText::GetEmpty(), 12, TBPaper::PrintCream, true,
+		    FName(*FString::Printf(TEXT("HelpCaption%d"), Index + 1)));
+		Caption->SetAutoWrapText(false);
+		Row->AddChildToHorizontalBox(Caption);
+		HelpCaptions.Add(Caption);
+		auto* BadgeSlot = Page->AddChildToCanvas(Badge);
+		BadgeSlot->SetPosition(FVector2D(bPhotoOnRight ? 640 : 396, Top + 3));
+		BadgeSlot->SetAutoSize(true);
+
+		auto* Line = Label(FText::GetEmpty(), 18, TBPaper::PrintInk, false,
+		    FName(*FString::Printf(TEXT("HelpSpeech%d"), Index + 1)));
+		Line->SetFont(FSlateFontInfo(HandFont, 18));
+		Line->SetJustification(ETextJustify::Center);
+		HelpSpeech.Add(Line);
+		// Keep all lines inside the oval even when a translation needs more horizontal space.
+		auto* SpeechFit = FitLabel(Line, bPhotoOnRight ? 434 : 968, Top + 48, 178, 87, HAlign_Center);
+		SpeechFit->SetRenderTransformAngle(bPhotoOnRight ? 3.f : -3.f);
+	}
+	CloseHelpButton = DialogButton(TEXT("CloseHelp"), TEXT("Root.Help.Close"), 1100, 714, 86, TBPaper::PrintCream);
 	CloseHelpButton->OnClicked.AddDynamic(this, &ThisClass::CloseHelp);
 	HelpOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	RefreshHelpText();
@@ -378,7 +389,14 @@ void UTBTitleMenu::RefreshHelpText()
 	HelpToyTab->SetStyle(TBPaper::PrintButtonStyle(bHumanHelp ? TBPaper::PrintCream : TBPaper::PrintHoney));
 	HelpHumanTab->SetStyle(TBPaper::PrintButtonStyle(bHumanHelp ? TBPaper::PrintAqua : TBPaper::PrintCream));
 	HelpGoal->SetText(TBText::Get(bHumanHelp ? TEXT("Root.Help.HumanGoal") : TEXT("Root.Help.ToyGoal")));
-	HelpComic->SetBrushFromTexture(TBPaper::Art(bHumanHelp ? TEXT("GuideHuman") : TEXT("GuideToy")), true);
+	const TCHAR* Role = bHumanHelp ? TEXT("Human") : TEXT("Toy");
+	for (int32 Index = 0; Index < HelpCaptions.Num(); ++Index)
+	{
+		const FString Prefix = FString::Printf(TEXT("Root.Help.%s.Panel%d."), Role, Index + 1);
+		HelpCaptions[Index]->SetText(TBText::Get(*(Prefix + TEXT("Caption"))));
+		HelpSpeech[Index]->SetText(TBText::Get(*(Prefix + TEXT("Speech"))));
+	}
+	HelpComic->SetBrushFromTexture(TBPaper::Art(bHumanHelp ? TEXT("GuideHuman") : TEXT("GuideToy")));
 }
 
 void UTBTitleMenu::ShowToyHelp()

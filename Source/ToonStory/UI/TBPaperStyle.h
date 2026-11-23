@@ -42,7 +42,7 @@ namespace TBPaper
 	inline const FLinearColor Danger = FLinearColor::FromSRGBColor(FColor(166, 48, 40));
 	inline const FLinearColor Outline = FLinearColor::FromSRGBColor(FColor(59, 27, 9));
 	inline const FLinearColor Shadow = FLinearColor(0.025f, 0.012f, 0.006f, .24f);
-	enum class EFontRole : uint8 { Body, Heading, Display, Numeric };
+	enum class EFontRole : uint8 { Body, Heading, Display, Numeric, Hand };
 	inline FString Status(const FString& Value)
 	{
 		if (Value == TEXT("Create a room or find friends to begin."))
@@ -99,7 +99,8 @@ namespace TBPaper
 		Result->LegacyFontSize = 14;
 		const TCHAR* File = Role == EFontRole::Heading ? TEXT("mochiy.ttf") :
 		    Role == EFontRole::Display ? TEXT("mochiy.ttf") :
-		    Role == EFontRole::Numeric ? TEXT("toy-ui-numerals.ttf") : TEXT("zen-medium.ttf");
+		    Role == EFontRole::Numeric ? TEXT("toy-ui-numerals.ttf") :
+		    Role == EFontRole::Hand ? TEXT("yusei.ttf") : TEXT("zen-medium.ttf");
 		auto& Composite = Result->GetMutableInternalCompositeFont();
 		Composite.DefaultTypeface.Fonts.Emplace(
 		    TEXT("Regular"),

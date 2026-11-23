@@ -260,20 +260,37 @@ namespace
 					const TCHAR* Expected = Step == 1 ? TEXT("Root.Help.ToyGoal") : TEXT("Root.Help.HumanGoal");
 					const auto* Sheet = Cast<UImage>(Title->WidgetTree->FindWidget(TEXT("HelpComic")));
 					const auto* Art = Sheet ? Cast<UTexture2D>(Sheet->GetBrush().GetResourceObject()) : nullptr;
-					const auto* Credit = Cast<UTextBlock>(Title->WidgetTree->FindWidget(TEXT("HelpCredit")));
 					if (!Test->TestNotNull(TEXT("Role page has the player's comic"), Art) ||
-					    !Test->TestEqual(TEXT("Tab selects the correct portrait sheet"), Art->GetName(),
+					    !Test->TestEqual(TEXT("Tab selects the correct photo comic"), Art->GetName(),
 					        FString(Step == 1 ? TEXT("T_UI_GuideToy") : TEXT("T_UI_GuideHuman"))) ||
 					    !Test->TestTrue(TEXT("The complete comic fits with its original proportions"),
 					        FMath::IsNearlyEqual(Sheet->GetCachedGeometry().GetLocalSize().X /
 					            FMath::Max(1., double(Sheet->GetCachedGeometry().GetLocalSize().Y)),
-					            double(Art->GetSizeX()) / Art->GetSizeY(), .012)) ||
-					    !Test->TestNotNull(TEXT("Role page has an editable credit"), Credit) ||
-					    !Test->TestEqual(TEXT("Role page has its localized credit"), Credit->GetText().ToString(),
-					        TBText::String(TEXT("Root.Help.BudgetNote")))) return true;
+					            double(Art->GetSizeX()) / Art->GetSizeY(), .012))) return true;
 					if (!Test->TestNotNull(TEXT("Role page has an objective"), Goal) ||
 					    !Test->TestEqual(TEXT("Selected role shows its localized objective"),
 					        Goal->GetText().ToString(), TBText::String(Expected))) return true;
+					for (int32 Panel = 1; Panel <= 3; ++Panel)
+					{
+						const auto* Speech = Cast<UTextBlock>(Title->WidgetTree->FindWidget(
+						    FName(*FString::Printf(TEXT("HelpSpeech%d"), Panel))));
+						const FString Key = FString::Printf(TEXT("Root.Help.%s.Panel%d.Speech"),
+						    Step == 1 ? TEXT("Toy") : TEXT("Human"), Panel);
+						if (!Test->TestNotNull(TEXT("Panel has editable dialogue"), Speech) ||
+						    !Test->TestEqual(TEXT("Panel uses this role's dialogue"), Speech->GetText().ToString(),
+						        TBText::String(*Key))) return true;
+						// The safe area sits inside the oval, including room for its tilt.
+						const auto& Line = Speech->GetCachedGeometry();
+						const auto& Page = Sheet->GetCachedGeometry();
+						const FVector2D Size = Line.GetLocalSize();
+						const FVector2D Center(Panel == 2 ? 523.f : 1057.f, 202.5f + (Panel - 1) * 196.f);
+						for (FVector2D Corner : {FVector2D::ZeroVector, FVector2D(Size.X,0), Size, FVector2D(0,Size.Y)})
+						{
+							const FVector2D Offset = Page.AbsoluteToLocal(Line.LocalToAbsolute(Corner)) - Center;
+							if (!Test->TestTrue(TEXT("Dialogue fits within the balloon"),
+							    FMath::Square(Offset.X / 114.) + FMath::Square(Offset.Y / 58.) < 1.)) return true;
+						}
+					}
 				}
 				if (bTitle && Step == 3 && !CheckOptionButtons()) return true;
 				if (bTitle && (Step == 3 || Step == 11 || Step == 12) && !CheckSettingsScrollWidth()) return true;
