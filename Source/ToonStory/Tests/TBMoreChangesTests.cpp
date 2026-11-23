@@ -27,6 +27,7 @@
 #include "Core/TBController.h"
 #include "Core/TBSession.h"
 #include "Core/TBLobbySettings.h"
+#include "UI/TBUIText.h"
 #include "Engine/GameInstance.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBRescueEligibilityTest, "ToonStory.MoreChanges.RescueEligibility",
@@ -220,13 +221,13 @@ bool FTBLobbyVisibleTest::RunTest(const FString& Parameters)
 		for (const int32 Requested : {1, 3, 0, 2, -1, 4, MIN_int32, MAX_int32})
 		{
 			const int32 ExpectedId = Requested == 3 ? 3 : 1;
-			const TCHAR* ExpectedName = ExpectedId == 3 ? TEXT("Stylized House") : TEXT("Demo ＋ こども部屋");
+			const FString ExpectedName = TBText::String(ExpectedId == 3 ? TEXT("Stage.House") : TEXT("Stage.Demo"));
 			const int32 ExpectedItems = ExpectedId == 3 ? 8 : 10;
 			PC->ServerSelectStage(Requested);
 			TestEqual(TEXT("Selected stage retains its stable ID or falls back to Demo"),
 			          World->GetGameState<ATBGameState>()->SelectedStage, ExpectedId);
 			TestEqual(TEXT("Selected stage display name"), World->GetGameState<ATBGameState>()->StageName,
-			          FString(ExpectedName));
+			          ExpectedName);
 			TestTrue(TEXT("All stage selections retain the lobby pawn"), PC->GetPawn() == OriginalPawn);
 			TestEqual(TEXT("Selected stage item limit"), TBLobbySettings::AvailableItems(World), ExpectedItems);
 			TestEqual(TEXT("Stage path follows the same stable ID and fallback policy"),

@@ -4,6 +4,7 @@
 #include "TBGameMode.h"
 #include "TBGameState.h"
 #include "TBPlayerState.h"
+#include "UI/TBUIText.h"
 #include "Data/TBRuleData.h"
 #include "GamePlay/TBPickup.h"
 #include "Engine/GameInstance.h"
@@ -20,13 +21,13 @@ namespace
 	{
 		int32 Id;
 		const TCHAR* Path;
-		const TCHAR* Name;
+		const TCHAR* NameKey;
 		int32 ItemCount;
 	};
 	// ロビーでの表示・上限。実際のアイテム数はステージ到着時に再確認する。
 	// IDs survive saved selections; retired IDs and invalid values fall back to the retained Demo.
-	constexpr FStageDefinition Stages[] = {{TBLobbySettings::DemoStageId, TEXT("/Game/Maps/TB_ToyWorldDemoExpanded"), TEXT("Demo ＋ こども部屋"), 10},
-	                                       {TBLobbySettings::HouseStageId, TEXT("/Game/Maps/TB_StylizedHouse"), TEXT("Stylized House"), 8}};
+	constexpr FStageDefinition Stages[] = {{TBLobbySettings::DemoStageId, TEXT("/Game/Maps/TB_ToyWorldDemoExpanded"), TEXT("Stage.Demo"), 10},
+	                                       {TBLobbySettings::HouseStageId, TEXT("/Game/Maps/TB_StylizedHouse"), TEXT("Stage.House"), 8}};
 	const FStageDefinition* FindStage(int32 Index)
 	{
 		for (const auto& Stage : Stages) if (Stage.Id == Index) return &Stage;
@@ -63,6 +64,10 @@ const TCHAR* TBLobbySettings::StagePath(int32 Index)
 {
 	const auto* Stage = FindStage(Index);
 	return Stage ? Stage->Path : nullptr;
+}
+FString TBLobbySettings::StageDisplayName(int32 Index)
+{
+	return TBText::String(FindStage(Index)->NameKey);
 }
 int32 TBLobbySettings::StageIndex(const UWorld* World)
 {
@@ -124,7 +129,7 @@ void TBLobbySettings::SelectStage(ATBController* Host, int32 Index)
 	Pending->SelectedStage = Index;
 	State->SelectedStage = Index;
 	State->Settings.RequiredItems = FMath::Min(State->Settings.RequiredItems, AvailableItems(World));
-	State->StageName = FindStage(Index)->Name;
+	State->StageName = StageDisplayName(Index);
 	State->ForceNetUpdate();
 }
 bool TBLobbySettings::IsLobbyMapName(const FString& MapName)
@@ -184,7 +189,7 @@ FString TBLobbySettings::TryTravel(ATBGameMode* Mode, bool StartMatch)
 		return TEXT("移動先のマップが見つかりません。");
 	}
 	State->SelectedStage = FindStage(State->SelectedStage)->Id;
-	if (StartMatch) State->StageName = FindStage(State->SelectedStage)->Name;
+	if (StartMatch) State->StageName = StageDisplayName(State->SelectedStage);
 	Pending->PendingRules = State->Settings;
 	Pending->SelectedStage = State->SelectedStage;
 	Pending->ExpectedPlayers = State->PlayerArray.Num();
@@ -298,10 +303,7 @@ void TBLobbySettings::Restore(ATBGameMode* Mode)
 	// Arenaなどの直接起動時は、GameModeが設定したマップ名を維持する。
 	if (Pending->bDedicatedLobby || CurrentStage != INDEX_NONE)
 	{
-		if (const auto* Stage = FindStage(State->SelectedStage))
-		{
-			State->StageName = Stage->Name;
-		}
+		State->StageName = StageDisplayName(State->SelectedStage);
 	}
 	if (!Pending->PendingMap.IsEmpty() && World->GetMapName().EndsWith(FPackageName::GetShortName(Pending->PendingMap)))
 	{

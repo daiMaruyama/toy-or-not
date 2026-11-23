@@ -538,7 +538,7 @@ void ATBHUD::DrawLobby()
 		RoundedPanel(TBPaper::Teal, X + 1004 * S, Y + 209 * S, 146 * S, 32 * S, 4, 2);
 		DrawFittedText(TBText::String(TEXT("Stage.Preview")), Ink, X + 1013 * S, Y + 220 * S, 128 * S, .65f * S, true, true);
 		DrawText(House ? TEXT("01") : TEXT("02"), TBPaper::Gold, X + 538 * S, Y + 452 * S, PaperFont, .9f * S);
-		DrawFittedText(TBText::String(House ? TEXT("Stage.House") : TEXT("Stage.Demo")), TBPaper::Paper,
+		DrawFittedText(TBLobbySettings::StageDisplayName(DraftStage), TBPaper::Paper,
 		    X + 538 * S, Y + 483 * S, 600 * S, 1.38f * S, true);
 		auto Arrow = [&](FName Id, const TCHAR* Glyph, float PX)
 		{
