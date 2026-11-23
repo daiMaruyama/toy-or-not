@@ -166,7 +166,14 @@ void ATBMirror::Tick(float DeltaSeconds)
 	const float LastOnScreen=Surface->GetLastRenderTimeOnScreen();
 	const float VisibilityGrace=FMath::Max(.2f,DeltaSeconds+UE_KINDA_SMALL_NUMBER);
 	if (LastOnScreen<0 || Now-LastOnScreen>VisibilityGrace) return;
-	if (Now<NextCapture) return;
+	// The material samples screen-space UVs. Reusing a previous camera view while
+	// the player moves makes the reflection slide across the glass. Only throttle
+	// stationary views; a camera/projection/mirror change needs a matching capture.
+	const bool ViewChanged = !TargetTexture || !Eye.Equals(CapturedEye, .01) ||
+	    !View.Rotation.Quaternion().Equals(CapturedView, 1.e-5) ||
+	    !GetActorTransform().Equals(CapturedMirror, 1.e-5) ||
+	    !Projection.ProjectionMatrix.Equals(CapturedProjection, 1.e-5);
+	if (!ViewChanged && Now<NextCapture) return;
 	NextCapture=Now+1.f/FMath::Clamp(Data.FramesPerSecond,1.f,60.f);
 	const int32 Width=FMath::Clamp(Data.CaptureWidth,128,2048), Height=FMath::Clamp(FMath::RoundToInt(Width/Aspect),64,2048);
 	if (!TargetTexture)
@@ -189,5 +196,7 @@ void ATBMirror::Tick(float DeltaSeconds)
 	// Single bounce: never draw another live mirror texture into this one.
 	for (TActorIterator<ATBMirror> It(GetWorld()); It; ++It) ReflectionCamera->HiddenComponents.Add(It->Surface);
 	ReflectionCamera->CaptureScene();
+	CapturedEye=Eye; CapturedView=View.Rotation.Quaternion();
+	CapturedMirror=GetActorTransform(); CapturedProjection=Projection.ProjectionMatrix;
 	if (SurfaceMaterial) SurfaceMaterial->SetScalarParameterValue(TEXT("ReflectionEnabled"),1);
 }

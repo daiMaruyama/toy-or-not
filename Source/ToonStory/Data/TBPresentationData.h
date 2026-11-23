@@ -108,7 +108,22 @@ struct FTBRemoteFeel
 	float PressCooldown = .22f;
 };
 
-/** 箱のふた・部屋の光、テレビ、リモコンの演出 */
+USTRUCT(BlueprintType)
+struct FTBPickupFeel
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "電池",
+	          meta = (DisplayName = "光る視野の半角", Units = "Degrees", ClampMin = "1", ClampMax = "80"))
+	float HighlightHalfAngle = 25.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "電池",
+	          meta = (DisplayName = "光る距離", Units = "cm", ClampMin = "1"))
+	float HighlightDistance = 600.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "電池",
+	          meta = (DisplayName = "縁取りの強さ", ClampMin = "0", ClampMax = "1"))
+	float HighlightStrength = .28f;
+};
+
+/** 箱のふた・部屋の光、テレビ、リモコン、収集物の演出 */
 UCLASS(BlueprintType)
 class TOONSTORY_API UTBPresentationData : public UDataAsset
 {
@@ -122,6 +137,8 @@ public:
 	FTBRemoteFeel Remote;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "リザルト", meta = (ShowOnlyInnerProperties))
 	FTBResultFeel Result;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "電池", meta = (ShowOnlyInnerProperties))
+	FTBPickupFeel Pickup;
 
 #if WITH_EDITOR
 	// 1つずつの範囲は ClampMin で守り、ここでは値どうしの関係だけを確かめる。

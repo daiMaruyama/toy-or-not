@@ -71,6 +71,7 @@ void FStageSettingsDraftChecks::CheckDraft(UWorld* World)
 	if (!TestTrue(TEXT("No handoff is in progress"), Pending->PendingMap.IsEmpty())) return;
 	const FTBSettings OriginalRules = State->Settings;
 	const int32 OriginalStage = State->SelectedStage, OriginalPendingStage = Pending->SelectedStage;
+	const int32 OriginalResolvedStage = Pending->ResolvedStage;
 	const FString OriginalName = State->StageName;
 	const bool bStageSelected = Pending->bStageSelected, bSettingsOpen = HUD->IsLobbySettingsOpen();
 	const bool bReady = Player->bReady;
@@ -84,6 +85,7 @@ void FStageSettingsDraftChecks::CheckDraft(UWorld* World)
 		State->SelectedStage = OriginalStage;
 		State->StageName = OriginalName;
 		Pending->SelectedStage = OriginalPendingStage;
+		Pending->ResolvedStage = OriginalResolvedStage;
 		Pending->bStageSelected = bStageSelected;
 		Player->Preference = Preference;
 		Player->bReady = bReady;
@@ -214,6 +216,30 @@ void FStageSettingsDraftChecks::CheckDraft(UWorld* World)
 	TestEqual(TEXT("Smaller stage clamps collection target before saving"), State->Settings.RequiredItems,
 	    TBLobbySettings::StageItemCount(TBLobbySettings::HouseStageId));
 	EditorClosed(TEXT("Clamped save also returns directly to the lobby"));
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+	HUD->NotifyHitBoxClick(TEXT("DraftNextStage")); // House -> Random.
+	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
+	TestEqual(TEXT("Third stage choice saves Random"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	TestEqual(TEXT("Random preference is retained for travel"), Pending->SelectedStage, TBLobbySettings::RandomStageId);
+	TestEqual(TEXT("Saving Random does not draw a destination"), Pending->ResolvedStage, INDEX_NONE);
+	TestEqual(TEXT("Random collection target fits every candidate"), TBLobbySettings::AvailableItems(World), 8);
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+	HUD->NotifyHitBoxClick(TEXT("DraftPreviousStage"));
+	HUD->NotifyHitBoxClick(TEXT("CancelStage"));
+	TestEqual(TEXT("Cancelling a previous-stage edit keeps Random"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
+	TestEqual(TEXT("Reopening keeps the saved Random preference"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+	HUD->NotifyHitBoxClick(TEXT("DraftNextStage")); // Random -> Demo.
+	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
+	TestEqual(TEXT("Next stage wraps from Random to Demo"), State->SelectedStage, TBLobbySettings::DemoStageId);
+	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
+	HUD->NotifyHitBoxClick(TEXT("DraftPreviousStage")); // Demo -> Random.
+	HUD->NotifyHitBoxClick(TEXT("SaveStage"));
+	TestEqual(TEXT("Previous stage wraps from Demo to Random"), State->SelectedStage, TBLobbySettings::RandomStageId);
+	TestEqual(TEXT("Stage cycling never draws a destination"), Pending->ResolvedStage, INDEX_NONE);
+
 	HUD->NotifyHitBoxClick(TEXT("OpenSettings"));
 	HUD->NotifyHitBoxClick(TEXT("Toy"));
 	TestEqual(TEXT("Each player can explicitly choose toy"), Player->Preference, ETBTeam::Toy);

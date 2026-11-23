@@ -36,6 +36,8 @@ protected:
 
 private:
 	FTBGripCache GripCache;
+	FTBFallenSupportCache FallenSupport;
+	float FallenAngle = 0;
 	TWeakObjectPtr<AActor> AppliedVisual;
 	bool bAppliedOwnerNoSee = false;
 	bool bAppliedPause = false;

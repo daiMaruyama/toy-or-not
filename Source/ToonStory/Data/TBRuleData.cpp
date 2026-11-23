@@ -5,7 +5,8 @@
 
 bool FTBMomEventRules::IsValid() const
 {
-	return FMath::IsFinite(ArrivalSeconds) && ArrivalSeconds>=1 &&
+	return FMath::IsFinite(InitialDelaySeconds) && InitialDelaySeconds>=0 &&
+	       FMath::IsFinite(ArrivalSeconds) && ArrivalSeconds>=1 &&
 	       FMath::IsFinite(PersuadeSeconds) && PersuadeSeconds>=.1f &&
 	       FMath::IsFinite(Radius) && Radius>=20 && FMath::IsFinite(Height) && Height>=1;
 }
@@ -48,7 +49,7 @@ EDataValidationResult UTBRuleData::IsDataValid(FDataValidationContext& Context) 
 		Fail(LOCTEXT("InvalidPreparationTiming", "隠れる時間は0.1秒以上の有限の値にしてください。"));
 	}
 	if (!Events.Mom.IsValid())
-		Fail(LOCTEXT("InvalidMomEvent", "ママの到着は1秒以上、説得は0.1秒以上、範囲半径は20cm以上、足元の許容高さは1cm以上の有限値にしてください。"));
+		Fail(LOCTEXT("InvalidMomEvent", "ママの発生禁止時間は0秒以上、到着は1秒以上、説得は0.1秒以上、範囲半径は20cm以上、足元の許容高さは1cm以上の有限値にしてください。"));
 	if(RandomItems.SpawnCount<0 || RandomItems.SpawnCount>100 || !FMath::IsFinite(RandomItems.MinimumSeparation) || RandomItems.MinimumSeparation<0 ||
 	   !FMath::IsFinite(RandomItems.FloorProbeDistance) || RandomItems.FloorProbeDistance<1)
 		Fail(LOCTEXT("InvalidRandomItemLimits", "ランダム配置の出現数は0〜100、最短距離は0cm以上、床の確認距離は1cm以上の有限の値にしてください。"));

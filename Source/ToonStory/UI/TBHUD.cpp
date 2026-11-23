@@ -168,6 +168,16 @@ void ATBHUD::DrawHUD()
 			Options->Dismiss();
 		}
 	}
+	if (State->IsIgniting())
+	{
+		const float Bar = Canvas->ClipY * (41.f / 720.f);
+		DrawRect(FLinearColor::Black, 0, 0, Canvas->ClipX, Bar);
+		DrawRect(FLinearColor::Black, 0, Canvas->ClipY - Bar, Canvas->ClipX, Bar);
+		const double Elapsed = State->IgnitionElapsed();
+		const float Fade = 1.f - FMath::Clamp(6. * FMath::Min(Elapsed, FTBEscapeIgnition::Duration - Elapsed), 0., 1.);
+		if (Fade > 0.f) DrawRect(FLinearColor(0, 0, 0, Fade), 0, 0, Canvas->ClipX, Canvas->ClipY);
+		return;
+	}
 	if (State->bTravelPending) bConfirmingLeave = false;
 	if ((bConfirmingLeave || bPlayersOpen) && State->Phase == ETBPhase::Lobby)
 	{

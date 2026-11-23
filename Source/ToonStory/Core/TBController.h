@@ -144,6 +144,8 @@ private:
 	bool UpdateResultPresentation(const class ATBGameState& State);
 	void EndResultPresentation();
 	TWeakObjectPtr<class ACameraActor> ResultCamera;
+	void UpdateIgnitionView(const ATBGameState* Match);
+	bool bWatchingIgnition = false;
 	bool bResultFade = false;
 	bool bResultCut = false;
 	bool bResultRevealed = false;

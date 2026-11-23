@@ -104,7 +104,7 @@ void ATBController::PlayerTick(float DeltaTime)
 	}
 	const auto* State = TB::GS(GetWorld());
 	const bool InLobby = State && State->Phase == ETBPhase::Lobby;
-	if (!State || State->Phase != ETBPhase::Playing) bLeaveMenuOpen = false;
+	if (!State || State->Phase != ETBPhase::Playing || State->IsIgniting()) bLeaveMenuOpen = false;
 	UpdateChat();
 	const auto* HUD = Cast<ATBHUD>(GetHUD());
 	const bool BlockingPanel = HUD && (HUD->IsChatBlocked() || HUD->IsStagePickerOpen());
@@ -113,7 +113,11 @@ void ATBController::PlayerTick(float DeltaTime)
 	const bool bClosingCurtain = UTBLoadingScreenSubsystem::IsClosingOverDeparture(GetWorld());
 	if (!bClosingCurtain) UpdateLobbyCamera(InLobby || ShouldHidePreparationView());
 	UpdateMenuInput(ShowMenu || (State && State->IsLobbyReturnStopped() && HasAuthority()), InLobby);
-	if (!bClosingCurtain) UpdateScreenTransition();
+	if (!bClosingCurtain)
+	{
+		UpdateScreenTransition();
+		UpdateIgnitionView(State);
+	}
 	UpdateResultView();
 	UpdateViewAspect();
 	SyncInputContexts();
@@ -121,6 +125,27 @@ void ATBController::PlayerTick(float DeltaTime)
 	{
 		Notice.Reset();
 		NoticeExpires = 0;
+	}
+}
+
+void ATBController::UpdateIgnitionView(const ATBGameState* Match)
+{
+	auto* Vehicle = Match && Match->IsIgniting() && !ShouldHidePreparationView() ? Match->Ignition.Vehicle.Get() : nullptr;
+	if (IsValid(Vehicle))
+	{
+		if (!bWatchingIgnition)
+		{
+			TBScreen::HoldBlack(this, false);
+			SetIgnoreLookInput(true);
+			bWatchingIgnition = true;
+		}
+		if (GetViewTarget() != Vehicle) SetViewTarget(Vehicle);
+	}
+	else if (bWatchingIgnition)
+	{
+		SetIgnoreLookInput(false);
+		bWatchingIgnition = false;
+		if (GetPawn() && (!Match || Match->Phase == ETBPhase::Playing)) SetViewTarget(GetPawn());
 	}
 }
 
@@ -363,6 +388,12 @@ bool ATBController::ShouldHidePreparationView() const
 	const auto* State = TB::GS(GetWorld());
 	const auto* Info = GetPlayerState<ATBPlayerState>();
 	if (!State) return true;
+	// A released round with a powered car is already past the hidden entrance.
+	// A Begin for a newer round must still cover any older replicated snapshot.
+	if (State->Phase == ETBPhase::Playing && !State->bTravelPending && !State->IsPreparing() &&
+	    State->Ignition.StartsAt >= 0 && Info && Info->Team != ETBTeam::None &&
+	    (!bPreparationStartMask || PreparationStartRound == State->HidePreparation.Round))
+		return false;
 	if (bPreparationStartMask && (State->Phase != ETBPhase::Playing || !State->HidePreparation.bValid ||
 	    State->HidePreparation.Round != PreparationStartRound || PreparationViewRound != PreparationStartRound ||
 	    !Info || Info->Team != PreparationViewTeam)) return true;
@@ -483,9 +514,9 @@ void ATBController::UpdateLobbyCamera(bool InLobby)
 				}
 			}
 		}
-		if (LobbyCamera.IsValid() && GetViewTarget() != LobbyCamera.Get())
+		if (LobbyCamera.IsValid())
 		{
-			SetViewTarget(LobbyCamera.Get());
+			if (GetViewTarget() != LobbyCamera.Get()) SetViewTarget(LobbyCamera.Get());
 			bLobbyCameraActive = true;
 		}
 	}
@@ -512,6 +543,9 @@ void ATBController::UpdateMenuInput(bool ShowMenu, bool LobbyPointer)
 		{
 			SetIgnoreLookInput(ShowMenu);
 			SetIgnoreMoveInput(ShowMenu);
+			if (ShowMenu)
+				if (auto* Body = Cast<ATBCharacter>(GetPawn()); Body && Body->TBPS() && Body->TBPS()->Team == ETBTeam::Toy)
+					Body->UnCrouch(); // UI focus can consume the physical key-up; end the held fall now.
 		}
 		ApplyMenuInputMode();
 	}
@@ -661,7 +695,7 @@ void ATBController::ToggleLeaveMenu()
 		}
 		return;
 	}
-	if (State && State->Phase == ETBPhase::Playing) bLeaveMenuOpen = !bLeaveMenuOpen;
+	if (State && State->Phase == ETBPhase::Playing && !State->IsIgniting()) bLeaveMenuOpen = !bLeaveMenuOpen;
 }
 
 void ATBController::TBHost()

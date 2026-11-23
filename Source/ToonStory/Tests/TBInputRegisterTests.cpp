@@ -101,6 +101,9 @@ bool FTBRegisteredSurviveGCTest::RunTest(const FString& Parameters)
 	PC->SyncInputContexts();
 	TestTrue(TEXT("Sprint is still bound to the IMC action"),
 	         IsStartedBound(PawnInput, ActionOfKey(Settings->ToyContext.LoadSynchronous(), EKeys::LeftShift)));
+	TestTrue(TEXT("Toy fall reuses the bound crouch action with a separate role mapping"),
+	    ActionOfKey(Settings->ToyContext.LoadSynchronous(), EKeys::LeftControl) == Settings->CrouchAction.LoadSynchronous() &&
+	    IsStartedBound(PawnInput, Settings->CrouchAction.LoadSynchronous()));
 	const UInputAction* Push = Settings->PushAction.LoadSynchronous();
 	const UInputMappingContext* Toys = Settings->ToyContext.LoadSynchronous();
 	TestTrue(TEXT("Mouse and gamepad both trigger toy push"), Push &&

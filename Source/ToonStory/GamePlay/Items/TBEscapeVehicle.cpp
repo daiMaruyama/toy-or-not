@@ -10,6 +10,8 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "Sound/SoundBase.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EngineUtils.h"
@@ -21,6 +23,14 @@ ATBEscapeVehicle::ATBEscapeVehicle()
 	PrimaryActorTick.bCanEverTick = true;
 	bAlwaysRelevant = true;
 	SetReplicateMovement(true);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Plane(TEXT("/Engine/BasicShapes/Plane"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Lamp(TEXT("/Game/Items/EscapeVehicle/M_IgnitionLens"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> Ignition(TEXT("/Game/Audio/SE/rc_ignition"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> ToyIgnition(TEXT("/Game/Audio/SE/rc_ignition_toy"));
+	LensPlane = Plane.Object;
+	LensMaterial = Lamp.Object;
+	IgnitionSound = Ignition.Object;
+	ToyIgnitionSound = ToyIgnition.Object;
 	Collision = CreateDefaultSubobject<UBoxComponent>(TEXT("VehicleCollision"));
 	Collision->SetBoxExtent(FVector(55.f, 40.f, 20.f));
 	Collision->SetCollisionProfileName(TEXT("BlockAllDynamic"));
@@ -72,6 +82,8 @@ void ATBEscapeVehicle::BeginPlay()
 	Super::BeginPlay();
 	LoadedData = VehicleData.LoadSynchronous();
 	StartTransform = GetActorTransform();
+	ParkedMeshLocation = Mesh->GetRelativeLocation();
+	ShotCenter = GetActorTransform().InverseTransformPosition(Mesh->Bounds.Origin);
 	BoardingArea->OnComponentBeginOverlap.AddDynamic(this, &ATBEscapeVehicle::OnBoardingOverlap);
 	for (FTBItemAction& Action : Actions) Action.MaxDistance = FMath::Max(1.f, Data().InteractionDistance);
 }
@@ -172,6 +184,7 @@ void ATBEscapeVehicle::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	if (!FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0) return;
 	const auto* Match = TB::GS(GetWorld());
+	if (GetNetMode() != NM_DedicatedServer) UpdateIgnitionEffects(Match);
 	if (ResultStart >= 0)
 	{
 		// 壁を抜けてもカメラの前を通れるよう、当たり判定なしで線の上を進める。
@@ -239,6 +252,7 @@ void ATBEscapeVehicle::ResetRound()
 
 void ATBEscapeVehicle::EndPlay(const EEndPlayReason::Type Reason)
 {
+	StopIgnitionEffects();
 	if (HasAuthority()) ReleasePassengers();
 	Super::EndPlay(Reason);
 }

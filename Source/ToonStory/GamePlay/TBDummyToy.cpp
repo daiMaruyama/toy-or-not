@@ -71,8 +71,7 @@ void ATBDummyToy::RefreshVisual()
 	}
 	TBToyPresentation::Initialize(Visual->GetChildActor());
 	TBToyPresentation::Animate(Visual->GetChildActor(), 0, true);
-	SettleFrames = 12;
-	SetActorTickEnabled(true);
+	OnRep_Placement();
 }
 void ATBDummyToy::Tick(float DeltaSeconds)
 {
@@ -85,11 +84,23 @@ void ATBDummyToy::Tick(float DeltaSeconds)
 	{
 		ResetPlacement();
 	}
-	if (!Holder)
+	const bool bRestingFlat = bLyingAtRest && !Holder && !StoredBox && !bFalling;
+	if (bRestPoseDirty && Visual->GetChildActor())
+	{
+		const FRotator Rotation = bRestingFlat ? TBToyPresentation::FallRotation(Visual->GetChildActor(), 90.f) : FRotator::ZeroRotator;
+		Visual->SetRelativeLocationAndRotation(FVector(0, 0, -13), Rotation);
+		if (bRestingFlat)
+		{
+			FTBFallenSupportCache Support;
+			TBToyPresentation::GroundFallen(Visual, GetActorLocation().Z - 13.f, Support);
+		}
+		bRestPoseDirty = false;
+	}
+	if (!Holder && !bRestingFlat)
 	{
 		TBToyPresentation::Ground(Visual, GetActorLocation().Z - 13.f);
 	}
-	else
+	else if (Holder)
 	{
 		TBToyPresentation::Grip(Visual, Holder->GetCarryGripLocation(), GripCache);
 	}
@@ -112,8 +123,7 @@ void ATBDummyToy::OnRep_Holder()
 	// Stored decoys must be visible to storage/drop-area occupancy sweeps.
 	Collision->SetCollisionResponseToChannel(ECC_GameTraceChannel1, StoredBox ? ECR_Block : ECR_Ignore);
 	Collision->SetCollisionEnabled(Holder ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryAndPhysics);
-	SettleFrames = 12;
-	SetActorTickEnabled(true);
+	OnRep_Placement();
 	if (Holder)
 	{
 		AttachToComponent(Holder->CarryAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
@@ -206,6 +216,7 @@ void ATBDummyToy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	DOREPLIFETIME(ATBDummyToy, VisualClass);
 	DOREPLIFETIME(ATBDummyToy, StoredBox);
 	DOREPLIFETIME(ATBDummyToy, bFalling);
+	DOREPLIFETIME(ATBDummyToy, bLyingAtRest);
 }
 
 bool ATBDummyToy::TryPickUpNearest(ATBCharacter* Human, float ClosestDistance)

@@ -56,6 +56,13 @@ DAの数値を変更したらPlayを開始し直して確認する。`/Game/Data
 
 ## 実際の暗さ
 
+House と Demo はレベル読み込み時に、配置済みの一部の室内灯だけ照射半径を制限する。
+House の広域点光源3灯は最大20m、対象のスポット・矩形ライトは最大9m。Demo の対象4灯は最大6.5m。
+House の天井スポット4灯（`SpotLight5`、`SpotLight6`、`SpotLight7`、`SpotLight_0`）は、歩く人物の影が床で四角くなるのを抑えるため、外側コーンの半角を最大80度にする。
+対象は `ATBRoomLighting::ApplyStageLightRanges` のレベル名・Actor名で指定する。配置を改名したときはこの対応も確認する。
+既に上限より短いライトはその値を使う。消灯・再点灯や暗所の凝視判定は従来どおり部屋単位。
+Epic のローカルライトは柔らかい影のサンプリングを4レイにする。影の解像度は `Config/DefaultScalability.ini` の設定に従う。
+
 ポストプロセスで画面を暗転させず、登録したライトそのものを消す。
 プロジェクトは既にLumen有効・Static Lighting無効。Movableライトは動的な直接光と間接光に対応する。
 参考: https://dev.epicgames.com/documentation/unreal-engine/movable-light-mobility-in-unreal-engine
@@ -73,7 +80,7 @@ Staticライトの焼き込み光は実行中に消せない。全体のSkyLight
 - `ToonStory.Items.LightSwitch`: 共通の対象選択、部屋未設定の拒否、両チームの切り替え、
   無効化・凍結・範囲外・未知のアクションで状態が変わらないこと、DAによる操作距離の変更。
 - `ToonStory.Data.Lighting`: 既定値・共有スイッチDAの存在。
-- `ToonStory.Lighting.AuthoredStage`: 上記各マップをStandaloneで起動して実行。
+- `ToonStory.Lighting.AuthoredStage` は `/Game/Maps/TB_ToyWorldDemoExpanded` を Standalone で起動して実行する。
   保存した参照、ライトのMobility、重複割り当て、スイッチ数、人間・おもちゃの体格で
   壁や家具と重ならない床上の操作位置、共通対象選択、操作による消灯・再点灯を確認する。
   スイッチ付近の到達性を検証するもので、開始地点からの経路全体は検証しない。

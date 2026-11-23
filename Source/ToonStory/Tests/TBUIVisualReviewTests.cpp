@@ -84,6 +84,8 @@ namespace
 		{
 			OldLanguage = TBText::GetLanguage();
 			bRosterOnly = !bTitle && FParse::Param(FCommandLine::Get(), TEXT("UIReviewRosterOnly"));
+			bRandomOnly = !bTitle && FParse::Param(FCommandLine::Get(), TEXT("UIReviewRandomStageOnly"));
+			if (bRandomOnly) Step = 1;
 			bCompactHintsOnly = !bTitle && FParse::Param(FCommandLine::Get(), TEXT("UIReviewCompactHintsOnly"));
 			if (auto* Settings = UTBGameUserSettings::Get()) OldSavedLanguage = Settings->GetLanguage();
 			FString RequestedLanguage;
@@ -419,7 +421,7 @@ namespace
 			if (FScreenshotRequest::IsScreenshotRequested()) return false;
 			Test->TestTrue(*FString::Printf(TEXT("Rendered screenshot: %s"), *Name),
 			              IFileManager::Get().FileSize(*Path) > 1024);
-			if ((!bTitle && Step == 46) || (bTitle && Step == 13)) return true;
+			if (bRandomOnly || (!bTitle && Step == 46) || (bTitle && Step == 13)) return true;
 			// Photograph the settings return before the existing match sequence;
 			// retain the earlier step indices used by transition/gaze assertions.
 			if (bCompactHintsOnly && Step == 0) Step = 9;
@@ -967,8 +969,8 @@ namespace
 				Test->TestTrue(TEXT("Game settings opens directly to stage and rules"),
 				    HUD->IsLobbySettingsOpen() && HUD->IsStagePickerOpen());
 				// Select a known preview through the draft only; no map or rules save.
-				HUD->NotifyHitBoxClick(TEXT("StageExpanded"));
-				Name = TEXT("11-room-settings");
+				HUD->NotifyHitBoxClick(bRandomOnly ? TEXT("StageRandom") : TEXT("StageExpanded"));
+				Name = bRandomOnly ? TEXT("11-random-stage") : TEXT("11-room-settings");
 				break;
 			case 2:
 				HUD->NotifyHitBoxClick(TEXT("DraftNextStage"));
@@ -1471,6 +1473,7 @@ namespace
 		uint32 OldRound = 0;
 		bool bTitle, bEntered = false, bRequested = false, bOldModeTick = false;
 		bool bRosterOnly = false;
+		bool bRandomOnly = false;
 		bool bCompactHintsOnly = false;
 		bool bOldSettings = false, bOldEscape = false, bOldReady = false, bOldVehicleResult = false;
 		bool bOldGazeRequested = false, bOldCameraConstrained = false, bChangedGazeView = false;

@@ -341,14 +341,14 @@ bool ATBCharacter::CanRequestEmote() const
 {
 	if (!IsLocallyControlled() || !EmoteEligible()) return false;
 	const auto* State = TB::GS(GetWorld());
-	return !Emote.bActive && FMath::IsFinite(Emote.NextAllowedAt) && State->GetServerWorldTimeSeconds() >= Emote.NextAllowedAt &&
-	    (HasAuthority() || (Emote.Player == TBPS() && Emote.Round == State->HidePreparation.Round &&
+	return (HasAuthority() || (Emote.Player == TBPS() && Emote.Round == State->HidePreparation.Round &&
 	      Emote.Possession != 0 && Emote.Possession == HumanLook.Possession && !bEmoteRejected));
 }
 
 bool ATBCharacter::RequestEmote(ETBEmoteKind Kind)
 {
 	if (!SupportsEmoteKind(Kind) || !CanRequestEmote()) return false;
+	if (Emote.bActive && Emote.Kind == Kind && TB::GS(GetWorld())->GetServerWorldTimeSeconds() < Emote.EndsAt) return false;
 	if (HasAuthority()) return TryEmote(Kind);
 	ServerEmote(Kind, Emote.Round, Emote.Possession);
 	return true; // Request delivery is not a claim of server acceptance.
@@ -377,24 +377,24 @@ bool ATBCharacter::TryEmote(ETBEmoteKind Kind)
 	UpdateEmote(); // Cancellation always precedes a new request in the same frame.
 	const auto* State = TB::GS(GetWorld());
 	const double Duration = EmoteDuration(Kind);
-	if (!EmoteEligible() || Emote.bActive || LastEmoteCancelFrame == GFrameCounter ||
-	    State->GetServerWorldTimeSeconds() < Emote.NextAllowedAt) return false;
+	if (!EmoteEligible() || LastEmoteCancelFrame == GFrameCounter ||
+	    (Emote.bActive && Emote.Kind == Kind)) return false;
 	Emote.bActive = true; Emote.Kind = Kind;
 	if (++Emote.Revision == 0) ++Emote.Revision;
 	Emote.Player = TBPS(); Emote.Team = TBPS()->Team; Emote.Round = State->HidePreparation.Round;
 	Emote.Phase = State->Phase;
 	Emote.Possession = HumanLookPossession; Emote.Visual = EmoteVisualIndex();
 	Emote.StartsAt = State->GetServerWorldTimeSeconds(); Emote.EndsAt = Emote.StartsAt + Duration;
-	Emote.NextAllowedAt = Emote.StartsAt + 4.;
+	Emote.NextAllowedAt = 0; // Different gestures can replace this one; expiry has no recovery delay.
 	ForceNetUpdate(); return true;
 }
 
-void ATBCharacter::CancelEmote()
+void ATBCharacter::CancelEmote(bool bInterrupted)
 {
 	if (!HasAuthority() || !Emote.bActive) return;
 	Emote.bActive = false; Emote.Kind = ETBEmoteKind::None;
 	if (++Emote.Revision == 0) ++Emote.Revision;
-	LastEmoteCancelFrame = GFrameCounter;
+	if (bInterrupted) LastEmoteCancelFrame = GFrameCounter;
 	ForceNetUpdate();
 }
 
@@ -413,7 +413,11 @@ void ATBCharacter::UpdateEmote()
 	const ETBPhase Phase = State ? State->Phase : ETBPhase::Lobby;
 	const bool Changed = Emote.Player != TBPS() || Emote.Team != Team || Emote.Round != Round ||
 	    Emote.Phase != Phase || Emote.Possession != HumanLookPossession || Emote.Visual != EmoteVisualIndex();
-	if (Emote.bActive && (Changed || !EmoteEligible() || !State || State->GetServerWorldTimeSeconds() >= Emote.EndsAt)) CancelEmote();
+	if (Emote.bActive)
+	{
+		if (Changed || !EmoteEligible() || !State) CancelEmote();
+		else if (State->GetServerWorldTimeSeconds() >= Emote.EndsAt) CancelEmote(false);
+	}
 	if (Changed)
 	{
 		if (++Emote.Revision == 0) ++Emote.Revision;
@@ -479,7 +483,11 @@ bool ATBCharacter::GetEmoteSample(FTBEmoteSample& Out) const
 void ATBCharacter::RestoreEmoteHair()
 {
 	for (const auto& Entry : EmoteHairVisibility)
-		if (auto* Hair = Entry.Key.Get()) Hair->SetHiddenInGame(Entry.Value);
+		if (auto* Hair = Entry.Key.Get())
+		{
+			Hair->SetHiddenInGame(Entry.Value.bHiddenInGame);
+			Hair->SetCastHiddenShadow(Entry.Value.bCastHiddenShadow);
+		}
 	EmoteHairVisibility.Reset();
 }
 
@@ -498,7 +506,9 @@ void ATBCharacter::UpdateHairEmote()
 	for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Assembly))
 		if (Part->GetFName() == TEXT("Hair"))
 		{
-			if (!EmoteHairVisibility.Contains(Part)) EmoteHairVisibility.Add(Part, Part->bHiddenInGame);
+			if (!EmoteHairVisibility.Contains(Part))
+				EmoteHairVisibility.Add(Part, FEmoteHairState{bool(Part->bHiddenInGame), bool(Part->bCastHiddenShadow)});
+			Part->SetCastHiddenShadow(false);
 			Part->SetHiddenInGame(true);
 		}
 }
@@ -520,7 +530,7 @@ bool ATBCharacter::CanAct() const
 {
 	const auto* ToyPlayerInfo = TBPS();
 	const auto* State = TB::GS(GetWorld());
-	return TB::Playing(GetWorld()) && State && !State->IsPreparing() && ToyPlayerInfo && !ToyPlayerInfo->bFrozen &&
+	return TB::Playing(GetWorld()) && State && !State->IsPreparing() && !State->IsIgniting() && ToyPlayerInfo && !ToyPlayerInfo->bFrozen &&
 	       (ToyPlayerInfo->Team == ETBTeam::Human ||
 	        (ToyPlayerInfo->Team == ETBTeam::Toy && ToyPlayerInfo->ToyState == ETBToyState::Free));
 }
@@ -556,6 +566,7 @@ bool ATBCharacter::IsPhysicsLocked() const
 	const auto* MatchInfo = TB::GS(GetWorld());
 	const auto* ToyPlayerInfo = TBPS();
 	if (MatchInfo && MatchInfo->Phase == ETBPhase::Lobby && MatchInfo->bTravelPending) return true;
+	if (MatchInfo && MatchInfo->IsIgniting()) return true;
 	if (MatchInfo && MatchInfo->IsPreparing() && (!ToyPlayerInfo || ToyPlayerInfo->Team != ETBTeam::Toy)) return true;
 	if (MatchInfo && (MatchInfo->Phase == ETBPhase::Results || MatchInfo->Phase == ETBPhase::Aborted))
 	{
@@ -568,7 +579,7 @@ bool ATBCharacter::IsPhysicsLocked() const
 
 bool ATBCharacter::IsMovementLocked() const
 {
-	return IsPhysicsLocked() || IsGazeFrozen();
+	return IsPhysicsLocked() || IsGazeFrozen() || IsToyFallen();
 }
 
 // 同期された状態から、体格・衝突・移動モードをそろえる。
@@ -578,6 +589,15 @@ void ATBCharacter::ApplyState()
 	if (!ToyPlayerInfo)
 	{
 		return;
+	}
+	if (MovementTeam != ToyPlayerInfo->Team)
+	{
+		if (HasAuthority() || IsLocallyControlled())
+		{
+			UnCrouch();
+			GetCharacterMovement()->UnCrouch(false);
+		}
+		MovementTeam = ToyPlayerInfo->Team;
 	}
 	const bool Toy = ToyPlayerInfo->Team == ETBTeam::Toy;
 	// ToyPawnはConfig/DefaultEngine.iniで定義する専用オブジェクトチャンネル。
@@ -601,11 +621,18 @@ void ATBCharacter::ApplyState()
 				// Use its own groom bounds so hair outside the face is not culled at view edges.
 				if (Part->GetFName() == TEXT("Hair"))
 				{
+					// OwnerNoSee hides this groom in first person. Keep its shadow resources
+					// updated so secondary views (mirrors/TV) still render the scalp hair.
+					Part->SetCastHiddenShadow(true);
 					Part->bUseAttachParentBound = false;
 					Part->SetBoundsScale(1.2f);
 					Part->UpdateBounds();
 				}
 				auto* Skinned = Cast<USkeletalMeshComponent>(Part);
+				// The player's camera hides their outfit with OwnerNoSee. Its visible meshes
+				// still cast the walking silhouette on the floor in first person.
+				if (Skinned && Skinned->CastShadow && Skinned->IsVisible() && !Skinned->bHiddenInGame)
+					Skinned->SetCastHiddenShadow(true);
 				if (Skinned && Skinned->GetFName() == TEXT("Face"))
 				{
 					// The entrance camera sees the back of the head. Groom bindings still
@@ -643,7 +670,9 @@ void ATBCharacter::ApplyState()
 	if (auto* Assembly = HumanVisual->GetChildActor())
 		for (auto* Part : TInlineComponentArray<UPrimitiveComponent*>(Assembly))
 			Part->SetOwnerNoSee(IsHuman() && !IsCelebrating());
-	if (!Toy && LoadedChildMesh) GetMesh()->SetVisibility(!HumanVisual->GetChildActor());
+	const bool bUseFallbackHumanMesh = !Toy && LoadedChildMesh && !HumanVisual->GetChildActor();
+	if (!Toy && LoadedChildMesh) GetMesh()->SetVisibility(bUseFallbackHumanMesh);
+	GetMesh()->SetCastHiddenShadow(bUseFallbackHumanMesh);
 	UpdateHairEmote();
 	const bool Held = EscapeVehicle || ToyPlayerInfo->ToyState == ETBToyState::Grabbed ||
 	                  ToyPlayerInfo->ToyState == ETBToyState::Carried ||
@@ -952,6 +981,7 @@ void ATBCharacter::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	if (const auto* Match = TB::GS(GetWorld()); Match && Match->IsIgniting()) return;
 	if (EscapeVehicle && VehicleExitStarted >= 0 &&
 	    GetWorld()->GetTimeSeconds() - VehicleExitStarted >= FMath::Max(.1f, EscapeVehicle->Data().ExitHoldSeconds))
 	{
@@ -1296,7 +1326,7 @@ void ATBCharacter::Right(float InputValue)
 // 運ばれている間は移動できないが、人間の周りを左右に回り込める。
 void ATBCharacter::Yaw(float InputValue)
 {
-	if (!IsMovementLocked() || Carrier || EscapeVehicle)
+	if (!IsMovementLocked() || Carrier || EscapeVehicle || (IsToyFallen() && !IsGazeFrozen()))
 	{
 		AddControllerYawInput(InputValue * LookScale().X);
 	}
@@ -1312,7 +1342,7 @@ FVector2D ATBCharacter::LookScale()
 // 運ばれている間の見下ろし角は掴まれた時点の値で固定する。
 void ATBCharacter::Pitch(float InputValue)
 {
-	if (!IsMovementLocked() || EscapeVehicle)
+	if (!IsMovementLocked() || EscapeVehicle || (IsToyFallen() && !IsGazeFrozen()))
 	{
 		AddControllerPitchInput(InputValue * LookScale().Y);
 	}
@@ -1425,7 +1455,7 @@ void ATBCharacter::SetupPlayerInputComponent(UInputComponent* Input)
 			Enhanced->BindAction(JumpAction, ETriggerEvent::Completed, this, &ATBCharacter::JumpReleased);
 			Enhanced->BindAction(JumpAction, ETriggerEvent::Canceled, this, &ATBCharacter::JumpReleased);
 		}
-		// しゃがみは人間、ダッシュは人形のIMCにだけある。どちらが効くかは付いているIMCで決まる。
+		// 姿勢Actionを押している間、人間はしゃがみ、おもちゃは倒れる。キー設定行は陣営別。
 		if (const UInputAction* CrouchAction = Settings->CrouchAction.LoadSynchronous())
 		{
 			Enhanced->BindAction(CrouchAction, ETriggerEvent::Started, this, &ATBCharacter::CrouchPressed);

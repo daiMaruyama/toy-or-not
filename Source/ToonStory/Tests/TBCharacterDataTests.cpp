@@ -9,11 +9,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTBCharacterDataTest, "ToonStory.Data.Character
 
 bool FTBCharacterDataTest::RunTest(const FString& Parameters)
 {
-	// C++ の初期値は、移す前に実際に効いていた値と同じ。人形の速さは BP の上書き（歩き40×1.25、走り120）を引き継ぐ。
+	// 人形の速さは元の BP の値（歩き40×1.25、走り120）を引き継ぐ。
 	const auto* Defaults = GetDefault<UTBCharacterData>();
-	TestEqual(TEXT("Human walk"), Defaults->Human.WalkSpeed, 270.f);
-	TestEqual(TEXT("Human carry"), Defaults->Human.CarrySpeed, 180.f);
-	TestEqual(TEXT("Human crouch"), Defaults->Human.WalkSpeed * Defaults->Human.CrouchSpeedRatio, 270.f * .48f);
+	TestEqual(TEXT("Human walk"), Defaults->Human.WalkSpeed, 255.f);
+	TestEqual(TEXT("Human carry"), Defaults->Human.CarrySpeed, 170.f);
+	TestEqual(TEXT("Human crouch"), Defaults->Human.WalkSpeed * Defaults->Human.CrouchSpeedRatio, 255.f * .48f);
 	TestEqual(TEXT("Human jump"), Defaults->Human.JumpVelocity, 420.f);
 	TestEqual(TEXT("Human step"), Defaults->Human.MaxStepHeight, 45.f);
 	TestEqual(TEXT("Toy walk"), Defaults->Toy.WalkSpeed, 40.f * 1.25f);

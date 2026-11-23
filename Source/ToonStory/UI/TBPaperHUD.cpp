@@ -118,6 +118,7 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 	}
 	const int32 Stage = Name == TEXT("StageExpanded") ? TBLobbySettings::DemoStageId
 	                    : Name == TEXT("StagePlayroom") ? TBLobbySettings::HouseStageId
+	                    : Name == TEXT("StageRandom") ? TBLobbySettings::RandomStageId
 	                                                    : INDEX_NONE;
 	if (bStagePickerOpen)
 	{
@@ -129,7 +130,7 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 		const auto& Match = TB::Rules().Match;
 		if (Name == TEXT("SaveStage"))
 		{
-			if (!FPackageName::DoesPackageExist(TBLobbySettings::StagePath(DraftStage)))
+			if (!TBLobbySettings::IsStageAvailable(DraftStage))
 			{
 				StageDraftNotice = TEXT("Stage.SaveFailed");
 				return true;
@@ -150,8 +151,12 @@ bool ATBHUD::HandleLobbyPanelClick(FName Name)
 			return true;
 		}
 		if (Stage != INDEX_NONE) DraftStage = Stage;
-		else if (Name == TEXT("DraftNextStage") || Name == TEXT("DraftPreviousStage"))
-			DraftStage = DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::DemoStageId : TBLobbySettings::HouseStageId;
+		else if (Name == TEXT("DraftNextStage"))
+			DraftStage = DraftStage == TBLobbySettings::DemoStageId ? TBLobbySettings::HouseStageId
+			    : DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::RandomStageId : TBLobbySettings::DemoStageId;
+		else if (Name == TEXT("DraftPreviousStage"))
+			DraftStage = DraftStage == TBLobbySettings::RandomStageId ? TBLobbySettings::HouseStageId
+			    : DraftStage == TBLobbySettings::HouseStageId ? TBLobbySettings::DemoStageId : TBLobbySettings::RandomStageId;
 		else if (Name == TEXT("DraftLessTime")) StageDraft.Duration -= Match.DurationStep;
 		else if (Name == TEXT("DraftMoreTime")) StageDraft.Duration += Match.DurationStep;
 		else if (Name == TEXT("DraftFewerItems")) --StageDraft.RequiredItems;
@@ -260,19 +265,27 @@ void ATBHUD::DrawLobby()
 		const int32 Value = FMath::RoundToInt(Seconds);
 		return Value % 60 == 0 ? Number(TEXT("Stage.Minutes"), Value / 60) : Number(TEXT("Stage.Seconds"), Value);
 	};
-	auto Preview = [&](bool House, float PX, float PY, float W, float H, float FS)
+	auto Preview = [&](int32 Stage, float PX, float PY, float W, float H, float FS)
 	{
-		const auto* Entry = ArtTextures.Find(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo"));
+		const bool Random = Stage == TBLobbySettings::RandomStageId;
+		const bool House = Stage == TBLobbySettings::HouseStageId;
 		Rect(PX, PY, W, H, PrintCream);
 		const float PW = W - 4, PH = H - 4;
-		if (Entry && *Entry && (*Entry)->GetSizeY() > 0)
+		if (Random)
+		{
+			Rect(PX + 2, PY + 2, PW, PH, PrintSea);
+			Label(TEXT("?"), PX, PY + H * .40f, W, FS * 4.f, PrintCream, true);
+			Label(TBText::String(TEXT("Stage.RandomHint")), PX + 12, PY + H * .7f, W - 24, FS, PrintCream, true);
+		}
+		else if (const auto* Entry = ArtTextures.Find(House ? TEXT("StagePreview_House") : TEXT("StagePreview_Demo"));
+		         Entry && *Entry && (*Entry)->GetSizeY() > 0)
 		{
 			const float Aspect = float((*Entry)->GetSizeX()) / (*Entry)->GetSizeY();
 			const float U = FMath::Min(1.f, PW / PH / Aspect), V = FMath::Min(1.f, Aspect * PH / PW);
 			DrawTexture(Entry->Get(), X + (PX + 2) * S, Y + (PY + 2) * S, PW * S, PH * S,
 			    (1 - U) * .5f, (1 - V) * .5f, U, V);
 		}
-		const FString Name = TBText::String(House ? TEXT("Stage.House") : TEXT("Stage.Demo"));
+		const FString Name = TBText::String(Random ? TEXT("Stage.Random") : House ? TEXT("Stage.House") : TEXT("Stage.Demo"));
 		float TW = 0, TH = 0;
 		GetTextSize(Name, TW, TH, HeadingFont, FS);
 		const float NameW = FMath::Min(W - 4.f, TW + 24.f), NameH = TH + 9.f;
@@ -317,7 +330,7 @@ void ATBHUD::DrawLobby()
 		Dots(1061, 109, 346, 458, PrintInk.CopyWithNewOpacity(.6f));
 		Rect(1077, 121, 4, 26, PrintHoney);
 		Label(TBText::String(TEXT("Stage.Stage")), 1091, 134, 286, 1.22f, PrintCream);
-		Preview(State->SelectedStage == TBLobbySettings::HouseStageId, 1077, 156, 315, 268, .98f);
+		Preview(State->SelectedStage, 1077, 156, 315, 268, .98f);
 		auto Fact = [&](const TCHAR* Key, const FString& Value, float CY)
 		{
 			Label(TBText::String(Key), 1078, CY, 225, .84f, PrintCream);
@@ -398,10 +411,11 @@ void ATBHUD::DrawLobby()
 	Dots(589, 99, 818, 628, PrintAqua.CopyWithNewOpacity(.13f));
 	Frame(900, 120, 196, 37, PrintHoney);
 	Label(TBText::String(TEXT("Stage.ChooseStage")), 907, 139, 182, 1.12f, PrintInk, true);
-	Preview(House, 613, 169, 770, 494, 1.4f);
+	Preview(DraftStage, 613, 169, 770, 494, 1.4f);
 	Button(TEXT("DraftPreviousStage"), TEXT("‹"), 614, 676, 33, 32, PrintCream, Host, 1.16f);
 	Button(TEXT("DraftNextStage"), TEXT("›"), 1350, 676, 33, 32, PrintCream, Host, 1.16f);
-	Label(House ? TEXT("02 / 02") : TEXT("01 / 02"), 909, 692, 178, 1.f, PrintCream, true);
+	Label(DraftStage == TBLobbySettings::RandomStageId ? TEXT("03 / 03") : House ? TEXT("02 / 03") : TEXT("01 / 03"),
+	      909, 692, 178, 1.f, PrintCream, true);
 
 	if (!StageDraftNotice.IsNone()) Label(TBText::String(*StageDraftNotice.ToString()), 40, 765, 930, .84f, PrintCream);
 	if (Host) Button(TEXT("CancelStage"), TBText::String(TEXT("Stage.Cancel")), 1085, 747, 154, 39);

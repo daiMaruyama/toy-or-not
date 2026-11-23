@@ -69,20 +69,30 @@ bool FTBToyPushTest::RunTest(const FString&)
 	auto* PropPusher = MakeToy(PropLane);
 	auto* Prop = MakeBox(PropLane + FVector(32, 0, 0), true);
 	auto* Passive = MakeBox(PropLane + FVector(0, 100, 0), true);
+	auto* OtherPassive = MakeBox(PropLane + FVector(0, 160, 0), true);
 	FHitResult Impact(Passive->GetOwner(), Passive, Passive->Bounds.Origin, -FVector::ForwardVector);
-	CastChecked<UTBMovement>(PropPusher->GetCharacterMovement())->ApplyImpactPhysicsForces(
-	    Impact, FVector(500, 0, 0), FVector(200, 0, 0));
+	auto* PropMovement = CastChecked<UTBMovement>(PropPusher->GetCharacterMovement());
+	PropMovement->ApplyImpactPhysicsForces(Impact, FVector(500, 0, 0), FVector(200, 0, 0));
+	// Different props remain pushable in the same frame (A, B, then A again).
+	FHitResult OtherImpact(OtherPassive->GetOwner(), OtherPassive, OtherPassive->Bounds.Origin, -FVector::ForwardVector);
+	PropMovement->ApplyImpactPhysicsForces(OtherImpact, FVector(500, 0, 0), FVector(200, 0, 0));
+	PropMovement->ApplyImpactPhysicsForces(Impact, FVector(500, 0, 0), FVector(200, 0, 0));
 	TestTrue(TEXT("Tagged physics prop can be pushed"), PropPusher->TryPush());
 	// Chaos may consume queued impulses on the next simulation step.
 	Fixtures.Remove(Prop->GetOwner());
 	Fixtures.Remove(Passive->GetOwner());
+	Fixtures.Remove(OtherPassive->GetOwner());
 	ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(.2f));
-	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, Prop, Passive]()
+	ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, Prop, Passive, OtherPassive]()
 	{
 		TestTrue(TEXT("Explicit push moves the prop forward"), Prop->GetPhysicsLinearVelocity().X > 0);
-		TestTrue(TEXT("Ordinary toy contact leaves the prop still"), Passive->GetPhysicsLinearVelocity().IsNearlyZero());
+		TestTrue(TEXT("Ordinary toy contact nudges the prop without duplicate acceleration"),
+			Passive->GetPhysicsLinearVelocity().X > 1.f && Passive->GetPhysicsLinearVelocity().X <= 66.f);
+		TestTrue(TEXT("A second prop receives its own modest push in the same frame"),
+			OtherPassive->GetPhysicsLinearVelocity().X > 1.f && OtherPassive->GetPhysicsLinearVelocity().X <= 66.f);
 		Prop->GetOwner()->Destroy();
 		Passive->GetOwner()->Destroy();
+		OtherPassive->GetOwner()->Destroy();
 		return true;
 	}));
 

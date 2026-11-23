@@ -7,6 +7,18 @@
 #include "TBGameState.generated.h"
 
 class ATBBox;
+class ATBEscapeVehicle;
+
+USTRUCT()
+struct FTBEscapeIgnition
+{
+	GENERATED_BODY()
+	static constexpr double Duration = 111.0 / 24.0;
+	UPROPERTY()
+	double StartsAt = -1;
+	UPROPERTY()
+	TObjectPtr<ATBEscapeVehicle> Vehicle = nullptr;
+};
 
 // Replicate validity, authority decision and deadline together; zero on a client is not permission to reveal.
 USTRUCT()
@@ -36,7 +48,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndReason) override;
 private:
-	void ConfigurePushableProps(ULevel* Level, UWorld* World);
+	void ConfigureStageActors(ULevel* Level, UWorld* World);
 	TMap<TWeakObjectPtr<UPrimitiveComponent>, double> PropPeakHeights;
 	UFUNCTION()
 	void OnPropHit(UPrimitiveComponent* Part, AActor* Other, UPrimitiveComponent* OtherPart,
@@ -72,6 +84,15 @@ public:
 	int32 Collected = 0;
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	bool bEscapePhase = false;
+	UPROPERTY(ReplicatedUsing=OnRep_Ignition)
+	FTBEscapeIgnition Ignition;
+	UFUNCTION()
+	void OnRep_Ignition();
+private:
+	double IgnitionReceivedAt = -1;
+public:
+	bool IsIgniting() const { return Phase == ETBPhase::Playing && !bEscapePhase && Ignition.StartsAt >= 0; }
+	double IgnitionElapsed() const;
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	bool bVehicleEscapeResult = false;
 	// 車で脱出できた人。勝敗と同じ GameState で送り、結果の画面や音と同時に届くようにする。

@@ -35,6 +35,7 @@ bool FTBAuthoredMomTest::RunTest(const FString&)
 	if (!Human || !Info || !Match || World->GetNetMode() != NM_Standalone) return false;
 	const auto OldTeam = Info->Team; const auto OldTransform = Human->GetActorTransform();
 	TBTest::FPlayingScope Playing(*Match, World->GetTimeSeconds() + 600);
+	Match->HidePreparation.EndsAt = Match->GetServerWorldTimeSeconds() - TB::Rules().Events.Mom.InitialDelaySeconds;
 	ON_SCOPE_EXIT { Info->Team = OldTeam; Human->SetActorTransform(OldTransform); Human->ApplyState(); };
 	Info->Team = ETBTeam::Human; Human->ApplyState();
 	const auto& Rules = TB::Rules().Events;
@@ -51,10 +52,12 @@ bool FTBAuthoredMomTest::RunTest(const FString&)
 		for (FVector Offset : {FVector::ZeroVector, FVector(45,0,0), FVector(-45,0,0), FVector(0,45,0), FVector(0,-45,0)})
 		{
 			FHitResult Floor;
+			// Visible pushables are not human floors. Match the standing capsule's channel.
 			if (TestTrue(TEXT("Persuasion area has floor"), World->LineTraceSingleByChannel(Floor,
-			    Origin+Offset+FVector(0,0,80), Origin+Offset-FVector(0,0,100), ECC_Visibility, Query)))
+			    Origin+Offset+FVector(0,0,80), Origin+Offset-FVector(0,0,100), ECC_Pawn, Query)))
 			{
-				TestTrue(TEXT("Human can stand in persuasion area"), TB::SupportsCapsule(World,
+				TestTrue(*FString::Printf(TEXT("Human can stand in persuasion area at %s (surface=%s, PawnResponse=%d)"),
+				    *(Origin+Offset).ToString(), *GetNameSafe(Floor.GetActor()), int32(Floor.GetComponent()->GetCollisionResponseToChannel(ECC_Pawn))), TB::SupportsCapsule(World,
 				    Floor.ImpactPoint+FVector(0,0,TBCharacterGeometry::HumanHalfHeight+2.15),
 				    TBCharacterGeometry::HumanRadius, TBCharacterGeometry::HumanHalfHeight, ECC_Pawn, Query));
 			}

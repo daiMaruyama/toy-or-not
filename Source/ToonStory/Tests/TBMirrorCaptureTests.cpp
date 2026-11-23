@@ -63,6 +63,19 @@ bool FTBMirrorCaptureTest::RunTest(const FString&)
 		if(Measurement->Phase==0) {
 			TestNotNull(TEXT("Visible mirror starts capture"),Mirror->TargetTexture.Get());
 			TestTrue(TEXT("Visible mirror continues capture"),Mirror->NextCapture>0);
+			// A stationary view respects the capture budget, but movement must not reuse
+			// a texture projected from the previous screen-space camera.
+			const double DelayedCapture=World->GetTimeSeconds()+60;
+			Mirror->NextCapture=DelayedCapture;
+			Mirror->Tick(.016f);
+			TestEqual(TEXT("Stationary mirror respects update interval"),Mirror->NextCapture,DelayedCapture);
+			Camera->AddActorWorldOffset(Camera->GetActorRightVector()*5);
+			PC->PlayerCameraManager->UpdateCamera(.016f);
+			Mirror->Tick(.016f);
+			TestTrue(TEXT("Moving viewpoint immediately refreshes reflection"),Mirror->NextCapture<DelayedCapture);
+			TestTrue(TEXT("Capture matches the current reflected eye"),Mirror->ReflectionCamera->GetComponentLocation().Equals(
+				ATBMirror::ReflectPoint(PC->PlayerCameraManager->GetCameraLocation(),Mirror->GetActorLocation(),Mirror->GetActorForwardVector()),.01));
+
 			Wall->SetActorHiddenInGame(false);
 		} else if(Measurement->Phase==1) {
 			// 遮蔽クエリの遅延が収束してから、さらに8秒更新されないことを確認。

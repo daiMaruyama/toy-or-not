@@ -117,12 +117,22 @@ ATBMomArrivalZone* ATBMomArrivalZone::FindActive(UWorld* World)
 	return nullptr;
 }
 
+bool ATBMomArrivalZone::HasPassedOpeningDelay(UWorld* World)
+{
+	const auto* Match = TB::GS(World);
+	const float Delay = TB::Rules().Events.Mom.InitialDelaySeconds;
+	return Match && Match->HidePreparation.bValid && !Match->IsPreparing() &&
+	       FMath::IsFinite(Delay) && Delay >= 0 && FMath::IsFinite(Match->HidePreparation.EndsAt) &&
+	       Match->GetServerWorldTimeSeconds() - Match->HidePreparation.EndsAt >= Delay;
+}
+
 bool ATBMomArrivalZone::StartEvent()
 {
 	const auto* Match=TB::GS(GetWorld());
 	const auto& Rules=TB::Rules().Events.Mom;
 	if (!HasAuthority() || !bEnabled || !TB::Playing(GetWorld()) || !Match || Match->IsPreparing() ||
-	    !Rules.IsValid() || !HasHumanPlayer(GetWorld()) || FindActive(GetWorld())) return false;
+	    !Rules.IsValid() || !HasPassedOpeningDelay(GetWorld()) ||
+	    !HasHumanPlayer(GetWorld()) || FindActive(GetWorld())) return false;
 	Round=Match->HidePreparation.Round;
 	State=FTBMomArrivalState();
 	State.bActive=true;
