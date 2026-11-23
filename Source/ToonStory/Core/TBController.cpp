@@ -500,18 +500,19 @@ void ATBController::UpdateLobbyCamera(bool InLobby)
 void ATBController::UpdateMenuInput(bool ShowMenu, bool LobbyPointer)
 {
 	const bool ShowPointer = ShowMenu || LobbyPointer;
-	const bool PointerChanged = bShowMouseCursor != ShowPointer;
-	if (bLobbyInput != ShowMenu)
+	if (!bInputModeInitialized || bLobbyInput != ShowMenu || bShowMouseCursor != ShowPointer)
 	{
+		const bool WasMenuOpen = bLobbyInput;
+		bInputModeInitialized = true;
 		bLobbyInput = ShowMenu;
-		SetIgnoreLookInput(ShowMenu);
-		SetIgnoreMoveInput(ShowMenu);
-	}
-	if (PointerChanged)
-	{
 		// The lobby camera is fixed: its controls and the moving pawn can share input.
 		bShowMouseCursor = ShowPointer;
 		bEnableClickEvents = ShowPointer;
+		if (WasMenuOpen != ShowMenu)
+		{
+			SetIgnoreLookInput(ShowMenu);
+			SetIgnoreMoveInput(ShowMenu);
+		}
 		ApplyMenuInputMode();
 	}
 }
@@ -522,6 +523,7 @@ void ATBController::ApplyMenuInputMode()
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
 		SetInputMode(Mode);
 	}
 	else
