@@ -221,14 +221,15 @@ int32 STBLoadingScreen::OnPaint(const FPaintArgs&, const FGeometry& Geometry, co
 	{
 		return PaintStageCurtain(Out, Geometry, Layer, W * (FMath::SmoothStep(0.f, .5f, In) - 1.f));
 	}
+	// 幕は左から右へ閉じ、開くときは来た左へ戻る。
 	auto Curtain = [&](int32 At) -> int32
 	{
 		if (Exit > 0.f && Exit < .5f)
 			return PaintStageCurtain(Out, Geometry, At, W * (FMath::SmoothStep(0.f, .5f, Exit) - 1.f));
 		if (Exit >= .5f)
-			return PaintStageCurtain(Out, Geometry, At, W * FMath::SmoothStep(.5f, 1.f, Exit));
+			return PaintStageCurtain(Out, Geometry, At, -W * FMath::SmoothStep(.5f, 1.f, Exit));
 		if (In < 1.f)
-			return PaintStageCurtain(Out, Geometry, At, W * FMath::SmoothStep(.5f, 1.f, In));
+			return PaintStageCurtain(Out, Geometry, At, -W * FMath::SmoothStep(.5f, 1.f, In));
 		return At;
 	};
 	if (Exit >= .5f)
