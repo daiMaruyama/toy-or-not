@@ -3,11 +3,11 @@
 #include "UI/TBTitleMenu.h"
 #include "UI/Loading/TBLoadingScreenSubsystem.h"
 #include "UI/TBUIText.h"
+#include "UI/TBStoryCaption.h"
 #include "Audio/TBAudioSubsystem.h"
 #include "Core/TBSession.h"
 #include "Core/TBTitleStory.h"
 #include "Components/Button.h"
-#include "Components/Border.h"
 #include "Components/CheckBox.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
@@ -40,21 +40,16 @@ void UTBTitleMenu::NativeOnInitialized()
 		BlackoutSlot->SetAnchors(FAnchors(0, 0, 1, 1));
 		BlackoutSlot->SetOffsets(FMargin(0));
 		Blackout = Black;
-		auto* Hint = WidgetTree->ConstructWidget<UBorder>();
-		Hint->SetBrush(FSlateRoundedBoxBrush(TBPaper::PrintInk.CopyWithNewOpacity(.72f), 1.f, TBPaper::PrintCream.CopyWithNewOpacity(.8f), 1.f));
-		Hint->SetPadding(FMargin(13, 4));
-		auto* Caption = WidgetTree->ConstructWidget<UTextBlock>();
-		Caption->SetText(TBText::Get(TEXT("Root.Title.Skip")));
-		Caption->SetFont(FSlateFontInfo(PaperFont, 13));
-		Caption->SetColorAndOpacity(TBPaper::PrintCream);
-		Hint->SetContent(Caption);
-		auto* HintSlot = Root->AddChildToCanvas(Hint);
-		HintSlot->SetAnchors(FAnchors(.976f, .966f));
-		HintSlot->SetAlignment(FVector2D(1,1));
-		HintSlot->SetAutoSize(true);
-		Hint->SetVisibility(ESlateVisibility::Collapsed);
-		StorySkipHint = Hint;
 	}
+	if (!StoryCaption)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ToonStoryTitle] WBP_TitleMenu has no StoryCaption (WBP_StoryCaption); story captions are not shown."));
+	}
+}
+
+void UTBTitleMenu::SetSkipHintShown(bool bShown)
+{
+	if (StoryCaption) StoryCaption->SetSkipHintShown(bShown);
 }
 
 void UTBTitleMenu::NativeConstruct()
@@ -122,7 +117,7 @@ void UTBTitleMenu::EnterStory()
 	if (auto* Memory = GetGameInstance()->GetSubsystem<UTBTitleStory>()) Memory->bShown = true;
 	State = EState::Story;
 	bOpeningOverlap = false;
-	StorySkipHint->SetVisibility(ESlateVisibility::HitTestInvisible);
+	SetSkipHintShown(true);
 	if (ALevelSequenceActor* Loop = FindSequence(this, LoopTag)) Loop->GetSequencePlayer()->Stop();
 	MenuLayer->SetVisibility(ESlateVisibility::Collapsed);
 	SetRoomCardsShown(false);
@@ -226,7 +221,7 @@ void UTBTitleMenu::EnterMenu(bool bBeforeStoryEnd)
 	if (auto* Memory = GetGameInstance()->GetSubsystem<UTBTitleStory>()) Memory->bShown = true;
 	IdleSeconds = 0.f;
 	if (FSlateApplication::IsInitialized()) LastCursor = FSlateApplication::Get().GetCursorPos();
-	StorySkipHint->SetVisibility(ESlateVisibility::Collapsed);
+	SetSkipHintShown(false);
 	bOpeningOverlap = bBeforeStoryEnd;
 	if (!bBeforeStoryEnd) StartLoop();
 	if (ALevelSequenceActor* Loop = FindSequence(this, LoopTag)) Loop->GetSequencePlayer()->SetPlayRate(1.f);

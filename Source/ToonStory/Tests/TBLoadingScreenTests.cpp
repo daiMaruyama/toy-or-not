@@ -261,8 +261,9 @@ namespace
 						}
 						return float(Red) / Count;
 					};
-					Test->TestTrue(TEXT("The film is visible on the left while the opening cloth still covers the right"),
-						ClothFraction(Size.X / 10) < .9f && ClothFraction(Size.X * 19 / 20) > .95f);
+					// 幕は来た左へ戻って開くので、右から先に映像が見える。
+					Test->TestTrue(TEXT("The film is visible on the right while the opening cloth still covers the left"),
+						ClothFraction(Size.X * 19 / 20) < .9f && ClothFraction(Size.X / 10) > .95f);
 					TArray64<uint8> PNG;
 					FImageUtils::PNGCompressImageArray(Size.X, Size.Y, Pixels, PNG);
 					const FString Folder = FPaths::ProjectSavedDir() / TEXT("UIRefresh/LoadingFilm") / TBText::GetLanguage();
