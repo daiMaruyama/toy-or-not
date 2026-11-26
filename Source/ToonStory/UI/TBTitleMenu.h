@@ -80,6 +80,8 @@ protected:
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UImage> HostBurst;
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UImage> FindBurst;
 	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UImage> HelpBurst;
+	// 寸劇の字幕とスキップの案内（WBP_StoryCaption）。WBP_TitleMenuの中に置く。
+	UPROPERTY(Transient, meta = (BindWidgetOptional)) TObjectPtr<class UTBStoryCaption> StoryCaption;
 
 private:
 	void BuildPaperLayout();
@@ -107,7 +109,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UWidget> Blackout;
 	UPROPERTY(Transient) TObjectPtr<UWidget> MenuLayer;
 	UPROPERTY(Transient) TObjectPtr<UWidget> TitlePrintSheet;
-	UPROPERTY(Transient) TObjectPtr<UWidget> StorySkipHint;
+	void SetSkipHintShown(bool bShown);
 	UPROPERTY(Transient) TObjectPtr<UWidget> FinderOverlay;
 	UPROPERTY(Transient) TObjectPtr<UTBSession> Session;
 	UPROPERTY(Transient) TObjectPtr<UButton> JoinButton;
